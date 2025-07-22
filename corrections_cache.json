@@ -1,0 +1,26 @@
+[
+  {
+    "Id": 4,
+    "Question": "How many CL can permanent employee can take at once",
+    "Answer": "The permament employee are eligbile for CL upto 8 but can avail 5 at once",
+    "Date": "2025-07-22T06:37:59.2785672Z"
+  },
+  {
+    "Id": 3,
+    "Question": "How many CLs can be taken at once",
+    "Answer": "The employee can take upto 5 CL at once",
+    "Date": "2025-07-22T06:36:37.5045476Z"
+  },
+  {
+    "Id": 2,
+    "Question": "How many CL\u0027s are for permanaent employee",
+    "Answer": "The permananet employee can take upto 8 CLs per year and now the limit of availing CLs at once is changed from 2 to 5",
+    "Date": "2025-07-22T06:35:26.0636931Z"
+  },
+  {
+    "Id": 1,
+    "Question": "Can I Take CL and SL Combined",
+    "Answer": "The CL and SL cannot be combined",
+    "Date": "2025-07-22T05:02:19.2800567Z"
+  }
+]
