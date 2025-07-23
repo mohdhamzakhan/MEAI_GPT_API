@@ -321,7 +321,7 @@ public class RagService
     // Private helper methods (same as original but adapted)
     private async Task LoadOrGenerateEmbeddings(string model = "llama3.1:8b")
     {
-        CACHE_FILE = model.Replace('.', '_').Replace(':', '_') + "_" + CACHE_FILE;
+        CACHE_FILE = model.Replace('.', '_').Replace(':', '_') + "_" + "policy_embeddings_cache.json";
         if (File.Exists(CACHE_FILE))
         {
             await LoadFromCache(model,CACHE_FILE);
@@ -350,7 +350,6 @@ public class RagService
                 var embedding = await GetEmbedding(chunk.Text, model);
                 _cachedEmbeddings.Add(new EmbeddingData(chunk.Text, embedding, filePath, lastModified));
                 totalChunksAdded++;
-                await Task.Delay(50);
             }
         }
 
