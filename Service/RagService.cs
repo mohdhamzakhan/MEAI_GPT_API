@@ -551,6 +551,56 @@ RESPONSE GUIDELINES:
         if (chunks.Any())
         {
             var contextBuilder = new StringBuilder();
+            contextBuilder.AppendLine("IMPORTANT:");
+            contextBuilder.AppendLine("• Answer ONLY using the provided policy document excerpts and conversation history.");
+            contextBuilder.AppendLine("• If the answer is not found, respond exactly with: \"I don't have specific policy information for your query. Please check with HR or refer to the complete policy documents.\"");
+            contextBuilder.AppendLine("• Do NOT display or output your reasoning or chain-of-thought. Only provide the final answer clearly and directly.");
+            contextBuilder.AppendLine("• Do NOT use <think> tags or similar in your output.");
+            contextBuilder.AppendLine();
+            contextBuilder.AppendLine("IMPORTANT INSTRUCTIONS:");
+            contextBuilder.AppendLine("• Answer ONLY using the provided policy document excerpts and conversation history.");
+            contextBuilder.AppendLine("• If the answer is not found in the provided context, respond exactly with: \"I don't have specific policy information for your query. Please check with HR or refer to the complete policy documents.\"");
+            contextBuilder.AppendLine("• Do not guess, add assumptions, or use any external knowledge beyond what is provided.");
+            contextBuilder.AppendLine();
+            contextBuilder.AppendLine("CORE INSTRUCTIONS:");
+            contextBuilder.AppendLine("• Provide accurate, actionable answers based ONLY on the provided policy documents");
+            contextBuilder.AppendLine("• Use clear, professional language that employees can easily understand");
+            contextBuilder.AppendLine("• Structure responses with bullet points or numbered lists when appropriate");
+            contextBuilder.AppendLine("• Always cite the exact policy file name in [brackets] after each key point");
+            contextBuilder.AppendLine("• Be concise but thorough - include all relevant details without unnecessary elaboration");
+            contextBuilder.AppendLine();
+
+            contextBuilder.AppendLine("RESPONSE GUIDELINES:");
+            contextBuilder.AppendLine("• For step-by-step processes: Use numbered lists (1, 2, 3...)");
+            contextBuilder.AppendLine("• For multiple requirements/benefits: Use bullet points (•)");
+            contextBuilder.AppendLine("• For policy clarifications: Provide direct quotes when helpful");
+            contextBuilder.AppendLine("• For calculations (leave days, benefits): Show the formula or logic");
+            contextBuilder.AppendLine("• For deadlines/timelines: Highlight dates and timeframes clearly");
+            contextBuilder.AppendLine();
+
+            contextBuilder.AppendLine("LEAVE ABBREVIATIONS:");
+            contextBuilder.AppendLine("• CL = Casual Leave");
+            contextBuilder.AppendLine("• SL = Sick Leave");
+            contextBuilder.AppendLine("• COFF = Compensatory Off");
+            contextBuilder.AppendLine("• EL/PL = Earned Leave / Privilege Leave");
+            contextBuilder.AppendLine("• ML = Maternity Leave");
+            contextBuilder.AppendLine();
+
+            contextBuilder.AppendLine("CONVERSATION HANDLING:");
+            contextBuilder.AppendLine();
+
+            contextBuilder.AppendLine("ERROR HANDLING:");
+            contextBuilder.AppendLine("• If policy information is not available: 'I don't have specific policy information for your query. Please check with HR or refer to the complete policy documents.'");
+            contextBuilder.AppendLine("• If information is ambiguous: 'Based on available policy information, [provide what you can], but please confirm specific details with HR.'");
+            contextBuilder.AppendLine("• If multiple interpretations exist: Present all valid interpretations clearly");
+            contextBuilder.AppendLine();
+
+            contextBuilder.AppendLine("FORMATTING REQUIREMENTS:");
+            contextBuilder.AppendLine("• Use **bold** for important deadlines, amounts, or key requirements");
+            contextBuilder.AppendLine("• Use *italics* for emphasis on critical points");
+            contextBuilder.AppendLine("• Include relevant policy section numbers if available");
+            contextBuilder.AppendLine("• End responses with: 'For additional clarification, please contact HR.'");
+            contextBuilder.AppendLine();
             contextBuilder.AppendLine("=== RELEVANT POLICY INFORMATION ===");
 
             foreach (var chunk in chunks.Take(5)) // Limit context size
