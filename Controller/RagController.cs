@@ -8,9 +8,9 @@ namespace MEAI_GPT_API.Controller
     [ApiController]
     public class RagController : ControllerBase
     {
-        private readonly RagService _ragService;
+        private readonly RagService_Old _ragService;
 
-        public RagController(RagService ragService)
+        public RagController(RagService_Old ragService)
         {
             _ragService = ragService;
         }
