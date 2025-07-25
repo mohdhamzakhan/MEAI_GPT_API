@@ -5,7 +5,7 @@
     public string Database { get; set; } = "default_database";
     public Dictionary<string, string> Collections { get; set; } = new();
     public int TimeoutMinutes { get; set; } = 5;
-    public string PolicyFolder { get; set; } = string.Empty;
+    public string PolicyFolder { get; set; } = "D:\\Code\\MEAIGPT\\MEAIRAG\\policies";
     public List<string> SupportedExtensions { get; set; } = new() { ".txt", ".md", ".pdf", ".docx" };
     public string DefaultEmbeddingModel { get; set; } = "nomic-embed-text:latest";
 }

@@ -241,6 +241,7 @@ public class RagService : IRAGService
         var stopwatch = Stopwatch.StartNew();
         try
         {
+            _collectionId = await InitializeCollectionAsync();
             if (string.IsNullOrEmpty(_collectionId))
             {
                 throw new RAGServiceException("Service not properly initialized");
@@ -674,7 +675,7 @@ RESPONSE GUIDELINES:
                 include = new[] { "documents", "metadatas", "distances" }
             };
 
-            var response = await _chromaClient.PostAsJsonAsync($"/api/v2/tenants/{_options.Tenant}/databases/{_options.Database}/collections/{_options.Collections}/query", searchData);
+            var response = await _chromaClient.PostAsJsonAsync($"/api/v2/tenants/{_options.Tenant}/databases/{_options.Database}/collections/{_collectionId}/query", searchData);
             response.EnsureSuccessStatusCode();
 
             var result = await response.Content.ReadAsStringAsync();
@@ -902,7 +903,7 @@ RESPONSE GUIDELINES:
             };
 
             var response = await _chromaClient.PostAsJsonAsync(
-                $"/api/v2/tenants/{_options.Tenant}/databases/{_options.Database}/collections/{_options.Collections}/add",
+                $"/api/v2/tenants/{_options.Tenant}/databases/{_options.Database}/collections/{_collectionId}/add",
                 addData);
 
             if (!response.IsSuccessStatusCode)
@@ -945,7 +946,7 @@ RESPONSE GUIDELINES:
             };
 
             var response = await _chromaClient.PostAsJsonAsync(
-                $"/api/v2/tenants/{_options.Tenant}/databases/{_options.Database}/collections/{_options.Collections}/get",
+                $"/api/v2/tenants/{_options.Tenant}/databases/{_options.Database}/collections/{_collectionId}/get",
                 searchData);
 
             if (!response.IsSuccessStatusCode)

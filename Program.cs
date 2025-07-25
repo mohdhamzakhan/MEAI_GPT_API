@@ -9,7 +9,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-builder.Services.AddSingleton<RagService_Old>();
+builder.Services.AddSingleton<RagService>();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
@@ -80,6 +80,12 @@ builder.Services.AddScoped<IRAGService, RagService>();
 
 var app = builder.Build();
 
+using (var scope = app.Services.CreateScope())
+{
+    var ragService = scope.ServiceProvider.GetRequiredService<IRAGService>();
+    await ragService.InitializeAsync();
+}
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
@@ -92,5 +98,6 @@ app.UseCors("AllowAll");
 app.UseRouting();
 app.MapControllers();
 app.UseMetrics();
+
 
 app.Run();
