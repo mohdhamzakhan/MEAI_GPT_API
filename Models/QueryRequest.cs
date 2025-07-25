@@ -13,7 +13,7 @@ namespace MEAI_GPT_API.Models
         public string sessionId { get; set; }
     }
 
-    public record EmbeddingData(string Text, List<float> Vector, string SourceFile, DateTime LastModified)
+    public record EmbeddingData(string Text, List<float> Vector, string SourceFile, DateTime LastModified, string model)
     {
         public double Similarity { get; set; }
     }

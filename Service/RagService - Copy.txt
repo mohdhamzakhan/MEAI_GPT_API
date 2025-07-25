@@ -1,0 +1,1950 @@
+﻿using MEAI_GPT_API.Models;
+using Microsoft.Data.Sqlite;
+using System.Collections.Concurrent;
+using System.Data;
+using System.Text;
+using System.Text.Json;
+
+using static MEAI_GPT_API.Models.Conversation;
+
+public class RagService
+{
+    private static readonly HttpClient httpClient = new()
+    {
+        BaseAddress = new Uri("http://192.168.129.203:11434"),
+        Timeout = TimeSpan.FromMinutes(10)
+    };
+
+    private static string CACHE_FILE = "policy_embeddings_cache.json";
+    private static readonly string POLICIES_FOLDER = "D:\\Code\\MEAIGPT\\MEAIRAG\\policies";
+    private static readonly string[] SUPPORTED_EXTENSIONS = { ".txt"};
+    //private static readonly string[] SUPPORTED_EXTENSIONS = { ".txt", ".md", ".doc", ".docx", ".pdf" };
+    private static string CORRECTIONS_CACHE_FILE = "corrections_cache.json";
+    private static readonly string DB_CONNECTION_STRING = "Data Source=rag_database.db";
+
+    //private readonly ConcurrentBag<EmbeddingData> _cachedEmbeddings = new();
+    private readonly ConcurrentDictionary<string, EmbeddingData> _cachedEmbeddings = new();
+    private readonly ConcurrentBag<CorrectionEntry> _correctionsCache = new();
+    private readonly object _lockObject = new();
+    private int _nextCorrectionId = 1;
+    private string GenerateEmbeddingKey(EmbeddingData embedding) =>
+       $"{embedding.SourceFile}|{embedding.model}|{embedding.LastModified.Ticks}|{ExtractKeywords(embedding.Text).GetHashCode()}";
+
+    public class ModelConfiguration
+    {
+        public string EmbeddingModel { get; set; } = "nomic-embed-text:latest";  // Specialized embedding model
+        public string GenerationModel { get; set; } = "llama3.1:8b";     // Text generation model
+        public string ReRankModel { get; set; } = "linux6200/bge-reranker-v2-m3";  // Optional reranking model
+        public bool UseReRanking { get; set; } = true;
+        public bool UseCrossEncoder { get; set; } = false;
+    }
+
+
+    public async Task InitializeAsync()
+    {
+        Console.WriteLine("Initializing RAG system...");
+        await InitializeDatabaseAsync();
+
+        // Check available embedding models
+        var embeddingModel = GetBestEmbeddingModel();
+        var isAvailable = await IsModelAvailable(embeddingModel);
+
+        if (!isAvailable)
+        {
+            Console.WriteLine($"⚠️ Warning: Preferred embedding model '{embeddingModel}' not available");
+            Console.WriteLine("Consider pulling an embedding model: 'ollama pull nomic-embed-text:latest'");
+        }
+
+        await LoadOrGenerateEmbeddings(embeddingModel);
+        await LoadCorrectionsAsync();
+        Console.WriteLine($"Ready! Loaded {_cachedEmbeddings.Count} policy chunks.");
+    }
+
+    private readonly ConcurrentDictionary<string, ConversationContext> _sessionContexts = new();
+
+    // FIX 3: Enhanced ProcessQueryAsync with proper model selection
+    public async Task<QueryResponse> ProcessQueryAsync(
+        string question,
+        string generationModel,
+        int maxResults = 50,
+        bool meai_info = true,
+        string? sessionId = null,
+        bool useReRanking = true,
+        string? embeddingModel = null) // Make optional
+    {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var conversationContext = GetOrCreateConversationContext(sessionId);
+
+        if (IsTopicChanged(question, conversationContext.History))
+        {
+            Console.WriteLine("⚠️ Topic change detected. Clearing previous context automatically.");
+            conversationContext.History.Clear();
+            conversationContext.RelevantChunks.Clear();
+        }
+
+        // Auto-select embedding model if not provided or if provided model doesn't support embeddings
+        if (string.IsNullOrEmpty(embeddingModel) || !SupportsEmbeddings(embeddingModel))
+        {
+            embeddingModel = GetBestEmbeddingModel();
+            Console.WriteLine($"Using embedding model: {embeddingModel}");
+        }
+
+        if (IsHistoryClearRequest(question))
+        {
+            conversationContext.History.Clear();
+            conversationContext.RelevantChunks.Clear();
+            conversationContext.LastAccessed = DateTime.Now;
+
+            if (!string.IsNullOrEmpty(sessionId))
+            {
+                _sessionContexts.TryRemove(sessionId, out _);
+                conversationContext = new ConversationContext();
+            }
+
+            stopwatch.Stop();
+            return new QueryResponse
+            {
+                Answer = "✅ Conversation history cleared. How can I assist you today?",
+                IsFromCorrection = false,
+                Sources = new List<string>(),
+                Confidence = 1.0,
+                ProcessingTimeMs = stopwatch.ElapsedMilliseconds,
+                RelevantChunks = new List<RelevantChunk>()
+            };
+        }
+        
+        var contextualQuery = BuildContextualQuery(question, conversationContext.History);
+        List<EmbeddingData> topChunks = new();
+
+        if (meai_info)
+        {
+            try
+            {
+                await LoadOrGenerateEmbeddings(embeddingModel);
+
+                if (conversationContext.RelevantChunks.Count > 0 && IsFollowUpQuestion(question, conversationContext.History))
+                {
+                    topChunks = conversationContext.RelevantChunks;
+                    Console.WriteLine($"✅ Reusing context for follow-up question in session {sessionId}");
+                }
+                else
+                {
+                    var queryEmbedding = await GetEmbedding(contextualQuery, embeddingModel);
+
+                    var candidates = _cachedEmbeddings.Values
+                        .Where(e => e.model == embeddingModel)
+                        .Select(e => new EmbeddingData(e.Text, e.Vector, e.SourceFile, e.LastModified, e.model)
+                        {
+                            Similarity = CosineSimilarity(queryEmbedding, e.Vector)
+                        })
+                        .OrderByDescending(e => e.Similarity)
+                        .Take(useReRanking ? maxResults * 3 : maxResults)
+                        .ToList();
+
+                    topChunks = useReRanking && candidates.Count > maxResults
+    ? await ReRankCandidates(contextualQuery, candidates, maxResults, generationModel)
+    : candidates.Take(maxResults).ToList();
+
+
+                    conversationContext.RelevantChunks = topChunks;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error in embedding process: {ex.Message}");
+                // Continue without embeddings - use generation model only
+                topChunks = new List<EmbeddingData>();
+            }
+        }
+        double maxSimilarity = topChunks.FirstOrDefault()?.Similarity ?? 0.0;
+        bool isOutOfEmbeddingScope = maxSimilarity < 0.3; // adjustable threshold
+
+
+        var prompt = BuildPrompt(question, topChunks, conversationContext.History, meai_info, isOutOfEmbeddingScope);
+        var answer = await GenerateChatResponse(
+    question,
+    generationModel,
+    conversationContext.History,
+    topChunks,
+    temperature: 0.2
+);
+
+        // Update conversation history
+        conversationContext.History.Add(new ConversationTurn
+        {
+            Question = question,
+            Answer = answer,
+            Timestamp = DateTime.Now,
+            Sources = topChunks.Select(c => Path.GetFileName(c.SourceFile)).Distinct().ToList()
+        });
+
+        if (conversationContext.History.Count > 10)
+        {
+            conversationContext.History.RemoveAt(0);
+        }
+        if (conversationContext.History.Count > 10)
+        {
+            conversationContext.History = conversationContext.History.TakeLast(5).ToList();
+            conversationContext.History = conversationContext.History.TakeLast(5).ToList();
+        }
+
+        conversationContext.LastAccessed = DateTime.Now;
+        stopwatch.Stop();
+
+        return new QueryResponse
+        {
+            Answer = answer,
+            IsFromCorrection = false,
+            Sources = topChunks.Select(c => Path.GetFileName(c.SourceFile)).Distinct().ToList(),
+            Confidence = topChunks.FirstOrDefault()?.Similarity ?? 0,
+            ProcessingTimeMs = stopwatch.ElapsedMilliseconds,
+            RelevantChunks = topChunks.Select(c => new RelevantChunk
+            {
+                Text = c.Text.Length > 200 ? c.Text.Substring(0, 200) + "..." : c.Text,
+                Source = Path.GetFileName(c.SourceFile),
+                Similarity = c.Similarity
+            }).ToList()
+        };
+    }
+
+    private bool IsTopicChanged(string question, List<ConversationTurn> history)
+    {
+        if (history.Count == 0) return false;
+
+        var lastQuestion = history.Last().Question;
+        double similarity = CalculateTextSimilarity(question, lastQuestion);
+
+        // If similarity is below threshold, assume topic change
+        return similarity < 0.3; // adjust threshold as needed
+    }
+
+    private double CalculateTextSimilarity(string text1, string text2)
+    {
+        var words1 = ExtractKeywords(text1).Split(' ').ToHashSet();
+        var words2 = ExtractKeywords(text2).Split(' ').ToHashSet();
+
+        var intersection = words1.Intersect(words2).Count();
+        var union = words1.Union(words2).Count();
+
+        if (union == 0) return 0.0;
+
+        return (double)intersection / union; // Jaccard similarity
+    }
+
+    private string GetBestEmbeddingModel()
+    {
+        var preferredModels = new[]
+        {
+        "nomic-embed-text:latest",
+        "mxbai-embed-large",
+        "bge-large-en",
+        "bge-base-en"
+    };
+
+        foreach (var model in preferredModels)
+        {
+            if (SupportsEmbeddings(model))
+            {
+                return model;
+            }
+        }
+
+        // Fallback - this will use the simple embedding method
+        return "nomic-embed-text:latest";
+    }
+
+    // FIX 5: Check if embedding model is available via Ollama
+    private async Task<bool> IsModelAvailable(string modelName)
+    {
+        try
+        {
+            var response = await httpClient.GetAsync("/api/tags");
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+
+                if (doc.RootElement.TryGetProperty("models", out var modelsArray))
+                {
+                    foreach (var model in modelsArray.EnumerateArray())
+                    {
+                        if (model.TryGetProperty("name", out var nameProperty))
+                        {
+                            var name = nameProperty.GetString();
+                            if (name != null && name.StartsWith(modelName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error checking model availability: {ex.Message}");
+        }
+
+        return false;
+    }
+
+    private async Task<string> GenerateChatScore(string query, string passage, string model)
+    {
+        var messages = new List<object>
+    {
+        new { role = "system", content = "You are a relevance scoring assistant. Given a query and a passage, respond only with a numeric relevance score between 0.0 and 1.0 indicating how relevant the passage is to the query. Do not explain your answer." },
+        new { role = "user", content = $"Query: {query}\n\nPassage: {passage.Substring(0, Math.Min(500, passage.Length)).Replace("\n", " ")}" }
+    };
+
+        var request = new
+        {
+            model = model.Contains("nomic") ? "llama3.1:8b" : model,
+            messages = messages,
+            temperature = 0.0,
+            stream = false
+        };
+
+        var response = await httpClient.PostAsJsonAsync("/api/chat", request);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.GetProperty("message").GetProperty("content").GetString() ?? "";
+    }
+
+    private async Task<List<EmbeddingData>> ReRankCandidates(
+    string query,
+    List<EmbeddingData> candidates,
+    int maxResults,
+    string model)
+    {
+        var reRankedCandidates = new List<(EmbeddingData embedding, double score)>();
+
+        foreach (var candidate in candidates)
+        {
+            try
+            {
+                var scoreResponse = await GenerateChatScore(query, candidate.Text, model);
+
+                if (double.TryParse(scoreResponse.Trim(), out double score))
+                {
+                    reRankedCandidates.Add((candidate, score));
+                }
+                else
+                {
+                    reRankedCandidates.Add((candidate, candidate.Similarity));
+                }
+            }
+            catch
+            {
+                reRankedCandidates.Add((candidate, candidate.Similarity));
+            }
+        }
+
+        return reRankedCandidates
+            .OrderByDescending(x => x.score)
+            .Take(maxResults)
+            .Select(x =>
+            {
+                x.embedding.Similarity = x.score;
+                return x.embedding;
+            })
+            .ToList();
+    }
+
+
+    // FIX 2: Sequential embedding processing with rate limiting
+    private async Task LoadOrGenerateEmbeddings(string model = "nomic-embed-text:latest")
+    {
+        await LoadEmbeddingsFromDatabase(model);
+
+        var policyFiles = GetAllPolicyFiles();
+        var newEmbeddings = new List<EmbeddingData>();
+        var processedChunks = 0;
+        var totalChunks = 0;
+
+        Console.WriteLine($"Processing {policyFiles.Count} policy files with model: {model}");
+
+        foreach (var filePath in policyFiles)
+        {
+            var fileInfo = new FileInfo(filePath);
+            var lastModified = fileInfo.LastWriteTime;
+
+            var hasEmbedding = _cachedEmbeddings.Values.Any(e =>
+                e.SourceFile == filePath &&
+                e.model == model &&
+                Math.Abs((e.LastModified - lastModified).TotalSeconds) < 1);
+
+            if (hasEmbedding)
+            {
+                Console.WriteLine($"✅ Skipping {Path.GetFileName(filePath)} - already cached");
+                continue;
+            }
+
+            Console.WriteLine($"🔄 Processing {Path.GetFileName(filePath)}...");
+
+            // Remove old embeddings for this file
+            var oldEmbeddings = _cachedEmbeddings.Values
+                .Where(e => e.SourceFile == filePath && e.model == model)
+                .ToList();
+
+            foreach (var oldEmbedding in oldEmbeddings)
+            {
+                var key = GenerateEmbeddingKey(oldEmbedding);
+                _cachedEmbeddings.TryRemove(key, out _);
+            }
+
+            await RemoveFileEmbeddingsFromDatabase(filePath, model);
+
+            var content = await ReadFileContent(filePath);
+            if (string.IsNullOrWhiteSpace(content)) continue;
+
+            var chunks = ChunkText(content, filePath, maxTokens: 2048); // Smaller chunks for embedding models
+            totalChunks += chunks.Count;
+            Console.WriteLine($"📝 Processing {chunks.Count} chunks from {Path.GetFileName(filePath)}");
+
+            // Process chunks sequentially with delays
+            for (int i = 0; i < chunks.Count; i++)
+            {
+                var chunk = chunks[i];
+                try
+                {
+                    Console.WriteLine($"Processing chunk {i + 1}/{chunks.Count} from {Path.GetFileName(filePath)}");
+
+                    // Generate embedding with retry logic
+                    var embedding = await GetEmbedding(chunk.Text, model);
+                    var embeddingData = new EmbeddingData(chunk.Text, embedding, filePath, lastModified, model);
+                    var key = GenerateEmbeddingKey(embeddingData);
+                    _cachedEmbeddings[key] = embeddingData;
+                    newEmbeddings.Add(embeddingData);
+
+                    processedChunks++;
+
+                    // Rate limiting: Wait between requests to avoid overwhelming the model
+                    if (i < chunks.Count - 1) // Don't wait after the last chunk
+                    {
+                        Console.WriteLine("Waiting 1 second before next embedding...");
+                        await Task.Delay(1000); // 1 second delay between embeddings
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"❌ Failed to process chunk {i + 1}: {ex.Message}");
+                    // Continue with next chunk instead of failing completely
+                    continue;
+                }
+            }
+
+            // Save progress after each file
+            if (newEmbeddings.Count > 0)
+            {
+                Console.WriteLine($"💾 Saving progress: {newEmbeddings.Count} embeddings");
+                await SaveNewEmbeddingsToDatabase(newEmbeddings, model);
+                newEmbeddings.Clear(); // Clear to save memory
+            }
+        }
+
+        Console.WriteLine($"✅ Embedding processing complete! Processed {processedChunks}/{totalChunks} chunks");
+    }
+
+
+    public async Task<List<EmbeddingData>> HybridSearch(
+    string query,
+    string[] embeddingModels,
+    int maxResults = 10)
+    {
+        var allCandidates = new List<EmbeddingData>();
+
+        foreach (var embeddingModel in embeddingModels)
+        {
+            await LoadOrGenerateEmbeddings(embeddingModel);
+            var queryEmbedding = await GetEmbedding(query, embeddingModel);
+
+            var candidates = _cachedEmbeddings.Values
+                .Where(e => e.model == embeddingModel)
+                .Select(e => new EmbeddingData(e.Text, e.Vector, e.SourceFile, e.LastModified, e.model)
+                {
+                    Similarity = CosineSimilarity(queryEmbedding, e.Vector)
+                })
+                .OrderByDescending(e => e.Similarity)
+                .Take(maxResults)
+                .ToList();
+
+            allCandidates.AddRange(candidates);
+        }
+
+        // Combine and deduplicate results
+        var uniqueCandidates = allCandidates
+            .GroupBy(c => $"{c.SourceFile}|{c.Text.GetHashCode()}")
+            .Select(g => g.OrderByDescending(c => c.Similarity).First()) // Take best similarity score
+            .OrderByDescending(c => c.Similarity)
+            .Take(maxResults)
+            .ToList();
+
+        return uniqueCandidates;
+    }
+
+    private (string embeddingModel, string generationModel) SelectOptimalModels(string query)
+    {
+        var queryLower = query.ToLower();
+
+        // Technical/procedural queries - use code-focused models
+        if (queryLower.Contains("process") || queryLower.Contains("procedure") || queryLower.Contains("step"))
+        {
+            return ("nomic-embed-text", "llama3.1:8b");
+        }
+
+        // Policy/legal queries - use general models
+        if (queryLower.Contains("policy") || queryLower.Contains("rule") || queryLower.Contains("regulation"))
+        {
+            return ("nomic-embed-text", "qwen2.5:7b");
+        }
+
+        // Mathematical/calculation queries
+        if (queryLower.Contains("calculate") || queryLower.Contains("formula") || queryLower.Contains("math"))
+        {
+            return ("nomic-embed-text", "llama3.1:8b");
+        }
+
+        // Default models
+        return ("nomic-embed-text", "llama3.1:8b");
+    }
+
+    // IMPROVEMENT 7: Embedding quality validation
+    private async Task<bool> ValidateEmbeddingQuality(string text, List<float> embedding, string model)
+    {
+        // Check embedding dimension consistency
+        var expectedDimension = model.Contains("nomic") ? 768 : 4096; // Adjust based on your models
+        if (embedding.Count != expectedDimension)
+        {
+            Console.WriteLine($"⚠️ Warning: Embedding dimension mismatch for {model}");
+            return false;
+        }
+
+        // Verify embedding is not all zeros
+        if (embedding.All(x => Math.Abs(x) < 1e-6))
+        {
+            Console.WriteLine($"⚠️ Warning: Zero embedding detected for text: {text.Substring(0, 50)}...");
+            return false;
+        }
+
+        // Check for NaN or infinite values
+        if (embedding.Any(x => float.IsNaN(x) || float.IsInfinity(x)))
+        {
+            Console.WriteLine($"⚠️ Warning: Invalid embedding values detected");
+            return false;
+        }
+
+        return true;
+    }
+
+
+
+    private ConversationContext GetOrCreateConversationContext(string sessionId)
+    {
+        if (string.IsNullOrEmpty(sessionId))
+            return new ConversationContext();
+
+        return _sessionContexts.GetOrAdd(sessionId, _ => new ConversationContext());
+    }
+
+    private string ExtractKeywords(string text)
+    {
+        // Remove common stop words and extract meaningful keywords
+        var stopWords = new HashSet<string>
+            {
+                "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by",
+                "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did",
+                "will", "would", "could", "should", "may", "might", "can", "what", "how", "when", "where", "why",
+                "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them", "my", "your",
+                "his", "her", "its", "our", "their", "this", "that", "these", "those"
+            };
+
+        var words = text.ToLower()
+                       .Split(new char[] { ' ', '\t', '\n', '\r', '.', ',', ';', ':', '!', '?' },
+                              StringSplitOptions.RemoveEmptyEntries)
+                       .Where(word => word.Length > 2 && !stopWords.Contains(word))
+                       .Distinct()
+                       .OrderBy(word => word);
+
+        return string.Join(" ", words);
+    }
+
+    private string BuildContextualQuery(string currentQuestion, List<ConversationTurn> history)
+    {
+        if (history.Count == 0) return currentQuestion;
+
+        // Check for pronouns or references that need context
+        var contextualPhrases = new[] { "this", "that", "it", "they", "what about", "and", "also" };
+
+        if (contextualPhrases.Any(phrase => currentQuestion.ToLower().Contains(phrase)))
+        {
+            var lastTurn = history.LastOrDefault();
+            if (lastTurn != null)
+            {
+                return $"Previous context: {lastTurn.Question} -> {lastTurn.Answer.Substring(0, Math.Min(100, lastTurn.Answer.Length))}... Current question: {currentQuestion}";
+            }
+        }
+
+        return currentQuestion;
+    }
+
+    private bool IsFollowUpQuestion(string question, List<ConversationTurn> history)
+    {
+        if (history.Count == 0) return false;
+
+        var followUpIndicators = new[]
+        {
+        "what about", "and", "also", "additionally", "furthermore",
+        "this", "that", "it", "they", "more details", "explain",
+        "how", "why", "when", "where"
+    };
+
+        return followUpIndicators.Any(indicator =>
+            question.ToLower().StartsWith(indicator) ||
+            question.ToLower().Contains($" {indicator} "));
+    }
+
+    // Cleanup old sessions periodically
+    public void CleanupOldSessions()
+    {
+        var cutoffTime = DateTime.Now.AddHours(-2); // Keep sessions for 2 hours
+        var oldSessions = _sessionContexts
+            .Where(kvp => kvp.Value.LastAccessed < cutoffTime)
+            .Select(kvp => kvp.Key)
+            .ToList();
+
+        foreach (var sessionId in oldSessions)
+        {
+            _sessionContexts.TryRemove(sessionId, out _);
+        }
+    }
+
+
+
+    public SystemStatus GetSystemStatus()
+    {
+        return new SystemStatus
+        {
+            TotalEmbeddings = _cachedEmbeddings.Count,
+            TotalCorrections = _correctionsCache.Count,
+            LastUpdated = DateTime.Now,
+            IsHealthy = true,
+            PoliciesFolder = POLICIES_FOLDER,
+            SupportedExtensions = SUPPORTED_EXTENSIONS.ToList()
+        };
+    }
+
+    public List<CorrectionEntry> GetRecentCorrections(int limit = 50)
+    {
+        return _correctionsCache
+            .OrderByDescending(c => c.Date)
+            .Take(limit)
+            .ToList();
+    }
+
+    public async Task ProcessUploadedPolicyAsync(IFormFile file, string model)
+    {
+        var tempPath = Path.GetTempFileName();
+        await using (var stream = new FileStream(tempPath, FileMode.Create))
+        {
+            await file.CopyToAsync(stream);
+        }
+
+        try
+        {
+            var content = await ReadFileContent(tempPath);
+            if (!string.IsNullOrWhiteSpace(content))
+            {
+                var policyName = Path.GetFileNameWithoutExtension(file.FileName);
+                var chunks = ChunkText(content, file.FileName, maxTokens: 256);
+
+                foreach (var chunk in chunks)
+                {
+                    var embedding = await GetEmbedding(chunk.Text, model);
+                    var embeddingData = new EmbeddingData(
+                        chunk.Text, embedding, file.FileName, DateTime.Now, model);
+
+                    var key = GenerateEmbeddingKey(embeddingData);
+                    _cachedEmbeddings[key] = embeddingData; // Safe insert with deduplication
+
+                    // Optionally remove if you no longer need rate limiting:
+                    // await Task.Delay(50);
+                }
+
+                await SaveEmbeddingsToDatabase(model);
+            }
+        }
+        finally
+        {
+            File.Delete(tempPath);
+        }
+    }
+
+
+    private void LoadCorrections()
+    {
+        if (File.Exists(CORRECTIONS_CACHE_FILE))
+        {
+            var json = File.ReadAllText(CORRECTIONS_CACHE_FILE);
+            var corrections = JsonSerializer.Deserialize<List<CorrectionEntry>>(json) ?? new List<CorrectionEntry>();
+
+            foreach (var correction in corrections)
+            {
+                if (correction.Id >= _nextCorrectionId)
+                    _nextCorrectionId = correction.Id + 1;
+                _correctionsCache.Add(correction);
+            }
+        }
+    }
+
+   
+    private List<string> GetAllPolicyFiles() =>
+        Directory.GetFiles(POLICIES_FOLDER, "*.*", SearchOption.AllDirectories)
+            .Where(f => SUPPORTED_EXTENSIONS.Contains(Path.GetExtension(f).ToLowerInvariant()))
+            .ToList();
+
+    private async Task<string> ReadFileContent(string filePath)
+    {
+        var ext = Path.GetExtension(filePath).ToLowerInvariant();
+        if (ext == ".txt" || ext == ".md")
+            return await File.ReadAllTextAsync(filePath);
+        if (ext == ".pdf")
+            return ExtractTextFromPdf(filePath);
+
+        return "";
+    }
+
+    private string ExtractTextFromPdf(string filePath)
+    {
+        var sb = new StringBuilder();
+        //using var pdf = PdfDocument.Open(filePath);
+        //foreach (var page in pdf.GetPages())
+        //    sb.AppendLine(page.Text);
+        return sb.ToString();
+    }
+
+    // FIX 3: Smaller chunk sizes for embedding models
+    private List<(string Text, string SourceFile)> ChunkText(string text, string sourceFile, int maxTokens = 2048)
+    {
+        var chunks = new List<(string, string)>();
+
+        // For embedding models, use smaller chunks
+        var maxChunkSize = maxTokens < 3000 ? 1500 : 3000; // Characters, not tokens
+
+        var paragraphs = text.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
+                            .Select(p => p.Trim())
+                            .Where(p => p.Length > 0)
+                            .ToList();
+
+        var sb = new StringBuilder();
+
+        foreach (var paragraph in paragraphs)
+        {
+            // If single paragraph is too long, split it
+            if (paragraph.Length > maxChunkSize)
+            {
+                // Save current chunk if it has content
+                if (sb.Length > 0)
+                {
+                    chunks.Add((sb.ToString().Trim(), sourceFile));
+                    sb.Clear();
+                }
+
+                // Split long paragraph into sentences
+                var sentences = paragraph.Split(new[] { '.', '!', '?' }, StringSplitOptions.RemoveEmptyEntries);
+                var currentChunk = new StringBuilder();
+
+                foreach (var sentence in sentences)
+                {
+                    if (currentChunk.Length + sentence.Length > maxChunkSize && currentChunk.Length > 0)
+                    {
+                        chunks.Add((currentChunk.ToString().Trim() + ".", sourceFile));
+                        currentChunk.Clear();
+                    }
+                    currentChunk.Append(sentence.Trim() + ". ");
+                }
+
+                if (currentChunk.Length > 0)
+                {
+                    chunks.Add((currentChunk.ToString().Trim(), sourceFile));
+                }
+            }
+            else
+            {
+                // Check if adding this paragraph would exceed the limit
+                if (sb.Length + paragraph.Length > maxChunkSize && sb.Length > 0)
+                {
+                    chunks.Add((sb.ToString().Trim(), sourceFile));
+                    sb.Clear();
+                }
+
+                sb.AppendLine(paragraph);
+            }
+        }
+
+        // Add remaining content
+        if (sb.Length > 0)
+        {
+            chunks.Add((sb.ToString().Trim(), sourceFile));
+        }
+
+        return chunks;
+    }
+
+    // FIX 4: Batch processing helper for multiple embeddings (if needed later)
+    private async Task<List<List<float>>> GetEmbeddingsBatch(List<string> texts, string model, int batchSize = 1)
+    {
+        var results = new List<List<float>>();
+
+        // Process in small batches (for nomic-embed-text, batchSize should be 1)
+        for (int i = 0; i < texts.Count; i += batchSize)
+        {
+            var batch = texts.Skip(i).Take(batchSize).ToList();
+
+            foreach (var text in batch)
+            {
+                var embedding = await GetEmbedding(text, model);
+                results.Add(embedding);
+
+                // Small delay between individual requests
+                if (results.Count < texts.Count)
+                {
+                    await Task.Delay(500);
+                }
+            }
+
+            Console.WriteLine($"Processed batch {(i / batchSize) + 1}/{(texts.Count + batchSize - 1) / batchSize}");
+        }
+
+        return results;
+    }
+
+    private int EstimateTokenCount(string text) =>
+        text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+
+    // FIX 1: Updated GetEmbedding method for single-request processing
+    private async Task<List<float>> GetEmbedding(string text, string model, int maxRetries = 3)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            throw new ArgumentException("Text cannot be empty");
+        }
+
+        // Truncate text if too long for embedding models
+        if (text.Length > 8000)
+        {
+            text = text.Substring(0, 8000);
+        }
+
+        for (int attempt = 0; attempt < maxRetries; attempt++)
+        {
+            try
+            {
+                // Single request with proper options for nomic-embed-text
+                var request = new
+                {
+                    model = model,
+                    prompt = text,
+                    options = new
+                    {
+                        num_batch = 1,      // CRITICAL: Process one at a time
+                        num_ctx = 2048,     // Reasonable context size
+                        num_thread = 1,     // Single thread processing
+                        temperature = 0.0   // Deterministic for embeddings
+                    }
+                };
+
+                Console.WriteLine($"Requesting embedding from {model} (attempt {attempt + 1})...");
+
+                using var httpRequestMessage = new HttpRequestMessage(HttpMethod.Post, "/api/embeddings");
+                httpRequestMessage.Content = JsonContent.Create(request);
+
+                // Add timeout for embedding requests
+                using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+                var response = await httpClient.SendAsync(httpRequestMessage, cts.Token);
+
+                var responseContent = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"❌ Embedding request failed: {response.StatusCode}");
+                    Console.WriteLine($"Response: {responseContent}");
+
+                    // If it's a batch-related error, wait and retry
+                    if (responseContent.Contains("batch") || responseContent.Contains("context"))
+                    {
+                        Console.WriteLine("Detected batch/context issue, waiting before retry...");
+                        await Task.Delay(2000 * (attempt + 1));
+                        continue;
+                    }
+
+                    throw new HttpRequestException($"Embedding API returned {response.StatusCode}: {responseContent}");
+                }
+
+                using var doc = JsonDocument.Parse(responseContent);
+                if (doc.RootElement.TryGetProperty("embedding", out var embeddingProperty))
+                {
+                    var embedding = embeddingProperty.EnumerateArray().Select(x => x.GetSingle()).ToList();
+                    Console.WriteLine($"✅ Successfully generated embedding: {embedding.Count} dimensions");
+                    return embedding;
+                }
+                else
+                {
+                    Console.WriteLine($"❌ No embedding property in response: {responseContent}");
+                    throw new InvalidOperationException("Response does not contain embedding data");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                Console.WriteLine($"❌ Embedding request timed out (attempt {attempt + 1})");
+                if (attempt == maxRetries - 1) throw new TimeoutException("Embedding generation timed out");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Embedding attempt {attempt + 1} failed: {ex.Message}");
+
+                if (attempt == maxRetries - 1)
+                {
+                    // Final fallback to text-based embedding
+                    Console.WriteLine("⚠️ All embedding attempts failed, using text-based fallback");
+                    return CreateEmbeddingFromText(text);
+                }
+
+                // Wait before retry with exponential backoff
+                await Task.Delay(1000 * (int)Math.Pow(2, attempt));
+            }
+        }
+
+        throw new Exception($"Failed to generate embedding after {maxRetries} attempts");
+    }
+
+    // FIX 6: Model-specific embedding configuration
+    private (int maxTokens, int delayMs, bool supportsBatch) GetModelConfig(string model)
+    {
+        return model.ToLower() switch
+        {
+            "nomic-embed-text:latest" => (2048, 1000, false),      // No batching, 1s delay
+            "mxbai-embed-large" => (512, 1500, false),      // Smaller chunks, longer delay
+            "all-minilm" => (384, 500, false),              // Fastest option
+            "bge-base-en" => (512, 800, false),             // Medium speed
+            _ => (2048, 1000, false)                         // Default safe values
+        };
+    }
+
+    // FIX 5: Alternative embedding models that might support batches better
+    private string[] GetAlternativeEmbeddingModels()
+    {
+        return new[]
+        {
+        "nomic-embed-text",     // Primary choice, but no batching
+        "mxbai-embed-large",    // Alternative 1
+        "all-minilm",           // Alternative 2 (smaller, might be faster)
+        "bge-base-en"           // Alternative 3
+    };
+    }
+
+    // STEP 3: Create consistent text-based embeddings
+    private List<float> CreateEmbeddingFromText(string text, int dimensions = 384)
+    {
+        // Create a more sophisticated text-based embedding
+        var embedding = new List<float>();
+
+        // Normalize text
+        var normalizedText = text.ToLowerInvariant().Trim();
+        var words = normalizedText.Split(new char[] { ' ', '\t', '\n', '\r', '.', ',', ';', ':', '!', '?' },
+            StringSplitOptions.RemoveEmptyEntries);
+
+        // Create features based on text characteristics
+        var features = new List<double>();
+
+        // Feature 1: Text length normalized
+        features.Add(Math.Min(text.Length / 1000.0, 1.0));
+
+        // Feature 2-6: Character frequency features
+        features.Add(text.Count(c => char.IsLetter(c)) / (double)text.Length);
+        features.Add(text.Count(c => char.IsDigit(c)) / (double)text.Length);
+        features.Add(text.Count(c => char.IsPunctuation(c)) / (double)text.Length);
+        features.Add(text.Count(c => char.IsWhiteSpace(c)) / (double)text.Length);
+        features.Add(words.Length / (double)text.Length);
+
+        // Feature 7-11: Common word presence
+        var commonWords = new[] { "policy", "leave", "employee", "company", "process" };
+        foreach (var word in commonWords)
+        {
+            features.Add(normalizedText.Contains(word) ? 1.0 : 0.0);
+        }
+
+        // Generate embedding using text hash and features
+        var textHash = text.GetHashCode();
+        var random = new Random(textHash);
+
+        for (int i = 0; i < dimensions; i++)
+        {
+            double value;
+            if (i < features.Count)
+            {
+                // Use actual features for first dimensions
+                value = features[i];
+            }
+            else
+            {
+                // Use seeded random for remaining dimensions
+                value = random.NextDouble() * 2.0 - 1.0;
+            }
+
+            // Add some text-specific variation
+            var charIndex = i % text.Length;
+            var charInfluence = (text[charIndex] / 255.0) * 0.1;
+            value += charInfluence;
+
+            embedding.Add((float)Math.Tanh(value)); // Normalize to [-1, 1]
+        }
+
+        // L2 normalize the embedding
+        var magnitude = Math.Sqrt(embedding.Sum(x => x * x));
+        if (magnitude > 0)
+        {
+            for (int i = 0; i < embedding.Count; i++)
+            {
+                embedding[i] = (float)(embedding[i] / magnitude);
+            }
+        }
+
+        return embedding;
+    }
+
+    // Method 1: Standard Embedding API
+    private async Task<List<float>?> TryStandardEmbeddingAPI(string text, string model)
+    {
+        try
+        {
+            var request = new
+            {
+                model = model,
+                prompt = text,
+                options = new
+                {
+                    num_ctx = 2048, // Limit context size
+                    num_batch = 1   // Process one at a time
+                }
+            };
+
+            var response = await httpClient.PostAsJsonAsync("/api/embeddings", request);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                Console.WriteLine($"Embedding API error: {response.StatusCode} - {errorContent}");
+                return null;
+            }
+
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+
+            if (doc.RootElement.TryGetProperty("embedding", out var embeddingProperty))
+            {
+                return embeddingProperty.EnumerateArray().Select(x => x.GetSingle()).ToList();
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Standard embedding API failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    // Method 2: Generate-based embedding extraction (for models that don't support embeddings API)
+    private async Task<List<float>?> TryGenerateBasedEmbedding(string text, string model)
+    {
+        try
+        {
+            // Some models can provide embeddings through the generate API
+            var request = new
+            {
+                model = model,
+                prompt = $"Generate semantic embedding for: {text}",
+                stream = false,
+                options = new
+                {
+                    num_ctx = 2048,
+                    temperature = 0.0,
+                    top_p = 1.0
+                }
+            };
+
+            var response = await httpClient.PostAsJsonAsync("/api/generate", request);
+            response.EnsureSuccessStatusCode();
+
+            // This is a fallback - you might need to implement actual embedding extraction
+            // For now, we'll return null to indicate this method didn't work
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task<List<float>> GetFallbackEmbedding(string text)
+    {
+        try
+        {
+            // Try with nomic-embed-text as it's specifically designed for embeddings
+            return await TryStandardEmbeddingAPI(text, "nomic-embed-text")
+                   ?? GenerateSimpleEmbedding(text);
+        }
+        catch
+        {
+            return GenerateSimpleEmbedding(text);
+        }
+    }
+
+    private List<float> GenerateSimpleEmbedding(string text, int dimensions = 384)
+    {
+        var hash = text.GetHashCode();
+        var random = new Random(hash);
+        var embedding = new List<float>();
+
+        for (int i = 0; i < dimensions; i++)
+        {
+            embedding.Add((float)(random.NextDouble() * 2.0 - 1.0)); // Random values between -1 and 1
+        }
+
+        // Normalize the vector
+        var magnitude = Math.Sqrt(embedding.Sum(x => x * x));
+        if (magnitude > 0)
+        {
+            for (int i = 0; i < embedding.Count; i++)
+            {
+                embedding[i] = (float)(embedding[i] / magnitude);
+            }
+        }
+
+        Console.WriteLine("⚠️ Using fallback hash-based embedding - consider using a proper embedding model");
+        return embedding;
+    }
+    //private async Task<string> GenerateResponse(string prompt, string model, double temperature = 0.0)
+    //{
+    //    var request = new
+    //    {
+    //        model = model.Contains("nomic") ? "llama3.1:8b" : model,
+    //        prompt = prompt,
+    //        temperature = temperature,
+    //        stream = false
+    //    };
+
+    //    var response = await httpClient.PostAsJsonAsync("/api/generate", request);
+    //    response.EnsureSuccessStatusCode();
+
+    //    var json = await response.Content.ReadAsStringAsync();
+    //    using var doc = JsonDocument.Parse(json);
+    //    var responseText = doc.RootElement.GetProperty("response").GetString() ?? "";
+
+    //    // Handle qwen3:8b thinking tags - remove <think> content
+    //    if (model.Contains("qwen"))
+    //    {
+    //        responseText = RemoveThinkingTags(responseText);
+    //    }
+
+    //    return responseText;
+    //}
+
+    // FIX 2: Model compatibility checker
+
+    private async Task<string> GenerateChatResponse(
+       string question,
+       string model,
+       List<ConversationTurn> history,
+       IEnumerable<dynamic> chunks,
+       double temperature = 0.2)
+    {
+        var messages = new List<object>
+    {
+        new
+        {
+            role = "system",
+            content = "You are MEAI HR Policy Assistant. Answer concisely, accurately, and based on the provided context when relevant. If you do not know, say so politely."
+        }
+    };
+
+        // Add last 5 conversation turns for context
+        foreach (var turn in history.TakeLast(5))
+        {
+            messages.Add(new { role = "user", content = turn.Question });
+            messages.Add(new { role = "assistant", content = turn.Answer });
+        }
+
+        // Add policy context as system message
+        if (chunks.Any())
+        {
+            var policyContext = new StringBuilder();
+            policyContext.AppendLine("Relevant policy excerpts:\n");
+            foreach (var chunk in chunks.Take(10))
+            {
+                policyContext.AppendLine($"- {chunk.Text.Substring(0, Math.Min(chunk.Text.Length, 300)).Replace("\n", " ")}");
+            }
+
+            messages.Add(new { role = "system", content = policyContext.ToString() });
+        }
+
+        // Add current user question
+        messages.Add(new { role = "user", content = question });
+
+        var request = new
+        {
+            model = model.Contains("nomic") ? "llama3.1:8b" : model,
+            messages = messages,
+            temperature = temperature,
+            stream = false
+        };
+
+        var response = await httpClient.PostAsJsonAsync("/api/chat", request);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(json);
+        var responseText = doc.RootElement.GetProperty("message").GetProperty("content").GetString() ?? "";
+
+        if (model.Contains("qwen"))
+        {
+            responseText = RemoveThinkingTags(responseText);
+        }
+
+        return responseText;
+    }
+
+
+    private readonly Dictionary<string, bool> _modelEmbeddingSupport = new()
+{
+    { "nomic-embed-text:latest", true },
+    { "mxbai-embed-large", true },
+    { "bge-large-en", true },
+    { "bge-base-en", true },
+    { "llama3.1:8b", false },
+    { "qwen2.5:7b", false },
+    { "qwen3:8b", false }
+};
+
+    private bool SupportsEmbeddings(string model)
+    {
+        return _modelEmbeddingSupport.GetValueOrDefault(model.ToLower(), false);
+    }
+
+
+    private string RemoveThinkingTags(string text)
+    {
+        // Remove <think>...</think> blocks completely
+        var pattern = @"<think>.*?</think>";
+        var result = System.Text.RegularExpressions.Regex.Replace(text, pattern, "",
+            System.Text.RegularExpressions.RegexOptions.Singleline |
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        // Clean up any extra whitespace
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\n\s*\n", "\n\n");
+
+        return result.Trim();
+    }
+
+    private double CosineSimilarity(List<float> a, List<float> b)
+    {
+        double dot = 0, magA = 0, magB = 0;
+        for (int i = 0; i < a.Count; i++)
+        {
+            dot += a[i] * b[i];
+            magA += a[i] * a[i];
+            magB += b[i] * b[i];
+        }
+        return dot / (Math.Sqrt(magA) * Math.Sqrt(magB) + 1e-10);
+    }
+
+    private string BuildPrompt(string question, IEnumerable<dynamic> chunks, List<ConversationTurn> conversationHistory, bool is_meai, bool isOutOfEmbeddingScope = false)
+    {
+        var prompt = new StringBuilder();
+
+        // Check if user wants to clear history
+        if (IsHistoryClearRequest(question))
+        {
+            return "History cleared. How can I assist you today?";
+        }
+
+        if (is_meai)
+        {
+            prompt.AppendLine("You are MEAI Policy Assistant, an expert HR policy advisor with deep knowledge of company policies and procedures.");
+            prompt.AppendLine();
+            prompt.AppendLine("IMPORTANT:");
+            prompt.AppendLine("• Answer ONLY using the provided policy document excerpts and conversation history.");
+            prompt.AppendLine("• If the answer is not found, respond exactly with: \"I don't have specific policy information for your query. Please check with HR or refer to the complete policy documents.\"");
+            prompt.AppendLine("• Do NOT display or output your reasoning or chain-of-thought. Only provide the final answer clearly and directly.");
+            prompt.AppendLine("• Do NOT use <think> tags or similar in your output.");
+            prompt.AppendLine();
+            prompt.AppendLine("IMPORTANT INSTRUCTIONS:");
+            prompt.AppendLine("• Answer ONLY using the provided policy document excerpts and conversation history.");
+            prompt.AppendLine("• If the answer is not found in the provided context, respond exactly with: \"I don't have specific policy information for your query. Please check with HR or refer to the complete policy documents.\"");
+            prompt.AppendLine("• Do not guess, add assumptions, or use any external knowledge beyond what is provided.");
+            prompt.AppendLine();
+            prompt.AppendLine("CORE INSTRUCTIONS:");
+            prompt.AppendLine("• Provide accurate, actionable answers based ONLY on the provided policy documents");
+            prompt.AppendLine("• Use clear, professional language that employees can easily understand");
+            prompt.AppendLine("• Structure responses with bullet points or numbered lists when appropriate");
+            prompt.AppendLine("• Always cite the exact policy file name in [brackets] after each key point");
+            prompt.AppendLine("• Be concise but thorough - include all relevant details without unnecessary elaboration");
+            prompt.AppendLine();
+
+            prompt.AppendLine("RESPONSE GUIDELINES:");
+            prompt.AppendLine("• For step-by-step processes: Use numbered lists (1, 2, 3...)");
+            prompt.AppendLine("• For multiple requirements/benefits: Use bullet points (•)");
+            prompt.AppendLine("• For policy clarifications: Provide direct quotes when helpful");
+            prompt.AppendLine("• For calculations (leave days, benefits): Show the formula or logic");
+            prompt.AppendLine("• For deadlines/timelines: Highlight dates and timeframes clearly");
+            prompt.AppendLine();
+
+            prompt.AppendLine("LEAVE ABBREVIATIONS:");
+            prompt.AppendLine("• CL = Casual Leave");
+            prompt.AppendLine("• SL = Sick Leave");
+            prompt.AppendLine("• COFF = Compensatory Off");
+            prompt.AppendLine("• EL/PL = Earned Leave / Privilege Leave");
+            prompt.AppendLine("• ML = Maternity Leave");
+            prompt.AppendLine();
+
+            prompt.AppendLine("CONVERSATION HANDLING:");
+            if (conversationHistory.Count > 0)
+            {
+                prompt.AppendLine("• Review the conversation history to understand context");
+                prompt.AppendLine("• For follow-up questions, build upon previous responses");
+                prompt.AppendLine("• When users say 'this', 'that', 'it', refer to the previous conversation");
+                prompt.AppendLine("• Avoid repeating information already provided unless clarification is needed");
+            }
+            else
+            {
+                prompt.AppendLine("• This is the start of a new conversation");
+            }
+            prompt.AppendLine();
+
+            prompt.AppendLine("ERROR HANDLING:");
+            prompt.AppendLine("• If policy information is not available: 'I don't have specific policy information for your query. Please check with HR or refer to the complete policy documents.'");
+            prompt.AppendLine("• If information is ambiguous: 'Based on available policy information, [provide what you can], but please confirm specific details with HR.'");
+            prompt.AppendLine("• If multiple interpretations exist: Present all valid interpretations clearly");
+            prompt.AppendLine();
+
+            prompt.AppendLine("FORMATTING REQUIREMENTS:");
+            prompt.AppendLine("• Use **bold** for important deadlines, amounts, or key requirements");
+            prompt.AppendLine("• Use *italics* for emphasis on critical points");
+            prompt.AppendLine("• Include relevant policy section numbers if available");
+            prompt.AppendLine("• End responses with: 'For additional clarification, please contact HR.'");
+            prompt.AppendLine();
+        }
+
+        if (isOutOfEmbeddingScope)
+        {
+            prompt.AppendLine("⚠️ Note: No relevant policy excerpts were found for your query. The following answer is generated based on general knowledge and may not reflect company policies exactly. Please check with HR for confirmation.");
+            prompt.AppendLine();
+        }
+        // Add conversation history with better formatting
+        if (conversationHistory.Count > 0)
+        {
+            prompt.AppendLine("=== RECENT CONVERSATION ===");
+            var recentTurns = conversationHistory.TakeLast(3).Reverse().ToList();
+
+            for (int i = 0; i < recentTurns.Count; i++)
+            {
+                var turn = recentTurns[i];
+                prompt.AppendLine($"Q{i + 1}: {turn.Question}");
+
+                // Truncate long previous answers to keep prompt manageable
+                var truncatedAnswer = turn.Answer.Length > 300
+                    ? turn.Answer.Substring(0, 300) + "... [truncated]"
+                    : turn.Answer;
+
+                prompt.AppendLine($"A{i + 1}: {truncatedAnswer}");
+
+                if (turn.Sources.Any())
+                {
+                    prompt.AppendLine($"Sources: [{string.Join(", ", turn.Sources)}]");
+                }
+                prompt.AppendLine();
+            }
+            prompt.AppendLine("=== END CONVERSATION ===");
+            prompt.AppendLine();
+        }
+
+        // Add relevant policy documents with better organization
+        if (chunks.Any())
+        {
+            prompt.AppendLine("=== RELEVANT POLICY INFORMATION ===");
+
+            var groupedChunks = chunks
+                .GroupBy(c => c.SourceFile)
+                .OrderBy(g => g.Key)
+                .ToList();
+
+            foreach (var group in groupedChunks)
+            {
+                prompt.AppendLine($"**{Path.GetFileNameWithoutExtension(group.Key)}**");
+                prompt.AppendLine($"Source: {group.Key}");
+                prompt.AppendLine();
+
+                foreach (var chunk in group)
+                {
+                    // Clean up chunk text for better readability
+                    var cleanText = chunk.Text
+                        .Replace("\r\n", "\n")
+                        .Replace("\n\n\n", "\n\n")
+                        .Trim();
+
+                    prompt.AppendLine(cleanText);
+                    prompt.AppendLine();
+                }
+                prompt.AppendLine("---");
+            }
+            prompt.AppendLine("=== END POLICY INFORMATION ===");
+            prompt.AppendLine();
+        }
+
+        // Enhanced question handling
+        prompt.AppendLine("=== CURRENT QUERY ===");
+
+        // Detect question type and add specific guidance
+        var questionLower = question.ToLower();
+        if (questionLower.Contains("how to") || questionLower.Contains("process") || questionLower.Contains("apply"))
+        {
+            prompt.AppendLine("Note: This appears to be a process question. Provide step-by-step instructions.");
+        }
+        else if (questionLower.Contains("how much") || questionLower.Contains("how many") || questionLower.Contains("calculate"))
+        {
+            prompt.AppendLine("Note: This appears to be a calculation question. Show the formula and example if applicable.");
+        }
+        else if (questionLower.Contains("when") || questionLower.Contains("deadline") || questionLower.Contains("timeline"))
+        {
+            prompt.AppendLine("Note: This appears to be a timing question. Highlight all relevant dates and deadlines.");
+        }
+        else if (questionLower.Contains("eligib") || questionLower.Contains("qualify") || questionLower.Contains("criteria"))
+        {
+            prompt.AppendLine("Note: This appears to be an eligibility question. List all requirements clearly.");
+        }
+        else if (conversationHistory.Count > 0 && (questionLower.StartsWith("what about") || questionLower.Contains("also") || questionLower.Contains("additionally")))
+        {
+            prompt.AppendLine("Note: This appears to be a follow-up question. Reference the previous conversation context.");
+        }
+
+        prompt.AppendLine();
+        var cleanedQuestion = ExtractKeywords(question);
+        prompt.AppendLine($"**User Question (cleaned):** {cleanedQuestion}");
+        prompt.AppendLine();
+        prompt.AppendLine("**Your Response:**");
+
+        return prompt.ToString();
+    }
+
+    // Helper method to detect history clearing requests
+    public bool IsHistoryClearRequest(string question)
+    {
+        var clearKeywords = new[]
+        {
+        "clear",
+        "delete",
+        "history",
+        "reset",
+        "start over",
+        "new conversation",
+        "clear history",
+        "delete history",
+        "clear conversation",
+        "reset chat"
+    };
+
+        var questionLower = question.ToLower().Trim();
+
+        // Check for direct clear commands
+        if (clearKeywords.Any(keyword => questionLower.Contains(keyword)))
+        {
+            // Additional validation to ensure it's really a clear request
+            var clearPhrases = new[]
+            {
+            "clear history",
+            "delete history",
+            "clear conversation",
+            "clear chat",
+            "reset conversation",
+            "start over",
+            "new conversation",
+            "clear all",
+            "delete all"
+        };
+
+            return clearPhrases.Any(phrase => questionLower.Contains(phrase)) ||
+                   (questionLower.Contains("clear") && questionLower.Contains("history")) ||
+                   (questionLower.Contains("delete") && questionLower.Contains("history")) ||
+                   questionLower == "clear" ||
+                   questionLower == "reset";
+        }
+
+        return false;
+    }
+
+    // You would also need a method to actually clear the conversation history
+    
+
+        public bool ShouldClearHistory(string question)
+        {
+            return IsHistoryClearRequest(question);
+        }
+
+
+    private async Task LoadFromCache(string model, string file)
+    {
+        try
+        {
+            var json = await File.ReadAllTextAsync(file);
+            var cacheData = JsonSerializer.Deserialize<CacheData>(json);
+
+            foreach (var embedding in cacheData.Embeddings)
+            {
+                var embeddingData = new EmbeddingData(
+                    embedding.Text,
+                    embedding.Vector.ToList(),
+                    embedding.SourceFile,
+                    embedding.LastModified,
+                    embedding.Model);
+
+                var key = GenerateEmbeddingKey(embeddingData);
+                _cachedEmbeddings[key] = embeddingData; // Use dictionary properly
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Cache load failed: {ex.Message}");
+        }
+    }
+
+
+
+
+    #region Database
+
+    private async Task InitializeDatabaseAsync()
+    {
+        using var connection = new SqliteConnection(DB_CONNECTION_STRING);
+        await connection.OpenAsync();
+
+        // Create embeddings table
+        var createEmbeddingsTable = @"
+    CREATE TABLE IF NOT EXISTS Embeddings (
+        Id INTEGER PRIMARY KEY AUTOINCREMENT,
+        Text TEXT NOT NULL,
+        Vector BLOB NOT NULL,
+        SourceFile TEXT NOT NULL,
+        LastModified TEXT NOT NULL,
+        Model TEXT NOT NULL
+    )";
+
+        // Create corrections table
+        var createCorrectionsTable = @"
+    CREATE TABLE IF NOT EXISTS Corrections (
+        Id INTEGER PRIMARY KEY,
+        Question TEXT NOT NULL,
+        Answer TEXT NOT NULL,
+        Date TEXT NOT NULL
+    )";
+
+        // Create indexes for better performance
+        var createIndexes = @"
+    CREATE INDEX IF NOT EXISTS idx_embeddings_model ON Embeddings(Model);
+    CREATE INDEX IF NOT EXISTS idx_embeddings_source ON Embeddings(SourceFile);
+    CREATE INDEX IF NOT EXISTS idx_corrections_question ON Corrections(Question);
+    ";
+
+        using var cmd1 = new SqliteCommand(createEmbeddingsTable, connection);
+        await cmd1.ExecuteNonQueryAsync();
+
+        using var cmd2 = new SqliteCommand(createCorrectionsTable, connection);
+        await cmd2.ExecuteNonQueryAsync();
+
+        using var cmd3 = new SqliteCommand(createIndexes, connection);
+        await cmd3.ExecuteNonQueryAsync();
+    }
+
+
+    private async Task LoadEmbeddingsFromDatabase(string model)
+    {
+        try
+        {
+            using var connection = new SqliteConnection(DB_CONNECTION_STRING);
+            await connection.OpenAsync();
+
+            var query = "SELECT Text, Vector, SourceFile, LastModified FROM Embeddings WHERE Model = @model";
+            using var command = new SqliteCommand(query, connection);
+            command.Parameters.AddWithValue("@model", model);
+
+            using var reader = await command.ExecuteReaderAsync();
+            int loadedCount = 0;
+
+            while (await reader.ReadAsync())
+            {
+                try
+                {
+                    var vectorBytes = (byte[])reader["Vector"];
+                    var vector = DeserializeVector(vectorBytes);
+
+                    var embedding = new EmbeddingData(
+                        reader["Text"].ToString(),
+                        vector,
+                        reader["SourceFile"].ToString(),
+                        DateTime.Parse(reader["LastModified"].ToString()),
+                        model
+                    );
+
+                    var key = GenerateEmbeddingKey(embedding);
+                    _cachedEmbeddings[key] = embedding;
+                    loadedCount++;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to load embedding record: {ex.Message}");
+                    continue; // Skip corrupted records
+                }
+            }
+
+            Console.WriteLine($"✅ Loaded {loadedCount} embeddings from database for model {model}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Database load failed: {ex.Message}");
+        }
+    }
+
+
+
+    private async Task SaveEmbeddingsToDatabase(string model)
+    {
+        using var connection = new SqliteConnection(DB_CONNECTION_STRING);
+        await connection.OpenAsync();
+
+        // Clear existing embeddings for this model
+        var deleteQuery = "DELETE FROM Embeddings WHERE Model = @model";
+        using var deleteCmd = new SqliteCommand(deleteQuery, connection);
+        deleteCmd.Parameters.AddWithValue("@model", model);
+        await deleteCmd.ExecuteNonQueryAsync();
+
+        // Insert new embeddings
+        var insertQuery = @"
+        INSERT INTO Embeddings (Text, Vector, SourceFile, LastModified, Model) 
+        VALUES (@text, @vector, @sourceFile, @lastModified, @model)";
+
+        foreach (var embedding in _cachedEmbeddings)
+        {
+            using var insertCmd = new SqliteCommand(insertQuery, connection);
+            insertCmd.Parameters.AddWithValue("@text", embedding.Value.Text);
+            insertCmd.Parameters.AddWithValue("@vector", SerializeVector(embedding.Value.Vector));
+            insertCmd.Parameters.AddWithValue("@sourceFile", embedding.Value.SourceFile);
+            insertCmd.Parameters.AddWithValue("@lastModified", embedding.Value.LastModified.ToString("O"));
+            insertCmd.Parameters.AddWithValue("@model", model);
+
+            await insertCmd.ExecuteNonQueryAsync();
+        }
+    }
+    private async Task LoadCorrectionsAsync()
+    {
+        try
+        {
+            using var connection = new SqliteConnection(DB_CONNECTION_STRING);
+            await connection.OpenAsync();
+
+            var query = "SELECT Id, Question, Answer, Date FROM Corrections ORDER BY Id DESC";
+            using var command = new SqliteCommand(query, connection);
+            using var reader = await command.ExecuteReaderAsync();
+
+            while (await reader.ReadAsync())
+            {
+                var correction = new CorrectionEntry
+                {
+                    Id = reader.GetInt32("Id"),
+                    Question = reader.GetString("Question"),
+                    Answer = reader.GetString("Answer"),
+                    Date = DateTime.Parse(reader.GetString("Date"))
+                };
+
+                if (correction.Id >= _nextCorrectionId)
+                    _nextCorrectionId = correction.Id + 1;
+
+                _correctionsCache.Add(correction);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to load corrections: {ex.Message}");
+        }
+    }
+    private async Task SaveCorrectionToDatabase(CorrectionEntry correction)
+    {
+        using var connection = new SqliteConnection(DB_CONNECTION_STRING);
+        await connection.OpenAsync();
+
+        // Delete existing correction with same question
+        var deleteQuery = "DELETE FROM Corrections WHERE LOWER(Question) = LOWER(@question)";
+        using var deleteCmd = new SqliteCommand(deleteQuery, connection);
+        deleteCmd.Parameters.AddWithValue("@question", correction.Question);
+        await deleteCmd.ExecuteNonQueryAsync();
+
+        // Insert new correction
+        var insertQuery = @"
+        INSERT INTO Corrections (Id, Question, Answer, Date) 
+        VALUES (@id, @question, @answer, @date)";
+
+        using var insertCmd = new SqliteCommand(insertQuery, connection);
+        insertCmd.Parameters.AddWithValue("@id", correction.Id);
+        insertCmd.Parameters.AddWithValue("@question", correction.Question);
+        insertCmd.Parameters.AddWithValue("@answer", correction.Answer);
+        insertCmd.Parameters.AddWithValue("@date", correction.Date.ToString("O"));
+
+        await insertCmd.ExecuteNonQueryAsync();
+    }
+    public async Task SaveCorrectionAsync(string question, string correctAnswer, string model)
+    {
+        var keywords = ExtractKeywords(question);
+        CorrectionEntry correction;
+
+        lock (_lockObject)
+        {
+            // Remove existing correction for the same question from memory
+            var existing = _correctionsCache.Where(c =>
+                c.Question.Equals(question, StringComparison.OrdinalIgnoreCase)).ToList();
+
+            // Use proper way to remove from ConcurrentBag
+            var remainingCorrections = _correctionsCache.Except(existing).ToList();
+            _correctionsCache.Clear();
+            foreach (var item in remainingCorrections)
+            {
+                _correctionsCache.Add(item);
+            }
+
+            correction = new CorrectionEntry
+            {
+                Id = _nextCorrectionId++,
+                Question = keywords,
+                Answer = correctAnswer,
+                Date = DateTime.Now
+            };
+
+            _correctionsCache.Add(correction);
+        }
+
+        await SaveCorrectionToDatabase(correction);
+
+        // Add correction to embeddings
+        try
+        {
+            var combinedText = $"{question}\n{correctAnswer}";
+            var embedding = await GetEmbedding(combinedText, model);
+            var sourceName = $"correction_{DateTime.Now:yyyyMMddHHmmss}_{correction.Id}.txt";
+
+            var embeddingData = new EmbeddingData(
+                combinedText,
+                embedding,
+                sourceName,
+                DateTime.Now,
+                model
+            );
+
+            var key = GenerateEmbeddingKey(embeddingData);
+            _cachedEmbeddings[key] = embeddingData; // Use dictionary properly
+
+            await SaveEmbeddingsToDatabase(model);
+            Console.WriteLine("\u001b[32mCorrection embedded and cached successfully.\u001b[0m");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"\u001b[31mFailed to embed correction: {ex.Message}\u001b[0m");
+        }
+    }
+
+    public async Task<bool> DeleteCorrectionAsync(int id)
+    {
+        try
+        {
+            using var connection = new SqliteConnection(DB_CONNECTION_STRING);
+            await connection.OpenAsync();
+
+            var deleteQuery = "DELETE FROM Corrections WHERE Id = @id";
+            using var deleteCmd = new SqliteCommand(deleteQuery, connection);
+            deleteCmd.Parameters.AddWithValue("@id", id);
+
+            var rowsAffected = await deleteCmd.ExecuteNonQueryAsync();
+
+            if (rowsAffected > 0)
+            {
+                // Remove from memory cache
+                var correction = _correctionsCache.FirstOrDefault(c => c.Id == id);
+                if (correction != null)
+                {
+                    var tempList = _correctionsCache.Where(c => c.Id != id).ToList();
+                    _correctionsCache.Clear();
+                    foreach (var item in tempList)
+                    {
+                        _correctionsCache.Add(item);
+                    }
+                }
+                return true;
+            }
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to delete correction: {ex.Message}");
+            return false;
+        }
+    }
+
+    public async Task RefreshEmbeddingsAsync(string model)
+    {
+        _cachedEmbeddings.Clear();
+
+        // Clear database
+        using var connection = new SqliteConnection(DB_CONNECTION_STRING);
+        await connection.OpenAsync();
+        var deleteQuery = "DELETE FROM Embeddings WHERE Model = @model";
+        using var deleteCmd = new SqliteCommand(deleteQuery, connection);
+        deleteCmd.Parameters.AddWithValue("@model", model);
+        await deleteCmd.ExecuteNonQueryAsync();
+
+        await LoadOrGenerateEmbeddings(model);
+    }
+
+    //private async Task LoadOrGenerateEmbeddings(string model = "llama3.1:8b")
+    //{
+    //    await LoadEmbeddingsFromDatabase(model);
+
+    //    var policyFiles = GetAllPolicyFiles();
+    //    var newEmbeddings = new List<EmbeddingData>();
+
+    //    foreach (var filePath in policyFiles)
+    //    {
+    //        var fileInfo = new FileInfo(filePath);
+    //        var lastModified = fileInfo.LastWriteTime;
+
+    //        var hasEmbedding = _cachedEmbeddings.Values.Any(e =>
+    //            e.SourceFile == filePath &&
+    //            e.model == model &&
+    //            Math.Abs((e.LastModified - lastModified).TotalSeconds) < 1);
+
+    //        if (hasEmbedding)
+    //        {
+    //            Console.WriteLine($"✅ Skipping {Path.GetFileName(filePath)} - already cached");
+    //            continue;
+    //        }
+
+    //        Console.WriteLine($"🔄 Processing {Path.GetFileName(filePath)} - file changed or new");
+
+    //        var oldEmbeddings = _cachedEmbeddings.Values
+    //            .Where(e => e.SourceFile == filePath && e.model == model)
+    //            .ToList();
+
+    //        foreach (var oldEmbedding in oldEmbeddings)
+    //        {
+    //            var key = GenerateEmbeddingKey(oldEmbedding);
+    //            _cachedEmbeddings.TryRemove(key, out _);
+    //        }
+
+    //        await RemoveFileEmbeddingsFromDatabase(filePath, model);
+
+    //        var content = await ReadFileContent(filePath);
+    //        if (string.IsNullOrWhiteSpace(content)) continue;
+
+    //        var chunks = ChunkText(content, filePath, maxTokens: 256);
+    //        Console.WriteLine($"📝 Generated {chunks.Count} chunks for {Path.GetFileName(filePath)}");
+
+    //        foreach (var chunk in chunks)
+    //        {
+    //            var embedding = await GetEmbedding(chunk.Text, model);
+    //            var embeddingData = new EmbeddingData(chunk.Text, embedding, filePath, lastModified, model);
+    //            var key = GenerateEmbeddingKey(embeddingData);
+    //            _cachedEmbeddings[key] = embeddingData;
+    //            newEmbeddings.Add(embeddingData);
+    //        }
+    //    }
+
+    //    if (newEmbeddings.Any())
+    //    {
+    //        Console.WriteLine($"💾 Saving {newEmbeddings.Count} new embeddings to database");
+    //        await SaveNewEmbeddingsToDatabase(newEmbeddings, model);
+    //    }
+    //    else
+    //    {
+    //        Console.WriteLine("✅ No new embeddings needed - all files are up to date");
+    //    }
+    //}
+    private async Task RemoveFileEmbeddingsFromDatabase(string filePath, string model)
+    {
+        using var connection = new SqliteConnection(DB_CONNECTION_STRING);
+        await connection.OpenAsync();
+
+        var deleteQuery = "DELETE FROM Embeddings WHERE SourceFile = @sourceFile AND Model = @model";
+        using var deleteCmd = new SqliteCommand(deleteQuery, connection);
+        deleteCmd.Parameters.AddWithValue("@sourceFile", filePath);
+        deleteCmd.Parameters.AddWithValue("@model", model);
+
+        await deleteCmd.ExecuteNonQueryAsync();
+    }
+
+    private async Task SaveNewEmbeddingsToDatabase(List<EmbeddingData> newEmbeddings, string model)
+    {
+        if (!newEmbeddings.Any()) return;
+
+        using var connection = new SqliteConnection(DB_CONNECTION_STRING);
+        await connection.OpenAsync();
+
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            var insertQuery = @"
+            INSERT INTO Embeddings (Text, Vector, SourceFile, LastModified, Model) 
+            VALUES (@text, @vector, @sourceFile, @lastModified, @model)";
+
+            foreach (var embedding in newEmbeddings)
+            {
+                using var insertCmd = new SqliteCommand(insertQuery, connection, transaction);
+                insertCmd.Parameters.AddWithValue("@text", embedding.Text);
+                insertCmd.Parameters.AddWithValue("@vector", SerializeVector(embedding.Vector));
+                insertCmd.Parameters.AddWithValue("@sourceFile", embedding.SourceFile);
+                insertCmd.Parameters.AddWithValue("@lastModified", embedding.LastModified.ToString("O"));
+                insertCmd.Parameters.AddWithValue("@model", model);
+
+                await insertCmd.ExecuteNonQueryAsync();
+            }
+
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+   
+
+    private byte[] SerializeVector(List<float> vector)
+    {
+        var bytes = new byte[vector.Count * 4];
+        for (int i = 0; i < vector.Count; i++)
+        {
+            var floatBytes = BitConverter.GetBytes(vector[i]);
+            Array.Copy(floatBytes, 0, bytes, i * 4, 4);
+        }
+        return bytes;
+    }
+
+    private List<float> DeserializeVector(byte[] bytes)
+    {
+        var vector = new List<float>();
+        for (int i = 0; i < bytes.Length; i += 4)
+        {
+            var floatValue = BitConverter.ToSingle(bytes, i);
+            vector.Add(floatValue);
+        }
+        return vector;
+    }
+
+    #endregion
+}

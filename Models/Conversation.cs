@@ -8,6 +8,8 @@ namespace MEAI_GPT_API.Models
 
         public class ConversationContext
         {
+            public List<List<ConversationTurn>> TopicHistory { get; set; } = new();
+            public List<ConversationTurn> CurrentTopic { get; set; } = new();//
             public List<EmbeddingData> RelevantChunks { get; set; } = new();
             public List<ConversationTurn> History { get; set; } = new();
             public DateTime LastAccessed { get; set; }

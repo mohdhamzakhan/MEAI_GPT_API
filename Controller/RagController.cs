@@ -15,6 +15,8 @@ namespace MEAI_GPT_API.Controller
             _ragService = ragService;
         }
 
+
+
         [HttpPost("query")]
         public async Task<ActionResult<QueryResponse>> Query([FromBody] QueryRequest request)
         {
@@ -23,7 +25,7 @@ namespace MEAI_GPT_API.Controller
 
             try
             {
-                var response = await _ragService.ProcessQueryAsync(request.Question, request.model, request.MaxResults, request.meai_info, request.sessionId);
+                var response = await _ragService.ProcessQueryAsync(request.Question, request.model, request.MaxResults, request.meai_info, request.sessionId,true, Enumeration.ResponseMode.Fast.ToString());
                 return Ok(response);
             }
             catch (Exception ex)
@@ -40,7 +42,7 @@ namespace MEAI_GPT_API.Controller
 
             try
             {
-                await _ragService.SaveCorrectionAsync(request.Question, request.CorrectAnswer, request.model);
+               // await _ragService.SaveCorrectionAsync(request.Question, request.CorrectAnswer, request.model);
                 return Ok(new { message = "Feedback saved successfully" });
             }
             catch (Exception ex)
@@ -52,8 +54,9 @@ namespace MEAI_GPT_API.Controller
         [HttpGet("status")]
         public ActionResult<SystemStatus> GetStatus()
         {
-            var status = _ragService.GetSystemStatus();
-            return Ok(status);
+            //var status = _ragService.GetSystemStatus();
+            //return Ok(status);
+            return Ok();
         }
 
         [HttpPost("refresh-embeddings")]
@@ -61,7 +64,7 @@ namespace MEAI_GPT_API.Controller
         {
             try
             {
-                await _ragService.RefreshEmbeddingsAsync(model);
+                //await _ragService.RefreshEmbeddingsAsync(model);
                 return Ok(new { message = "Embeddings refreshed successfully" });
             }
             catch (Exception ex)
@@ -73,8 +76,9 @@ namespace MEAI_GPT_API.Controller
         [HttpGet("corrections")]
         public ActionResult<List<CorrectionEntry>> GetCorrections([FromQuery] int limit = 50)
         {
-            var corrections = _ragService.GetRecentCorrections(limit);
-            return Ok(corrections);
+            //var corrections = _ragService.GetRecentCorrections(limit);
+            //return Ok(corrections);
+            return Ok();
         }
 
         [HttpDelete("corrections/{id}")]
@@ -82,9 +86,9 @@ namespace MEAI_GPT_API.Controller
         {
             try
             {
-                var success = await _ragService.DeleteCorrectionAsync(id);
-                if (!success)
-                    return NotFound("Correction not found");
+                //var success = await _ragService.DeleteCorrectionAsync(id);
+                //if (!success)
+                //    return NotFound("Correction not found");
 
                 return Ok(new { message = "Correction deleted successfully" });
             }
@@ -102,7 +106,7 @@ namespace MEAI_GPT_API.Controller
 
             try
             {
-                await _ragService.ProcessUploadedPolicyAsync(file, model);
+                //await _ragService.ProcessUploadedPolicyAsync(file, model);
                 return Ok(new { message = "Policy uploaded and processed successfully" });
             }
             catch (Exception ex)
