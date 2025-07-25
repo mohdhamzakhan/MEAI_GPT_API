@@ -94,6 +94,12 @@ public class RagService : IRAGService
         }
     }
 
+    private async Task RefreshEmbeddingsAsync(string model = "default")
+    {
+        // Implementation of refreshing embeddings
+        // This should only run when necessary
+    }
+
     private async Task<string> GetEmbeddingsVersionAsync()
     {
         // Create a hash of policy files to detect changes
@@ -1079,5 +1085,4 @@ RESPONSE GUIDELINES:
         public List<string>? Documents { get; set; }
         public List<Dictionary<string, object>>? Metadatas { get; set; }
     }
-
 }
