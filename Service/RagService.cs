@@ -21,7 +21,12 @@ public class RagService : IRAGService
     private readonly SemaphoreSlim _initializationLock = new(1, 1);
     private readonly IMetricsCollector _metrics;
     private const string EMBEDDINGS_VERSION_KEY = "embeddings_version";
-    private Boolean _isInitialized = true;
+    private Boolean _isInitialized = false;
+    private readonly object _lockObject = new object();
+    private readonly ConcurrentBag<CorrectionEntry> _correctionsCache = new();
+    private readonly string _currentUser = "mohdhamzakhan";
+    private readonly DateTime _currentUtc = DateTime.Parse("2025-07-25 08:21:53");
+    private int _nextCorrectionId = 1;
 
     public RagService(
         ILogger<RagService> logger,
@@ -93,17 +98,14 @@ public class RagService : IRAGService
             throw;
         }
     }
-
-    private async Task RefreshEmbeddingsAsync(string model = "default")
-    {
-        // Implementation of refreshing embeddings
-        // This should only run when necessary
-    }
-
     private async Task<string> GetEmbeddingsVersionAsync()
     {
         // Create a hash of policy files to detect changes
-        var policyFiles = Directory.GetFiles(_options.PolicyFolder, "*.md");
+        var policyFiles = new List<string>();
+        foreach(var extension in _options.SupportedExtensions)
+        {
+            policyFiles.AddRange(Directory.GetFiles(_options.PolicyFolder, $"*{extension}", SearchOption.AllDirectories));
+        }
         var fileInfos = policyFiles.Select(f => new FileInfo(f));
         var latestUpdate = fileInfos.Max(f => f.LastWriteTime);
         var filesHash = string.Join("|", fileInfos.Select(f => $"{f.Name}:{f.Length}:{f.LastWriteTime.Ticks}"));
@@ -539,16 +541,7 @@ public class RagService : IRAGService
             new
             {
                 role = "system",
-                content = @"You are MEAI HR Policy Assistant, an expert advisor with deep knowledge of company policies and procedures. 
-
-RESPONSE GUIDELINES:
-• Provide accurate, helpful answers based on the policy context provided
-• Use **bold** for important deadlines, amounts, or key requirements
-• Use *italics* for emphasis on critical points
-• If information is not available in the context, clearly state so
-• Always end with: 'For additional clarification, please contact HR.'
-• Be concise but thorough
-• Reference specific policy sections when available"
+                content = @"You are MEAI HR Policy Assistant, an expert advisor with deep knowledge of company policies and procedures. "
             }
         };
 
@@ -877,7 +870,7 @@ RESPONSE GUIDELINES:
             {
                 var request = new
                 {
-                    model = model,
+                    model = "nomic-embed-text:latest",
                     prompt = text,
                     options = new
                     {
@@ -1084,5 +1077,373 @@ RESPONSE GUIDELINES:
     {
         public List<string>? Documents { get; set; }
         public List<Dictionary<string, object>>? Metadatas { get; set; }
+    }
+
+    public async Task RefreshEmbeddingsAsync(string model = "default")
+    {
+        try
+        {
+            _logger.LogInformation($"Starting embeddings refresh {DateTime.Now}");
+
+            // Delete existing collection
+            await DeleteCollectionIfExistsAsync(_options.Collections["policies"]);
+
+            // Create new collection
+            await InitializeCollectionAsync();
+
+            // Load and process policy files
+            await LoadOrGenerateEmbeddings(model);
+
+            _logger.LogInformation("Embeddings refresh completed successfully");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to refresh embeddings");
+            throw;
+        }
+    }
+
+    private async Task DeleteCollectionIfExistsAsync(string collectionName)
+    {
+        try
+        {
+            _logger.LogInformation($"[{_currentUser}] Attempting to delete collection at {_currentUtc}");
+
+            // First get the collection ID
+            var collectionId = await GetCollectionIdByNameAsync(collectionName);
+            if (string.IsNullOrEmpty(collectionId))
+            {
+                _logger.LogInformation($"Collection {collectionName} not found, nothing to delete");
+                return;
+            }
+
+            // Prepare delete request with proper structure
+            var deleteRequest = new
+            {
+            };
+
+            // Make POST request to delete endpoint
+            var response = await _chromaClient.PostAsJsonAsync(
+                $"/api/v2/tenants/{_options.Tenant} /databases/ {_options.Database}/collections/{collectionId}/delete",
+                deleteRequest);
+
+            var responseContent = await response.Content.ReadAsStringAsync();
+            _logger.LogInformation($"Delete response: {responseContent}");
+
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation($"Successfully deleted collection content: {collectionName}");
+
+                // Now delete the collection itself
+                response = await _chromaClient.DeleteAsync(
+                    $"/api/v2/tenants/{_options.Tenant}/databases/{_options.Database}/collections/{collectionId}");
+
+                if (response.IsSuccessStatusCode)
+                {
+                    _logger.LogInformation($"Successfully deleted collection: {collectionName}");
+                }
+                else
+                {
+                    responseContent = await response.Content.ReadAsStringAsync();
+                    _logger.LogError($"Failed to delete collection structure. Status: {response.StatusCode}, Content: {responseContent}");
+                }
+            }
+            else
+            {
+                _logger.LogError($"Failed to delete collection content. Status: {response.StatusCode}, Content: {responseContent}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Failed to delete collection {collectionName}");
+            throw;
+        }
+    }
+
+
+
+    public async Task SaveCorrectionAsync(string question, string correctAnswer, string model)
+    {
+        try
+        {
+            _logger.LogInformation($"Saving correction at {DateTime.Now}");
+
+            var correction = new CorrectionEntry
+            {
+                Id = Guid.NewGuid().ToString(),
+                Question = question,
+                Answer = correctAnswer
+            };
+
+            // Add to ChromaDB
+            var embeddingModel = GetBestEmbeddingModel();
+            var embedding = await GetEmbedding(question, embeddingModel);
+
+            var addData = new
+            {
+                ids = new[] { correction.Id.ToString() },
+                embeddings = new[] { embedding },
+                documents = new[] { correctAnswer },
+                metadatas = new[]
+                {
+                new Dictionary<string, object>
+                {
+                    { "question", question },
+                    { "model", model },
+                    { "timestamp", DateTime.Now},
+                    { "user", "Hamza" }
+                }
+            }
+            };
+
+            var response = await _chromaClient.PostAsJsonAsync(
+                $"/api/v2/tenants/{_options.Tenant}/databases/{_options.Database}/collections/{_options.Collections}/add",
+                addData);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new Exception($"Failed to save correction: {await response.Content.ReadAsStringAsync()}");
+            }
+
+            _logger.LogInformation($"Successfully saved correction for question: {question}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to save correction for question: {Question}", question);
+            throw;
+        }
+    }
+
+    public SystemStatus GetSystemStatus()
+    {
+        try
+        {
+            _logger.LogInformation($"Getting system status at {DateTime.Now}");
+
+            var isHealthy = IsSystemHealthy();
+            var totalEmbeddings = GetCollectionCountAsync().Result;
+            var totalCorrections = GetCorrectionsCountAsync().Result;
+
+            return new SystemStatus
+            {
+                TotalEmbeddings = totalEmbeddings,
+                TotalCorrections = totalCorrections,
+                LastUpdated = DateTime.Parse("2025-07-25 08:16:41"),
+                IsHealthy = isHealthy,
+                PoliciesFolder = _options.PolicyFolder,
+                SupportedExtensions = _options.SupportedExtensions.ToList()
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get system status");
+            throw;
+        }
+    }
+
+    private bool IsSystemHealthy()
+    {
+        try
+        {
+            // Check ChromaDB health
+            var chromaHealth = _chromaClient.GetAsync("/api/v2/heartbeat").Result;
+            if (!chromaHealth.IsSuccessStatusCode)
+                return false;
+
+            // Check Ollama health
+            var ollamaHealth = _httpClient.GetAsync("/api/tags").Result;
+            if (!ollamaHealth.IsSuccessStatusCode)
+                return false;
+
+            // Check if policies folder exists
+            if (!Directory.Exists(_options.PolicyFolder))
+                return false;
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private async Task<int> GetCorrectionsCountAsync()
+    {
+        try
+        {
+            var response = await _chromaClient.GetAsync(
+                $"/api/v2/tenants/{_options.Tenant} /databases/ {_options.Database} /collections/ {_collectionId}/count");
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(result);
+                return doc.RootElement.GetInt32();
+            }
+
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get corrections count");
+            return 0;
+        }
+    }
+
+    public List<CorrectionEntry> GetRecentCorrections(int limit = 50)
+    {
+        try
+        {
+            _logger.LogInformation($"Retrieving {limit} recent corrections at {DateTime.Now}");
+
+            lock (_lockObject)
+            {
+                return _correctionsCache
+                    .OrderByDescending(c => c.Date)
+                    .Take(limit)
+                    .ToList();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get recent corrections");
+            throw;
+        }
+    }
+
+    public async Task<bool> DeleteCorrectionAsync(string id)
+    {
+        try
+        {
+            _collectionId = await InitializeCollectionAsync();
+            _logger.LogInformation($"Deleting correction {id} at {DateTime.Now}");
+
+            var deleteData = new
+            {
+                ids = new[] { id }
+            };
+
+            var response = await _chromaClient.PostAsJsonAsync(
+                $"/api/v2/tenants/{_options.Tenant} /databases/ {_options.Database} /collections/ {_collectionId}/delete",
+                deleteData);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogError($"Failed to delete correction: {await response.Content.ReadAsStringAsync()}");
+                return false;
+            }
+
+            // Remove from cache
+            lock (_lockObject)
+            {
+                var correction = _correctionsCache.FirstOrDefault(c => c.Id.ToString() == id);
+                if (correction != null)
+                {
+                    return ((ICollection<CorrectionEntry>)_correctionsCache).Remove(correction);
+                }
+            }
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete correction {Id}", id);
+            throw;
+        }
+    }
+
+    public async Task ProcessUploadedPolicyAsync(Stream fileStream, string fileName, string model)
+    {
+        try
+        {
+            _logger.LogInformation($"Processing uploaded policy {fileName} at {DateTime.Now}");
+
+            // Read file content
+            using var reader = new StreamReader(fileStream);
+            var content = await reader.ReadToEndAsync();
+
+            // Chunk the document
+            var chunks = ChunkText(content, fileName);
+
+            // Process chunks in batches
+            var batchSize = 5;
+            for (int i = 0; i < chunks.Count; i += batchSize)
+            {
+                var batch = chunks.Skip(i).Take(batchSize).ToList();
+                await ProcessChunkBatch(batch, model, fileName, DateTime.UtcNow);
+            }
+
+            _logger.LogInformation($"Successfully processed policy file {fileName} with {chunks.Count} chunks");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to process uploaded policy {FileName}", fileName);
+            throw;
+        }
+    }
+    private async Task<int> GetCollectionCountAsync()
+    {
+        try
+        {
+            _collectionId = await InitializeCollectionAsync();
+            var response = await _chromaClient.GetAsync($"/api/v2/tenants/{_options.Tenant}  /databases/  {_options.Database}  /collections/  {_options.Collections["policies"]}/count");
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(result);
+                return doc.RootElement.GetInt32();
+            }
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to get collection count: {ex.Message}");
+            return 0;
+        }
+    }
+    private string GetBestEmbeddingModel()
+    {
+        var preferredModels = new[]
+        {
+            "nomic-embed-text:latest",
+            "bge-large-en",
+            "bge-base-en",
+            "all-MiniLM-L6-v2"
+        };
+
+        foreach (var model in preferredModels)
+        {
+            if (IsModelAvailable(model).Result)
+            {
+                return model;
+            }
+        }
+
+        return "nomic-embed-text:latest"; // Default fallback
+    }
+    private async Task<bool> IsModelAvailable(string modelName)
+    {
+        try
+        {
+            var response = await _httpClient.GetAsync("/api/tags");
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+
+                if (doc.RootElement.TryGetProperty("models", out var modelsArray))
+                {
+                    return modelsArray.EnumerateArray()
+                        .Any(model => model.TryGetProperty("name", out var nameProperty) &&
+                                    nameProperty.GetString()?.StartsWith(modelName, StringComparison.OrdinalIgnoreCase) == true);
+                }
+            }
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error checking model availability: {ex.Message}");
+            return false;
+        }
     }
 }
