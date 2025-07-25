@@ -20,6 +20,8 @@ public class RagService : IRAGService
     private readonly ConcurrentDictionary<string, ConversationContext> _sessionContexts = new();
     private readonly SemaphoreSlim _initializationLock = new(1, 1);
     private readonly IMetricsCollector _metrics;
+    private const string EMBEDDINGS_VERSION_KEY = "embeddings_version";
+    private Boolean _isInitialized = true;
 
     public RagService(
         ILogger<RagService> logger,
@@ -38,30 +40,68 @@ public class RagService : IRAGService
         _metrics = metrics;
     }
 
+    //public async Task InitializeAsync()
+    //{
+    //    try
+    //    {
+    //        await _initializationLock.WaitAsync();
+    //        _logger.LogInformation("Initializing RAG system with ChromaDB...");
+
+    //        await EnsureChromaDBHealthyAsync();
+    //        _collectionId = await InitializeCollectionAsync();
+
+    //        var embeddingModel = await EnsureEmbeddingModelAvailableAsync();
+    //        await LoadOrGenerateEmbeddings(embeddingModel);
+
+    //        _logger.LogInformation("RAG system initialization completed successfully");
+    //    }
+    //    catch (Exception ex)
+    //    {
+    //        _logger.LogError(ex, "Failed to initialize RAG system");
+    //        throw new RAGServiceException("Failed to initialize RAG system", ex);
+    //    }
+    //    finally
+    //    {
+    //        _initializationLock.Release();
+    //    }
+    //}
+
     public async Task InitializeAsync()
     {
+        if (_isInitialized)
+            return;
+
         try
         {
-            await _initializationLock.WaitAsync();
-            _logger.LogInformation("Initializing RAG system with ChromaDB...");
+            var currentVersion = await GetEmbeddingsVersionAsync();
+            var cachedVersion = await _cacheManager.GetAsync<string>(EMBEDDINGS_VERSION_KEY);
 
-            await EnsureChromaDBHealthyAsync();
-            _collectionId = await InitializeCollectionAsync();
+            if (cachedVersion == currentVersion)
+            {
+                _logger.LogInformation("Using cached embeddings version: {Version}", currentVersion);
+                _isInitialized = true;
+                return;
+            }
 
-            var embeddingModel = await EnsureEmbeddingModelAvailableAsync();
-            await LoadOrGenerateEmbeddings(embeddingModel);
-
-            _logger.LogInformation("RAG system initialization completed successfully");
+            await RefreshEmbeddingsAsync();
+            await _cacheManager.SetAsync(EMBEDDINGS_VERSION_KEY, currentVersion, TimeSpan.FromDays(30));
+            _isInitialized = true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to initialize RAG system");
-            throw new RAGServiceException("Failed to initialize RAG system", ex);
+            _logger.LogError(ex, "Failed to initialize RAG service");
+            throw;
         }
-        finally
-        {
-            _initializationLock.Release();
-        }
+    }
+
+    private async Task<string> GetEmbeddingsVersionAsync()
+    {
+        // Create a hash of policy files to detect changes
+        var policyFiles = Directory.GetFiles(_options.PolicyFolder, "*.md");
+        var fileInfos = policyFiles.Select(f => new FileInfo(f));
+        var latestUpdate = fileInfos.Max(f => f.LastWriteTime);
+        var filesHash = string.Join("|", fileInfos.Select(f => $"{f.Name}:{f.Length}:{f.LastWriteTime.Ticks}"));
+        return Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(filesHash));
     }
 
     private async Task<string> InitializeCollectionAsync()
@@ -377,7 +417,7 @@ public class RagService : IRAGService
     {
         context.History.Clear();
         context.RelevantChunks.Clear();
-        context.LastAccessed = DateTime.UtcNow;
+        context.LastAccessed = DateTime.Now;
     }
 
     private async Task<List<RelevantChunk>> GetRelevantChunksAsync(
@@ -967,7 +1007,7 @@ RESPONSE GUIDELINES:
             {
                 Question = question,
                 Answer = result.Documents[0],
-                Date = DateTime.UtcNow
+                Date = DateTime.Now
             };
 
             // Cache the correction
@@ -995,7 +1035,7 @@ RESPONSE GUIDELINES:
             {
                 Question = question,
                 Answer = answer,
-                Timestamp = DateTime.UtcNow,
+                Timestamp = DateTime.Now,
                 Sources = relevantChunks.Select(c => c.Source).Distinct().ToList()
             };
 
@@ -1012,13 +1052,13 @@ RESPONSE GUIDELINES:
                 Text: r.Text,
                 Vector: new List<float>(), // We don't need to store vectors in memory
                 SourceFile: r.Source,
-                LastModified: DateTime.UtcNow,
+                LastModified: DateTime.Now,
                 model: _options.DefaultEmbeddingModel)
             {
                 Similarity = r.Similarity
             }).ToList();
 
-            context.LastAccessed = DateTime.UtcNow;
+            context.LastAccessed = DateTime.Now;
 
             // Log conversation turn for analytics
             _logger.LogInformation(
@@ -1039,4 +1079,5 @@ RESPONSE GUIDELINES:
         public List<string>? Documents { get; set; }
         public List<Dictionary<string, object>>? Metadatas { get; set; }
     }
+
 }
