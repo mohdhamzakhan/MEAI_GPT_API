@@ -10,5 +10,7 @@
         public List<RelevantChunk> RelevantChunks { get; set; }
         public bool IsFollowUp { get; set; } // New
         public string ContextUsed { get; set; } // New
+        public string? SessionId { get; set; } // Add this 
+        public Dictionary<string, string> ModelsUsed { get; set; } = new();
     }
 }

@@ -8,5 +8,10 @@
         public bool IsHealthy { get; set; }
         public string PoliciesFolder { get; set; } = "";
         public List<string> SupportedExtensions { get; set; } = new();
+        public List<ModelConfiguration> AvailableModels { get; set; } = new();
+        public List<ModelConfiguration> EmbeddingModels { get; set; } = new();
+        public List<ModelConfiguration> GenerationModels { get; set; } = new();
+        public string DefaultEmbeddingModel { get; set; } = string.Empty;
+        public string DefaultGenerationModel { get; set; } = string.Empty;
     }
 }

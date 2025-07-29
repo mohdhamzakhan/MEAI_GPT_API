@@ -7,5 +7,6 @@
     public int TimeoutMinutes { get; set; } = 5;
     public string PolicyFolder { get; set; } = "D:\\Code\\MEAIGPT\\MEAIRAG\\policies";
     public List<string> SupportedExtensions { get; set; } = new() { ".txt", ".md", ".pdf", ".docx" };
-    public string DefaultEmbeddingModel { get; set; } = "nomic-embed-text:latest";
+    public string DefaultEmbeddingModel { get; set; } = "mistral:latest";
+    public string ContextFolder { get; set; } = "D:\\Code\\MEAIGPT\\MEAIRAG\\Context";
 }

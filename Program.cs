@@ -1,7 +1,10 @@
+﻿using MEAI_GPT_API.Service.Interface;
+using MEAI_GPT_API.Services;
+using Microsoft.Extensions.Caching.StackExchangeRedis;
+using Microsoft.Extensions.Options;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
-using Microsoft.Extensions.Caching.StackExchangeRedis;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
@@ -75,7 +78,11 @@ builder.Services.AddOpenTelemetry()
 builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>();
 builder.Services.AddSingleton<ICacheManager, CacheManager>();
 builder.Services.AddSingleton<IMetricsCollector, MetricsCollector>();
-builder.Services.AddScoped<IRAGService, RagService>();
+builder.Services.AddScoped<IRAGService, DynamicRagService>();
+builder.Services.AddScoped<IModelManager, ModelManager>();
+builder.Services.AddScoped<IDynamicCollectionManager, DynamicCollectionManager>();
+builder.Services.Configure<ChromaDbOptions>(
+    builder.Configuration.GetSection("ChromaDB"));
 
 
 var app = builder.Build();

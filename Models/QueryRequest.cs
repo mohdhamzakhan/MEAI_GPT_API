@@ -7,7 +7,7 @@ namespace MEAI_GPT_API.Models
     public class QueryRequest
     {
         public string Question { get; set; } = "";
-        public int MaxResults { get; set; } = 10;
+        public int MaxResults { get; set; } = 50;
         public string model { get; set; }
         public bool meai_info { get; set; } =true;
         public string sessionId { get; set; }

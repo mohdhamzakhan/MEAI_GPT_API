@@ -13,6 +13,8 @@ namespace MEAI_GPT_API.Models
             public List<EmbeddingData> RelevantChunks { get; set; } = new();
             public List<ConversationTurn> History { get; set; } = new();
             public DateTime LastAccessed { get; set; }
+            public string SessionId { get; set; } = string.Empty;
+            public DateTime CreatedAt { get; set; } = DateTime.Now;
         }
 
         public class ConversationTurn
@@ -21,6 +23,7 @@ namespace MEAI_GPT_API.Models
             public string Answer { get; set; }
             public DateTime Timestamp { get; set; }
             public List<string> Sources { get; set; }
+            public string SessionId { get; set; }
         }
     }
 }
