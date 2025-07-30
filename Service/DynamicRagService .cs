@@ -13,7 +13,7 @@ namespace MEAI_GPT_API.Services
     public class DynamicRagService : IRAGService
     {
         private readonly IModelManager _modelManager;
-        private readonly IDynamicCollectionManager _collectionManager;
+        private readonly DynamicCollectionManager _collectionManager;
         private readonly DynamicRAGConfiguration _config;
         private readonly ChromaDbOptions _chromaOptions;
         private readonly ILogger<DynamicRagService> _logger;
@@ -30,7 +30,7 @@ namespace MEAI_GPT_API.Services
 
         public DynamicRagService(
             IModelManager modelManager,
-            IDynamicCollectionManager collectionManager,
+            DynamicCollectionManager collectionManager,
             IOptions<DynamicRAGConfiguration> config,
             IOptions<ChromaDbOptions> chromaOptions,
             ILogger<DynamicRagService> logger,
@@ -379,6 +379,8 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     UpdateConversationHistory(context, question, correction.Answer, new List<RelevantChunk>());
 
                     stopwatch.Stop();
+
+
                     return new QueryResponse
                     {
                         Answer = correction.Answer,
@@ -420,6 +422,34 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     ismeai: meaiInfo
                 );
 
+                var answerEmbedding = await GetEmbeddingAsync(answer, embModel);
+
+                // Rank chunks by similarity to answer
+                var scoredChunks = new List<(RelevantChunk Chunk, double Similarity)>();
+                foreach (var chunk in relevantChunks)
+                {
+                    var chunkEmbedding = await GetEmbeddingAsync(chunk.Text, embModel);
+                    var similarity = CosineSimilarity(answerEmbedding, chunkEmbedding);
+                    chunk.Similarity = similarity; // Store back to chunk if you use it
+                    scoredChunks.Add((chunk, similarity));
+                }
+
+                // Sort by similarity
+                var topChunks = scoredChunks
+                    .Where(c => c.Similarity >= 0.5) // or another threshold
+                    .OrderByDescending(c => c.Similarity)
+                    .Take(5)
+                    .Select(c =>
+                    {
+                        c.Chunk.Similarity = c.Similarity;
+                        return c.Chunk;
+                    })
+                    .ToList();
+
+                // Compute confidence
+                var confidence = topChunks.FirstOrDefault()?.Similarity ?? 0;
+
+
                 UpdateConversationHistory(context, question, answer, relevantChunks);
 
                 stopwatch.Stop();
@@ -433,9 +463,9 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     Answer = answer,
                     IsFromCorrection = false,
                     Sources = relevantChunks.Select(c => c.Source).Distinct().ToList(),
-                    Confidence = relevantChunks.FirstOrDefault()?.Similarity ?? 0,
+                    Confidence = confidence,
                     ProcessingTimeMs = stopwatch.ElapsedMilliseconds,
-                    RelevantChunks = relevantChunks.Take(5).ToList(),
+                    RelevantChunks = topChunks,
                     SessionId = context.SessionId,
                     ModelsUsed = new Dictionary<string, string>
                     {
@@ -452,6 +482,22 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 throw new RAGServiceException("Failed to process query", ex);
             }
         }
+
+        private double CosineSimilarity(List<float> a, List<float> b)
+        {
+            if (a.Count != b.Count) throw new ArgumentException("Vector dimensions must match");
+
+            double dot = 0, normA = 0, normB = 0;
+            for (int i = 0; i < a.Count; i++)
+            {
+                dot += a[i] * b[i];
+                normA += a[i] * a[i];
+                normB += b[i] * b[i];
+            }
+
+            return dot / (Math.Sqrt(normA) * Math.Sqrt(normB));
+        }
+
 
         // Updated search with model-specific collection
         private async Task<List<RelevantChunk>> SearchChromaDBAsync(string query, ModelConfiguration embeddingModel, int maxResults)
@@ -802,8 +848,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
         {
             var cleaned = System.Text.RegularExpressions.Regex.Replace(
                 response,
-                @"<think>.*?</think>",
-                "",
+                "","",
                 System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase
             );
 

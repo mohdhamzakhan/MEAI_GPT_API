@@ -1,6 +1,8 @@
-﻿using MEAI_GPT_API.Service.Interface;
+﻿using MEAI_GPT_API.Models;
+using MEAI_GPT_API.Service.Interface;
 using MEAI_GPT_API.Services;
 using Microsoft.Extensions.Caching.StackExchangeRedis;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -29,14 +31,20 @@ builder.Services.Configure<ChromaDbOptions>(
 
 builder.Services.AddHttpClient("ChromaDB", client =>
 {
-    client.BaseAddress = new Uri(builder.Configuration["ChromaDB:BaseUrl"]);
-    client.Timeout = TimeSpan.FromMinutes(5);
+    var baseUrl = builder.Configuration["ChromaDB:BaseUrl"] ?? "http://localhost:8000";
+    var timeoutMinutes = builder.Configuration.GetValue<int>("ChromaDB:TimeoutMinutes", 5);
+
+    client.BaseAddress = new Uri(baseUrl);
+    client.Timeout = TimeSpan.FromMinutes(timeoutMinutes);
 });
 
 builder.Services.AddHttpClient("OllamaAPI", client =>
 {
-    client.BaseAddress = new Uri(builder.Configuration["Ollama:BaseUrl"]);
-    client.Timeout = TimeSpan.FromMinutes(10);
+    var baseUrl = builder.Configuration["Ollama:BaseUrl"] ?? "http://localhost:11434";
+    var timeoutMinutes = builder.Configuration.GetValue<int>("Ollama:TimeoutMinutes", 10);
+
+    client.BaseAddress = new Uri(baseUrl);
+    client.Timeout = TimeSpan.FromMinutes(timeoutMinutes);
 });
 
 // Add Redis Cache with fallback to in-memory cache
@@ -65,8 +73,10 @@ builder.Services.AddOpenTelemetry()
                     .AddAttributes(new Dictionary<string, object>
                     {
                         ["environment"] = builder.Environment.EnvironmentName,
-                        ["timestamp"] = "2025-07-25 05:49:50",
-                        ["user"] = "mohdhamzakhan"
+                        ["timestamp"] = DateTime.Now.ToString("O"),
+                        ["user"] = Environment.UserName,
+                        ["version"] = Environment.Version.ToString(),
+                        ["machineName"] = Environment.MachineName
                     }))
             .AddMeter("MEAI.RAG.Metrics")
             .AddAspNetCoreInstrumentation()
@@ -79,8 +89,26 @@ builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>();
 builder.Services.AddSingleton<ICacheManager, CacheManager>();
 builder.Services.AddSingleton<IMetricsCollector, MetricsCollector>();
 builder.Services.AddScoped<IRAGService, DynamicRagService>();
-builder.Services.AddScoped<IModelManager, ModelManager>();
-builder.Services.AddScoped<IDynamicCollectionManager, DynamicCollectionManager>();
+builder.Services.Configure<DynamicRAGConfiguration>(
+    builder.Configuration.GetSection("DynamicRAG"));
+
+builder.Services.AddScoped<IModelManager>(provider =>
+{
+    var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
+    var httpClient = httpClientFactory.CreateClient("OllamaAPI");
+    var logger = provider.GetRequiredService<ILogger<ModelManager>>();
+    var configOptions = provider.GetRequiredService<IOptions<DynamicRAGConfiguration>>();
+
+    return new ModelManager(httpClient, logger, configOptions);
+});
+builder.Services.AddScoped<DynamicCollectionManager>(provider =>
+{
+    var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
+    var chromaClient = httpClientFactory.CreateClient("ChromaDB");
+    var chromaOptions = provider.GetRequiredService<IOptions<ChromaDbOptions>>().Value;
+    var logger = provider.GetRequiredService<ILogger<DynamicCollectionManager>>();
+    return new DynamicCollectionManager(chromaClient, chromaOptions, logger); // ✅ fixed
+});
 builder.Services.Configure<ChromaDbOptions>(
     builder.Configuration.GetSection("ChromaDB"));
 

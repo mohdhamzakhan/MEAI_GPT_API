@@ -2364,4 +2364,13 @@ These abbreviations are standard across all MEAI HR policies and should be inter
         }
     }
 
+    public Task<List<ModelConfiguration>> GetAvailableModelsAsync()
+    {
+        throw new NotImplementedException();
+    }
+
+    public Task<QueryResponse> ProcessQueryAsync(string question, string? generationModel = null, string? embeddingModel = null, int maxResults = 15, bool meaiInfo = true, string? sessionId = null, bool useReRanking = true)
+    {
+        throw new NotImplementedException();
+    }
 }

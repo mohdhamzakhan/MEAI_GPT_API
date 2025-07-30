@@ -4,13 +4,14 @@ public interface IRAGService
 {
     Task InitializeAsync();
     Task<QueryResponse> ProcessQueryAsync(
-        string question,
-        string generationModel,
-        int maxResults = 10,
-        bool meaiInfo = true,
-        string? sessionId = null,
-        bool useReRanking = true,
-        string? embeddingModel = null);
+    string question,
+    string? generationModel = null,
+    string? embeddingModel = null,
+    int maxResults = 15,
+    bool meaiInfo = true,
+    string? sessionId = null,
+    bool useReRanking = true);
+
     Task<bool> IsHealthy();
     //Task SaveCorrectionAsync(string question, string correctAnswer, string model);
     //SystemStatus GetSystemStatus();
@@ -18,4 +19,6 @@ public interface IRAGService
     //List<CorrectionEntry> GetRecentCorrections(int limit);
     //Task<bool> DeleteCorrectionAsync(string id);
     //Task ProcessUploadedPolicyAsync(Stream fileStream, string fileName, string model);
+
+    Task<List<ModelConfiguration>> GetAvailableModelsAsync();
 }

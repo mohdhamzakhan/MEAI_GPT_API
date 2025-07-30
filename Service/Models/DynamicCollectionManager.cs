@@ -6,28 +6,17 @@ using System.Text.Json;
 
 namespace MEAI_GPT_API.Services
 {
-    public interface IDynamicCollectionManager
-    {
-        Task DeleteModelCollectionAsync(string modelName);
-        Task<List<string>> GetAllCollectionIdsAsync();
-        string? GetCollectionId(string modelName);
-        Task<string> GetOrCreateCollectionAsync(ModelConfiguration model);
-    }
-
-    public class DynamicCollectionManager : IDynamicCollectionManager
+      public class DynamicCollectionManager
     {
         private readonly HttpClient _chromaClient;
         private readonly ChromaDbOptions _options;
         private readonly ILogger<DynamicCollectionManager> _logger;
         private readonly ConcurrentDictionary<string, string> _modelCollections = new();
 
-        public DynamicCollectionManager(
-            HttpClient chromaClient,
-            IOptions<ChromaDbOptions> options,
-            ILogger<DynamicCollectionManager> logger)
+        public DynamicCollectionManager(HttpClient chromaClient, ChromaDbOptions options, ILogger<DynamicCollectionManager> logger)
         {
             _chromaClient = chromaClient;
-            _options = options.Value;
+            _options = options;
             _logger = logger;
         }
 

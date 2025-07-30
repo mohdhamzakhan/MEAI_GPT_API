@@ -11,6 +11,10 @@ namespace MEAI_GPT_API.Models
         public string model { get; set; }
         public bool meai_info { get; set; } =true;
         public string sessionId { get; set; }
+
+        public string? GenerationModel { get; set; }  // Replaces old 'model' parameter
+        public string? EmbeddingModel { get; set; }   // New parameter
+        public bool? useReRanking { get; set; } = true;
     }
 
     public record EmbeddingData(string Text, List<float> Vector, string SourceFile, DateTime LastModified, string model)
