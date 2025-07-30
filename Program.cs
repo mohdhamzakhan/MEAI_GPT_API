@@ -92,6 +92,7 @@ builder.Services.AddScoped<IRAGService, DynamicRagService>();
 builder.Services.Configure<DynamicRAGConfiguration>(
     builder.Configuration.GetSection("DynamicRAG"));
 
+
 builder.Services.AddScoped<IModelManager>(provider =>
 {
     var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();

@@ -10,7 +10,7 @@
         public string ContextFolder { get; set; } = "./context";
         public List<string> SupportedExtensions { get; set; } = new();
         public PreferredModels PreferredModels { get; set; } = new();
-        public Dictionary<string, ModelConfigurationSettings> ModelConfigurations { get; set; } = new();
+        public Dictionary<string, ModelConfigurationSettings>? ModelConfigurations { get; set; }
     }
     public class PreferredModels
     {

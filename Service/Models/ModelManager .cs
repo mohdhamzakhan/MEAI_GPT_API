@@ -241,7 +241,7 @@ namespace MEAI_GPT_API.Services
         public Task<ModelConfiguration?> GetModelAsync(string modelName)
         {
             // First, check in static config with exact model name
-            if (_config.ModelConfigurations.TryGetValue(modelName, out var config))
+            if (_config.ModelConfigurations.TryGetValue(modelName.Replace(':','_'), out var config))
             {
                 _logger.LogInformation($"✅ Loaded model config from appsettings: {modelName}");
 

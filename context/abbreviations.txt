@@ -1,0 +1,10 @@
+HR Policy Abbreviations:
+CL = Casual Leave
+SL = Sick Leave
+COFF = Compensatory Off
+EL = Earned Leave
+PL = Privilege Leave
+ML = Maternity Leave
+PL = Paternity Leave
+
+These abbreviations are standard across all MEAI HR policies and should be interpreted consistently.

@@ -1728,7 +1728,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 Vector: new List<float>(), // We don't need to store vectors in memory
                 SourceFile: r.Source,
                 LastModified: DateTime.Now,
-                model: _options.DefaultEmbeddingModel)
+                model: "llama3.2:1b")
             {
                 Similarity = r.Similarity
             }).ToList();

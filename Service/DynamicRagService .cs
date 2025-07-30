@@ -295,6 +295,20 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 text = text.Substring(0, maxLength);
 
             const int maxRetries = 3;
+            var safeOptions = new Dictionary<string, object>();
+            foreach (var kvp in model.ModelOptions)
+            {
+                object value = kvp.Value;
+
+                if (kvp.Key == "num_ctx" && value is String d)
+                    value = int.Parse(d);
+                else if (kvp.Key == "top_p" && value is string e)
+                    value = float.Parse(e);
+                else if (kvp.Key == "temperature" && value is string f)
+                    value = float.Parse(f);
+
+                safeOptions[kvp.Key] = value;
+            }
             for (int attempt = 0; attempt < maxRetries; attempt++)
             {
                 try
@@ -303,7 +317,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     {
                         model = model.Name, // Dynamic model name!
                         prompt = text,
-                        options = model.ModelOptions // Dynamic model options!
+                        options = safeOptions // Dynamic model options!
                     };
 
                     var response = await _httpClient.PostAsJsonAsync("/api/embeddings", request);
@@ -362,6 +376,8 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     throw new ArgumentException($"Generation model {generationModel} not available");
                 if (embModel == null)
                     throw new ArgumentException($"Embedding model {embeddingModel} not available");
+                if (embModel.EmbeddingDimension == 0)
+                    embModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
 
                 var context = GetOrCreateConversationContext(sessionId);
                 _logger.LogInformation($"Processing query with models - Gen: {generationModel}, Emb: {embeddingModel}");
@@ -657,18 +673,37 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             // Add current question
             messages.Add(new { role = "user", content = question });
 
+            var safeOptions = new Dictionary<string, object>();
+            foreach (var kvp in generationModel.ModelOptions)
+            {
+                object value = kvp.Value;
+
+                Type t = value.GetType();
+                if (kvp.Key == "num_ctx" && value is String d)
+                    value = int.Parse(d);
+                else if (kvp.Key == "top_p" && value is string e)
+                    value = float.Parse(e);
+                else if (kvp.Key == "temperature" && value is string f)
+                    value = float.Parse(f);
+
+                safeOptions[kvp.Key] = value;
+
+            }
+
             var requestData = new
             {
                 model = generationModel.Name,
                 messages,
                 temperature = generationModel.Temperature,
                 stream = false,
-                options = generationModel.ModelOptions
+                options = safeOptions
             };
 
             try
             {
                 var response = await _httpClient.PostAsJsonAsync("/api/chat", requestData);
+                var responseContent = await response.Content.ReadAsStringAsync();
+                _logger.LogError("Raw Ollama response: {Content}", responseContent);
                 response.EnsureSuccessStatusCode();
 
                 var json = await response.Content.ReadAsStringAsync();
