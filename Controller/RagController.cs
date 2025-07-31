@@ -158,5 +158,11 @@ namespace MEAI_GPT_API.Controller
                 return StatusCode(500, new { error = ex.Message });
             }
         }
+        [HttpPost("feedback/like")]
+        public async Task<IActionResult> Like([FromBody] FeedbackRequest feedback)
+        {
+            await _ragService.MarkAppreciatedAsync(feedback.sessionId, feedback.Question);
+            return Ok();
+        }
     }
 }

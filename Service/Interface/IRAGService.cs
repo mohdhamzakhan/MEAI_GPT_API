@@ -21,4 +21,5 @@ public interface IRAGService
     //Task ProcessUploadedPolicyAsync(Stream fileStream, string fileName, string model);
 
     Task<List<ModelConfiguration>> GetAvailableModelsAsync();
+    Task MarkAppreciatedAsync(string sessionId, string question);
 }

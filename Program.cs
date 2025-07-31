@@ -92,7 +92,7 @@ builder.Services.AddScoped<IRAGService, DynamicRagService>();
 builder.Services.Configure<DynamicRAGConfiguration>(
     builder.Configuration.GetSection("DynamicRAG"));
 
-
+builder.Services.AddSingleton<Conversation>();
 builder.Services.AddScoped<IModelManager>(provider =>
 {
     var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
@@ -102,7 +102,7 @@ builder.Services.AddScoped<IModelManager>(provider =>
 
     return new ModelManager(httpClient, logger, configOptions);
 });
-builder.Services.AddScoped<DynamicCollectionManager>(provider =>
+builder.Services.AddSingleton<DynamicCollectionManager>(provider =>
 {
     var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
     var chromaClient = httpClientFactory.CreateClient("ChromaDB");

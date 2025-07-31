@@ -1,7 +1,9 @@
 ﻿// Services/DynamicRagService.cs
+using DocumentFormat.OpenXml.InkML;
 using MEAI_GPT_API.Models;
 using MEAI_GPT_API.Service.Interface;
 using Microsoft.Extensions.Options;
+using Microsoft.VisualBasic;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
@@ -22,11 +24,13 @@ namespace MEAI_GPT_API.Services
         private readonly IDocumentProcessor _documentProcessor;
         private readonly ICacheManager _cacheManager;
         private readonly IMetricsCollector _metrics;
+        private readonly Conversation _conversation;
         private readonly ConcurrentDictionary<string, ConversationContext> _sessionContexts = new();
         private readonly ConcurrentBag<CorrectionEntry> _correctionsCache = new();
         private readonly object _lockObject = new();
         private readonly string _currentUser = "system";
         private bool _isInitialized = false;
+        private readonly ConcurrentBag<(string Question, string Answer, List<RelevantChunk> Chunks)> _appreciatedTurns = new();
 
         public DynamicRagService(
             IModelManager modelManager,
@@ -37,6 +41,7 @@ namespace MEAI_GPT_API.Services
             IHttpClientFactory httpClientFactory,
             IDocumentProcessor documentProcessor,
             ICacheManager cacheManager,
+            Conversation conversation,
             IMetricsCollector metrics)
         {
             _modelManager = modelManager;
@@ -49,6 +54,7 @@ namespace MEAI_GPT_API.Services
             _documentProcessor = documentProcessor;
             _cacheManager = cacheManager;
             _metrics = metrics;
+            _conversation = conversation;
 
             InitializeSessionCleanup();
         }
@@ -378,8 +384,8 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     throw new ArgumentException($"Embedding model {embeddingModel} not available");
                 if (embModel.EmbeddingDimension == 0)
                     embModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
-
-                var context = GetOrCreateConversationContext(sessionId);
+                //sessionId = "69e7386a-d108-4304-be2a-c43402dbbb94";
+                var context = _conversation.GetOrCreateConversationContext(sessionId);
                 _logger.LogInformation($"Processing query with models - Gen: {generationModel}, Emb: {embeddingModel}");
 
                 if (IsHistoryClearRequest(question))
@@ -392,7 +398,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 if (correction != null)
                 {
                     _logger.LogInformation($"🎯 Using correction for question: {question}");
-                    UpdateConversationHistory(context, question, correction.Answer, new List<RelevantChunk>());
+                    await UpdateConversationHistory(context, question, correction.Answer, new List<RelevantChunk>());
 
                     stopwatch.Stop();
 
@@ -414,13 +420,40 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     };
                 }
 
-                if (IsTopicChanged(question, context.History))
+                if (IsTopicChanged(question, context))
                 {
                     _logger.LogInformation($"Topic changed for session {context.SessionId}, clearing context");
                     ClearContext(context);
                 }
 
                 var contextualQuery = BuildContextualQuery(question, context.History);
+
+                var similarAppreciated = _appreciatedTurns
+    .FirstOrDefault(a => CalculateTextSimilarity(a.Question, question) > 0.75);
+
+                if (similarAppreciated != default)
+                {
+                    _logger.LogInformation("💡 Reusing appreciated answer for similar question.");
+                    await UpdateConversationHistory(context, question, similarAppreciated.Answer, similarAppreciated.Chunks);
+
+                    return new QueryResponse
+                    {
+                        Answer = similarAppreciated.Answer,
+                        IsFromCorrection = false,
+                        Sources = similarAppreciated.Chunks.Select(c => c.Source).Distinct().ToList(),
+                        Confidence = 1.0,
+                        ProcessingTimeMs = 0,
+                        RelevantChunks = similarAppreciated.Chunks,
+                        SessionId = context.SessionId,
+                        ModelsUsed = new Dictionary<string, string>
+                        {
+                            ["generation"] = generationModel,
+                            ["embedding"] = embeddingModel
+                        }
+                    };
+                }
+
+
                 var relevantChunks = await GetRelevantChunksAsync(
                     contextualQuery,
                     embModel,
@@ -430,11 +463,13 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     useReRanking,
                     genModel);
 
+
                 var answer = await GenerateChatResponseAsync(
                     question,
                     genModel,
                     context.History,
                     relevantChunks,
+                    context,
                     ismeai: meaiInfo
                 );
 
@@ -442,7 +477,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
                 // Rank chunks by similarity to answer
                 var scoredChunks = new List<(RelevantChunk Chunk, double Similarity)>();
-                foreach (var chunk in relevantChunks)
+                foreach (var chunk in relevantChunks.Take(10))
                 {
                     var chunkEmbedding = await GetEmbeddingAsync(chunk.Text, embModel);
                     var similarity = CosineSimilarity(answerEmbedding, chunkEmbedding);
@@ -498,7 +533,30 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 throw new RAGServiceException("Failed to process query", ex);
             }
         }
+        public Task MarkAppreciatedAsync(string sessionId, string question)
+        {
+            if (_sessionContexts.TryGetValue(sessionId, out var context))
+            {
+                var turn = context.History.LastOrDefault(t => t.Question.Equals(question, StringComparison.OrdinalIgnoreCase));
+                if (turn != null)
+                {
+                    var chunks = ConvertToRelevantChunks(context.RelevantChunks ?? new List<EmbeddingData>());
+                    _appreciatedTurns.Add((turn.Question, turn.Answer, new List<RelevantChunk>(chunks)));
+                    _logger.LogInformation($"⭐ Appreciated turn saved: {question}");
+                }
+            }
+            return Task.CompletedTask;
+        }
 
+        List<RelevantChunk> ConvertToRelevantChunks(List<EmbeddingData> data)
+        {
+            return data.Select(d => new RelevantChunk
+            {
+                Text = d.Text,
+                Source = d.SourceFile,
+                Similarity = d.Similarity // if available in EmbeddingData
+            }).ToList();
+        }
         private double CosineSimilarity(List<float> a, List<float> b)
         {
             if (a.Count != b.Count) throw new ArgumentException("Vector dimensions must match");
@@ -520,7 +578,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
         {
             try
             {
-                var collectionId = _collectionManager.GetCollectionId(embeddingModel.Name);
+                var collectionId = await _collectionManager.GetOrCreateCollectionAsync(embeddingModel);
                 if (string.IsNullOrEmpty(collectionId))
                 {
                     throw new InvalidOperationException($"No collection found for embedding model {embeddingModel.Name}");
@@ -602,11 +660,12 @@ These abbreviations are standard across all MEAI HR policies and should be inter
         }
 
         private async Task<string> GenerateChatResponseAsync(
-            string question,
-            ModelConfiguration generationModel,
-            List<ConversationTurn> history,
-            List<RelevantChunk> chunks,
-            bool ismeai = true)
+    string question,
+    ModelConfiguration generationModel,
+    List<ConversationTurn> history,
+    List<RelevantChunk> chunks,
+    ConversationContext context,
+    bool ismeai = true)
         {
             var messages = new List<object>();
 
@@ -659,7 +718,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 foreach (var group in groupedChunks)
                 {
                     contextBuilder.AppendLine($"📄 {group.Key}:");
-                    foreach (var chunk in group.OrderByDescending(c => c.Similarity).Take(2))
+                    foreach (var chunk in group.OrderByDescending(c => c.Similarity).Take(10))
                     {
                         contextBuilder.AppendLine($"• {chunk.Text.Trim()}");
                         contextBuilder.AppendLine($"  (Relevance: {chunk.Similarity:F2})");
@@ -669,6 +728,11 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
                 messages.Add(new { role = "system", content = contextBuilder.ToString() });
             }
+
+            question = ResolvePronouns(question, context);
+
+            // Then add to messages
+            messages.Add(new { role = "user", content = question });
 
             // Add current question
             messages.Add(new { role = "user", content = question });
@@ -718,6 +782,8 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 return "I apologize, but I'm having trouble generating a response right now. Please try again or contact HR directly for assistance.";
             }
         }
+
+
 
         // API endpoint to get available models
         public async Task<List<ModelConfiguration>> GetAvailableModelsAsync()
@@ -924,23 +990,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             }
         }
 
-        private ConversationContext GetOrCreateConversationContext(string? sessionId)
-        {
-            if (string.IsNullOrEmpty(sessionId))
-            {
-                sessionId = $"temp_{Guid.NewGuid():N}";
-            }
-
-            var context = _sessionContexts.GetOrAdd(sessionId, _ => new ConversationContext
-            {
-                SessionId = sessionId,
-                CreatedAt = DateTime.Now,
-                LastAccessed = DateTime.Now
-            });
-
-            context.LastAccessed = DateTime.Now;
-            return context;
-        }
+       
 
         // Implement other required methods from IRAGService
         private bool IsHistoryClearRequest(string question)
@@ -971,16 +1021,259 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             context.LastAccessed = DateTime.Now;
         }
 
-        private bool IsTopicChanged(string question, List<ConversationTurn> history)
+        private bool IsTopicChanged(string question, ConversationContext context)
         {
-            return history.Count > 0 && CalculateTextSimilarity(question, history.Last().Question) < 0.3;
+            if (string.IsNullOrWhiteSpace(question)) return true;
+
+            var lowerQuestion = question.ToLowerInvariant();
+
+            // Broader follow-up phrase detection (not only at start)
+            string[] contextualPhrases = new[]
+{
+    // English follow-up cues
+    "what about",
+    "how about",
+    "what is his",
+    "what is her",
+    "how is she",
+    "how is he",
+    "what will",
+    "what if",
+    "what else",
+    "can she",
+    "can he",
+    "do they",
+    "did she",
+    "did he",
+    "does it",
+    "does he",
+    "does she",
+    "is that true",
+    "tell me more",
+    "more info",
+    "additional info",
+    "continue",
+    "next",
+    "go on",
+    "expand on that",
+    "in addition",
+    "related to",
+    "following that",
+    "based on that",
+    "regarding that",
+    "same as",
+    "just like",
+    "similar to",
+    "and then",
+    "after that",
+    "he",
+    "she",
+    "it",
+    "them",
+    "they",
+    "their",
+    "that",
+    "his",
+    "her",
+    "this person",
+    "that person",
+    "the individual",
+    "the person you mentioned",
+    "okay",
+    "got it",
+    "alright",
+    "yes and",
+    "oh",
+    "hmm",
+    "also",
+    "too",
+    "by the way",
+    "btw",
+    "on that topic",
+    "as you said",
+    "like you said",
+    "you mentioned",
+    "back to that",
+    "about that",
+    "is that still true",
+    "with that in mind",
+
+    // Hinglish / Hindi-English expressions
+    "phir kya",
+    "fir kya",
+    "uske baad",
+    "aur batao",
+    "aur kya",
+    "baki kya",
+    "aur info do",
+    "kya usne",
+    "kya uska",
+    "kya uski",
+    "toh kya",
+    "fir kya hua",
+    "ab kya",
+    "ab uska",
+    "wo kya karega",
+    "wo kya karegi",
+    "usse kya",
+    "usse related",
+    "iski info",
+    "uski info",
+    "wo bhi",
+    "iske alawa",
+    "yeh kya hai",
+    "matlab kya",
+    "next batao",
+    "aur details",
+    "ye kisne bola",
+    "phir kya hua",
+    "us topic pe",
+    "wahi wala",
+    "uske bare me",
+    "pehle jo bola tha",
+    "jaise aapne bola",
+    "bol rahe the",
+    "jis baat ki",
+    "fir batao",
+    "agar aisa ho",      
+    "agar main",          
+    "agar mein",          
+    "agar usne",          
+    "agar uska",          
+    "agar uski",          
+    "agar mujhe",         
+    "agar kisi ne",       
+    "agar me",            
+    "agar hum",           
+    "agar vo",            
+    "agar mai",           
+    "agar kuch",          
+    "agar kal",           
+    "agar mujhe chhutti", 
+    "agar leave chahiye", 
+    "agar me chala jau",  
+    "agar combine karu", 
+    "agar CL lo",         
+    "agar sick leave",
+    "agar SL lo",
+    "agar allowed hai",   
+};
+
+
+
+            // 1. If it contains follow-up terms, assume same topic
+            // ✅ Check fuzzy match on contextual phrases
+            if (IsFollowUpPhraseFuzzy(question, contextualPhrases))
+            {
+                return false;
+            }
+
+            // 2. Use anchor if present and valid
+            var anchor = context.LastTopicAnchor ?? "";
+            if (!string.IsNullOrWhiteSpace(anchor))
+            {
+                double anchorSim = CalculateTextSimilarity(question, anchor);
+                if (anchorSim >= 0.4) return false;
+            }
+
+            // 3. Fallback: check similarity with last question
+            if (context.History.Count > 0)
+            {
+                var lastQuestion = context.History.Last().Question;
+                double lastSim = CalculateTextSimilarity(question, lastQuestion);
+                if (lastSim >= 0.4) return false;
+            }
+
+            // 4. Default to "changed"
+            return true;
         }
+
+        public static int LevenshteinDistance(string s, string t)
+        {
+            if (string.IsNullOrEmpty(s)) return t.Length;
+            if (string.IsNullOrEmpty(t)) return s.Length;
+
+            var d = new int[s.Length + 1, t.Length + 1];
+
+            for (int i = 0; i <= s.Length; i++) d[i, 0] = i;
+            for (int j = 0; j <= t.Length; j++) d[0, j] = j;
+
+            for (int i = 1; i <= s.Length; i++)
+            {
+                for (int j = 1; j <= t.Length; j++)
+                {
+                    int cost = s[i - 1] == t[j - 1] ? 0 : 1;
+                    d[i, j] = new[] {
+                d[i - 1, j] + 1,
+                d[i, j - 1] + 1,
+                d[i - 1, j - 1] + cost
+            }.Min();
+                }
+            }
+
+            return d[s.Length, t.Length];
+        }
+
+        private bool IsFollowUpPhraseFuzzy(string question, string[] knownPhrases, int maxDistance = 2)
+        {
+            string lowerQ = question.ToLowerInvariant();
+
+            return knownPhrases.Any(phrase =>
+            {
+                if (lowerQ.Length < phrase.Length)
+                    return false;
+
+                var sub = lowerQ.Substring(0, Math.Min(phrase.Length + 3, lowerQ.Length));
+                return LevenshteinDistance(sub, phrase) <= maxDistance;
+            });
+        }
+
+        private string ResolvePronouns(string question, ConversationContext context)
+        {
+            if (context.NamedEntities.Count == 0) return question;
+
+            string lastEntity = context.NamedEntities.Last();
+
+            question = question.Replace("her", lastEntity, StringComparison.OrdinalIgnoreCase);
+            question = question.Replace("his", lastEntity, StringComparison.OrdinalIgnoreCase);
+            question = question.Replace("their", lastEntity, StringComparison.OrdinalIgnoreCase);
+            return question;
+        }
+
 
         private string BuildContextualQuery(string currentQuestion, List<ConversationTurn> history)
         {
             if (history.Count == 0) return currentQuestion;
 
-            var contextualPhrases = new[] { "this", "that", "it", "they", "what about", "and", "also" };
+            var contextualPhrases = new[]
+{
+    // Pronouns
+    "he", "she", "him", "her", "they", "them", "his", "hers", "their", "theirs", "it", "its",
+
+    // Demonstratives
+    "this", "that", "those", "these",
+
+    // Follow-up / connective words
+    "also", "and", "but", "or", "then", "next", "after", "before", "furthermore", "moreover", "besides",
+
+    // Question prompts
+    "what about", "who else", "anything else", "how about", "can i also", "does it mean", "in that case",
+    "how?", "why?", "when?", "where?", "what if?", "which one?", "how many?", "how long?", "what now?",
+
+    // Anaphoric phrases
+    "same", "as before", "previous one", "last one", "mentioned", "earlier", "above", "following that",
+    "that one", "the same", "that case", "it again", "same thing", "another one", "one more",
+
+    // Roles or objects
+    "the person", "the policy", "the rule", "the regulation", "the requirement", "the document", "the clause",
+
+    // Quantifiers
+    "some", "any", "all", "none", "more", "less", "other", "another", "rest",
+
+    // Clarifiers / corrections
+    "not that", "actually", "i meant", "no, i mean", "what i meant was"
+};
+
             if (contextualPhrases.Any(phrase => currentQuestion.ToLower().Contains(phrase)))
             {
                 var lastTurn = history.LastOrDefault();
@@ -992,6 +1285,42 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
             return currentQuestion;
         }
+
+
+        private async Task<List<string>> ExtractEntitiesAsync(string text)
+        {
+            var prompt = $"Extract all named entities (people, organizations, titles, etc.) from the following text:\n\n\"{text}\"\n\nEntities:";
+
+            var request = new
+            {
+                model = "mistral:latest", // or your current generation model
+                messages = new[]
+                {
+            new { role = "user", content = prompt }
+        },
+                temperature = 0.1
+            };
+
+            try
+            {
+                var response = await _httpClient.PostAsJsonAsync("/api/chat", request);
+                var json = await response.Content.ReadAsStringAsync();
+                var doc = JsonDocument.Parse(json);
+                var content = doc.RootElement.GetProperty("message").GetProperty("content").GetString() ?? "";
+
+                return content.Split(new[] { ',', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                              .Select(e => e.Trim())
+                              .Where(e => e.Length > 1)
+                              .Distinct(StringComparer.OrdinalIgnoreCase)
+                              .ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to extract entities");
+                return new List<string>();
+            }
+        }
+
 
         private double CalculateTextSimilarity(string text1, string text2)
         {
@@ -1030,11 +1359,11 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             }
         }
 
-        private void UpdateConversationHistory(
-            ConversationContext context,
-            string question,
-            string answer,
-            List<RelevantChunk> relevantChunks)
+        private async Task UpdateConversationHistory(
+     ConversationContext context,
+     string question,
+     string answer,
+     List<RelevantChunk> relevantChunks)
         {
             try
             {
@@ -1053,7 +1382,20 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     context.History = context.History.TakeLast(10).ToList();
                 }
 
+                // If it's a new topic, update anchor
+                if (IsTopicChanged(question, context))
+                {
+                    context.LastTopicAnchor = question; // 🆕 update anchor
+                }
+
                 context.LastAccessed = DateTime.Now;
+                
+                var extracted = await ExtractEntitiesAsync(answer);
+                foreach (var entity in extracted)
+                {
+                    if (!context.NamedEntities.Contains(entity, StringComparer.OrdinalIgnoreCase))
+                        context.NamedEntities.Add(entity);
+                }
             }
             catch (Exception ex)
             {
@@ -1061,17 +1403,34 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             }
         }
 
+
         private async Task<CorrectionEntry?> CheckCorrectionsAsync(string question)
         {
-            // Simplified implementation - you can enhance based on your needs
-            lock (_lockObject)
+            try
             {
-                return _correctionsCache
-                    .Where(c => c.Question.Equals(question, StringComparison.OrdinalIgnoreCase))
-                    .OrderByDescending(c => c.Date)
-                    .FirstOrDefault();
+                var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
+                var inputEmbedding = await GetEmbeddingAsync(question, embeddingModel);
+
+                lock (_lockObject)
+                {
+                    return _correctionsCache
+                        .Select(c => new
+                        {
+                            Entry = c,
+                            Similarity = CosineSimilarity(inputEmbedding, c.Embedding)
+                        })
+                        .OrderByDescending(x => x.Similarity)
+                        .FirstOrDefault(x => x.Similarity >= 0.8)  // You can tune this threshold
+                        ?.Entry;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to check semantic correction match");
+                return null;
             }
         }
+
 
         private async Task<int> GetCorrectionsCountAsync()
         {
@@ -1126,11 +1485,28 @@ These abbreviations are standard across all MEAI HR policies and should be inter
         }
 
         // Implement other required interface methods...
-        public Task SaveCorrectionAsync(string question, string correctAnswer, string model)
+        public async Task SaveCorrectionAsync(string question, string correctAnswer, string model)
         {
-            // Implementation here
-            throw new NotImplementedException();
+            var modelConfig = await _modelManager.GetModelAsync(model);
+            var embedding = await GetEmbeddingAsync(question, modelConfig);
+
+            var entry = new CorrectionEntry
+            {
+                Question = question,
+                Answer = correctAnswer,
+                Embedding = embedding,
+                Model = model,
+                Date = DateTime.UtcNow
+            };
+
+            lock (_lockObject)
+            {
+                _correctionsCache.Add(entry);
+            }
+
+            _logger.LogInformation("✅ Correction saved for question: {Question}", question);
         }
+
 
         public Task RefreshEmbeddingsAsync(string model = "mistral:latest")
         {

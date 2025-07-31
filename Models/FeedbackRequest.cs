@@ -5,5 +5,6 @@
         public string Question { get; set; } = "";
         public string CorrectAnswer { get; set; } = "";
         public string model { get; set; }
+        public string sessionId { get; set; }
     }
 }

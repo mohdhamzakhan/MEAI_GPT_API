@@ -1582,7 +1582,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
                         var correction = new CorrectionEntry
                         {
-                            Id = correctionId,
+                            Id = correctionId!,
                             Question = originalQuestion ?? question,
                             Answer = documents[i].GetString() ?? "",
                             Date = DateTime.Now
@@ -2370,6 +2370,11 @@ These abbreviations are standard across all MEAI HR policies and should be inter
     }
 
     public Task<QueryResponse> ProcessQueryAsync(string question, string? generationModel = null, string? embeddingModel = null, int maxResults = 15, bool meaiInfo = true, string? sessionId = null, bool useReRanking = true)
+    {
+        throw new NotImplementedException();
+    }
+
+    public Task MarkAppreciatedAsync(string sessionId, string question)
     {
         throw new NotImplementedException();
     }
