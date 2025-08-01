@@ -46,12 +46,15 @@ namespace MEAI_GPT_API.Controller
                 // ✅ FIXED: Updated call to match DynamicRagService signature
                 var response = await _ragService.ProcessQueryAsync(
                     question: request.Question,
+                    request.Plant +
+                     ", Centerlized",
                     generationModel: request.GenerationModel, // New parameter
                     embeddingModel: request.EmbeddingModel,   // New parameter
                     maxResults: request.MaxResults,
                     meaiInfo: request.meai_info,
                     sessionId: request.sessionId,
                     useReRanking: true
+
                 );
 
                 return Ok(response);

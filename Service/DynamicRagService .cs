@@ -32,6 +32,7 @@ namespace MEAI_GPT_API.Services
         private bool _isInitialized = false;
         private readonly ConcurrentBag<(string Question, string Answer, List<RelevantChunk> Chunks)> _appreciatedTurns = new();
         private readonly PlantSettings _plants;
+        private readonly IConversationStorageService _conversationStorage;
         public DynamicRagService(
             IModelManager modelManager,
             DynamicCollectionManager collectionManager,
@@ -43,7 +44,8 @@ namespace MEAI_GPT_API.Services
             ICacheManager cacheManager,
             Conversation conversation,
             IOptions<PlantSettings> plants,
-            IMetricsCollector metrics)
+            IMetricsCollector metrics,
+            IConversationStorageService conversationStorage)
         {
             _modelManager = modelManager;
             _collectionManager = collectionManager;
@@ -57,10 +59,12 @@ namespace MEAI_GPT_API.Services
             _metrics = metrics;
             _conversation = conversation;
             _plants = plants.Value;
+            _conversationStorage = conversationStorage;
 
             InitializeSessionCleanup();
         }
 
+        // 🆕 Enhanced InitializeAsync method
         public async Task InitializeAsync()
         {
             if (_isInitialized) return;
@@ -99,9 +103,12 @@ namespace MEAI_GPT_API.Services
                 // Process documents for all embedding models
                 foreach (var plant in _plants.Plants.Keys)
                 {
-                    _logger.LogInformation($"🌱 Processing documents for plant: {plant}");
+                    _logger.LogInformation($"Processing documents for plant: {plant}");
                     await ProcessDocumentsForAllModelsAsync(embeddingModels, plant);
                 }
+
+                // 🆕 Load historical appreciated answers
+                await LoadHistoricalAppreciatedAnswersAsync();
 
                 _isInitialized = true;
                 _logger.LogInformation("✅ Dynamic RAG system initialization completed");
@@ -367,13 +374,15 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
         // Updated query processing with dynamic model selection
         public async Task<QueryResponse> ProcessQueryAsync(
-            string question,
-            string? generationModel = null,
-            string? embeddingModel = null,
-            int maxResults = 15,
-            bool meaiInfo = true,
-            string? sessionId = null,
-            bool useReRanking = true)
+    string question,
+        string plant,
+    string? generationModel = null,
+    string? embeddingModel = null,
+    int maxResults = 15,
+    bool meaiInfo = true,
+    string? sessionId = null,
+    bool useReRanking = true
+)
         {
             var stopwatch = Stopwatch.StartNew();
             try
@@ -392,24 +401,71 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     throw new ArgumentException($"Embedding model {embeddingModel} not available");
                 if (embModel.EmbeddingDimension == 0)
                     embModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
-                //sessionId = "69e7386a-d108-4304-be2a-c43402dbbb94";
-                var context = _conversation.GetOrCreateConversationContext(sessionId);
+
+                // Get or create session in database
+                var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
+                    sessionId ?? Guid.NewGuid().ToString(),
+                    _currentUser);
+
+                var context = _conversation.GetOrCreateConversationContext(dbSession.SessionId);
+
                 _logger.LogInformation($"Processing query with models - Gen: {generationModel}, Emb: {embeddingModel}");
 
                 if (IsHistoryClearRequest(question))
                 {
-                    return await HandleHistoryClearRequest(context, sessionId);
+                    return await HandleHistoryClearRequest(context, dbSession.SessionId);
                 }
 
-                // Check corrections (model-agnostic)
+                // 🆕 Check for similar conversations in database first
+                var questionEmbedding = await GetEmbeddingAsync(question, embModel);
+                var similarConversations = await _conversationStorage.SearchSimilarConversationsAsync(
+                    questionEmbedding,plant, threshold: 0.8, limit: 3);
+
+                if (similarConversations.Any())
+                {
+                    var bestMatch = similarConversations.First();
+                    if (bestMatch.Entry.WasAppreciated)
+                    {
+                        _logger.LogInformation($"💡 Reusing appreciated answer from database (ID: {bestMatch.Entry.Id})");
+
+                        // Create a copy for this session
+                        await SaveConversationToDatabase(
+                            dbSession.SessionId, question, bestMatch.Entry.Answer,
+                            new List<RelevantChunk>(), genModel, embModel,
+                            bestMatch.Similarity, stopwatch.ElapsedMilliseconds,
+                            isFromCorrection: false, parentId: null, plant:plant);
+
+                        return new QueryResponse
+                        {
+                            Answer = bestMatch.Entry.Answer,
+                            IsFromCorrection = false,
+                            Sources = bestMatch.Entry.Sources,
+                            Confidence = bestMatch.Similarity,
+                            ProcessingTimeMs = stopwatch.ElapsedMilliseconds,
+                            RelevantChunks = new List<RelevantChunk>(),
+                            SessionId = dbSession.SessionId,
+                            ModelsUsed = new Dictionary<string, string>
+                            {
+                                ["generation"] = generationModel,
+                                ["embedding"] = embeddingModel
+                            }
+                        };
+                    }
+                }
+
+                // Check corrections (existing logic)
                 var correction = await CheckCorrectionsAsync(question);
                 if (correction != null)
                 {
                     _logger.LogInformation($"🎯 Using correction for question: {question}");
-                    await UpdateConversationHistory(context, question, correction.Answer, new List<RelevantChunk>());
+
+                    await SaveConversationToDatabase(
+                        dbSession.SessionId, question, correction.Answer,
+                        new List<RelevantChunk>(), genModel, embModel,
+                        1.0, stopwatch.ElapsedMilliseconds,
+                        isFromCorrection: true, parentId: null,plant:plant);
 
                     stopwatch.Stop();
-
 
                     return new QueryResponse
                     {
@@ -419,7 +475,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                         Confidence = 1.0,
                         ProcessingTimeMs = stopwatch.ElapsedMilliseconds,
                         RelevantChunks = new List<RelevantChunk>(),
-                        SessionId = context.SessionId,
+                        SessionId = dbSession.SessionId,
                         ModelsUsed = new Dictionary<string, string>
                         {
                             ["generation"] = generationModel,
@@ -428,6 +484,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     };
                 }
 
+                // Check topic change and context
                 if (IsTopicChanged(question, context))
                 {
                     _logger.LogInformation($"Topic changed for session {context.SessionId}, clearing context");
@@ -436,50 +493,28 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
                 var contextualQuery = BuildContextualQuery(question, context.History);
 
-                var similarAppreciated = _appreciatedTurns
-    .FirstOrDefault(a => CalculateTextSimilarity(a.Question, question) > 0.75);
+                // Get relevant chunks
+                var relevantChunks = await GetRelevantChunksAsync(
+                    contextualQuery, embModel, maxResults, meaiInfo, context, useReRanking, genModel);
 
-                if (similarAppreciated != default)
+                // Determine parent conversation ID for follow-ups
+                int? parentId = null;
+                if (context.History.Any())
                 {
-                    _logger.LogInformation("💡 Reusing appreciated answer for similar question.");
-                    await UpdateConversationHistory(context, question, similarAppreciated.Answer, similarAppreciated.Chunks);
+                    // Get the last conversation ID from session metadata
+                    var lastConversationId = dbSession.Metadata.ContainsKey("lastConversationId")
+                        ? Convert.ToInt32(dbSession.Metadata["lastConversationId"])
+                        : (int?)null;
 
-                    return new QueryResponse
+                    if (lastConversationId.HasValue && IsFollowUpQuestion(question, context))
                     {
-                        Answer = similarAppreciated.Answer,
-                        IsFromCorrection = false,
-                        Sources = similarAppreciated.Chunks.Select(c => c.Source).Distinct().ToList(),
-                        Confidence = 1.0,
-                        ProcessingTimeMs = 0,
-                        RelevantChunks = similarAppreciated.Chunks,
-                        SessionId = context.SessionId,
-                        ModelsUsed = new Dictionary<string, string>
-                        {
-                            ["generation"] = generationModel,
-                            ["embedding"] = embeddingModel
-                        }
-                    };
+                        parentId = lastConversationId.Value;
+                    }
                 }
 
-
-                var relevantChunks = await GetRelevantChunksAsync(
-                    contextualQuery,
-                    embModel,
-                    maxResults,
-                    meaiInfo,
-                    context,
-                    useReRanking,
-                    genModel);
-
-
+                // Generate answer
                 var answer = await GenerateChatResponseAsync(
-                    question,
-                    genModel,
-                    context.History,
-                    relevantChunks,
-                    context,
-                    ismeai: meaiInfo
-                );
+                    question, genModel, context.History, relevantChunks, context, ismeai: meaiInfo);
 
                 var answerEmbedding = await GetEmbeddingAsync(answer, embModel);
 
@@ -489,13 +524,13 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 {
                     var chunkEmbedding = await GetEmbeddingAsync(chunk.Text, embModel);
                     var similarity = CosineSimilarity(answerEmbedding, chunkEmbedding);
-                    chunk.Similarity = similarity; // Store back to chunk if you use it
+                    chunk.Similarity = similarity;
                     scoredChunks.Add((chunk, similarity));
                 }
 
                 // Sort by similarity
                 var topChunks = scoredChunks
-                    .Where(c => c.Similarity >= 0.5) // or another threshold
+                    .Where(c => c.Similarity >= 0.5)
                     .OrderByDescending(c => c.Similarity)
                     .Take(5)
                     .Select(c =>
@@ -508,14 +543,21 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 // Compute confidence
                 var confidence = topChunks.FirstOrDefault()?.Similarity ?? 0;
 
+                // 🆕 Save conversation to database
+                var conversationId = await SaveConversationToDatabase(
+                    dbSession.SessionId, question, answer, topChunks,
+                    genModel, embModel, confidence, stopwatch.ElapsedMilliseconds,
+                    isFromCorrection: false, parentId, plant);
 
-                UpdateConversationHistory(context, question, answer, relevantChunks);
+                // Update session metadata with last conversation ID
+                dbSession.Metadata["lastConversationId"] = conversationId;
+                await _conversationStorage.UpdateSessionAsync(dbSession);
+
+                // Update in-memory context
+                await UpdateConversationHistory(context, question, answer, relevantChunks);
 
                 stopwatch.Stop();
-                _metrics.RecordQueryProcessing(
-                    stopwatch.ElapsedMilliseconds,
-                    relevantChunks.Count,
-                    true);
+                _metrics.RecordQueryProcessing(stopwatch.ElapsedMilliseconds, relevantChunks.Count, true);
 
                 return new QueryResponse
                 {
@@ -525,7 +567,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     Confidence = confidence,
                     ProcessingTimeMs = stopwatch.ElapsedMilliseconds,
                     RelevantChunks = topChunks,
-                    SessionId = context.SessionId,
+                    SessionId = dbSession.SessionId,
                     ModelsUsed = new Dictionary<string, string>
                     {
                         ["generation"] = generationModel,
@@ -541,20 +583,197 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 throw new RAGServiceException("Failed to process query", ex);
             }
         }
-        public Task MarkAppreciatedAsync(string sessionId, string question)
+
+        private async Task<int> SaveConversationToDatabase(
+    string sessionId,
+    string question,
+    string answer,
+    List<RelevantChunk> chunks,
+    ModelConfiguration generationModel,
+    ModelConfiguration embeddingModel,
+    double confidence,
+    long processingTimeMs,
+    bool isFromCorrection,
+    int? parentId,
+    string plant)
         {
-            if (_sessionContexts.TryGetValue(sessionId, out var context))
+            try
             {
-                var turn = context.History.LastOrDefault(t => t.Question.Equals(question, StringComparison.OrdinalIgnoreCase));
-                if (turn != null)
+                var questionEmbedding = await GetEmbeddingAsync(question, embeddingModel);
+                var answerEmbedding = await GetEmbeddingAsync(answer, embeddingModel);
+
+                // Extract named entities from the answer
+                var namedEntities = await ExtractEntitiesAsync(answer);
+
+                // Determine topic tag (simple keyword-based approach)
+                var topicTag = DetermineTopicTag(question, answer);
+
+                var entry = new ConversationEntry
                 {
-                    var chunks = ConvertToRelevantChunks(context.RelevantChunks ?? new List<EmbeddingData>());
-                    _appreciatedTurns.Add((turn.Question, turn.Answer, new List<RelevantChunk>(chunks)));
-                    _logger.LogInformation($"⭐ Appreciated turn saved: {question}");
+                    SessionId = sessionId,
+                    Question = question,
+                    Answer = answer,
+                    CreatedAt = DateTime.UtcNow,
+                    QuestionEmbedding = questionEmbedding,
+                    AnswerEmbedding = answerEmbedding,
+                    NamedEntities = namedEntities,
+                    WasAppreciated = false,
+                    TopicTag = topicTag,
+                    FollowUpToId = parentId,
+                    GenerationModel = generationModel.Name,
+                    EmbeddingModel = embeddingModel.Name,
+                    Confidence = confidence,
+                    ProcessingTimeMs = processingTimeMs,
+                    RelevantChunksCount = chunks.Count,
+                    Sources = chunks.Select(c => c.Source).Distinct().ToList(),
+                    IsFromCorrection = isFromCorrection,
+                    Plant = plant
+                };
+
+                await _conversationStorage.SaveConversationAsync(entry);
+
+                _logger.LogInformation($"💾 Saved conversation {entry.Id} to database");
+                return entry.Id;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to save conversation to database");
+                return 0; // Return 0 if save fails
+            }
+        }
+
+        // 🆕 Helper method to determine topic tags
+        private string DetermineTopicTag(string question, string answer)
+        {
+            var lowerQuestion = question.ToLowerInvariant();
+            var lowerAnswer = answer.ToLowerInvariant();
+            var combinedText = $"{lowerQuestion} {lowerAnswer}";
+
+            // HR Policy topic mapping
+            var topicKeywords = new Dictionary<string, string[]>
+            {
+                ["leave_policy"] = new[] { "leave", "cl", "sl", "casual", "sick", "pto", "vacation", "holiday", "absence" },
+                ["attendance"] = new[] { "attendance", "punctuality", "working hours", "shift", "late", "early" },
+                ["payroll"] = new[] { "salary", "pay", "payroll", "bonus", "increment", "deduction", "tax" },
+                ["benefits"] = new[] { "insurance", "medical", "health", "benefits", "reimbursement", "allowance" },
+                ["performance"] = new[] { "appraisal", "performance", "review", "rating", "feedback", "kpi" },
+                ["grievance"] = new[] { "complaint", "grievance", "issue", "problem", "dispute", "conflict" },
+                ["training"] = new[] { "training", "development", "course", "certification", "skill", "learning" },
+                ["policy_general"] = new[] { "policy", "rule", "regulation", "procedure", "guideline", "compliance" }
+            };
+
+            foreach (var topic in topicKeywords)
+            {
+                if (topic.Value.Any(keyword => combinedText.Contains(keyword)))
+                {
+                    return topic.Key;
                 }
             }
-            return Task.CompletedTask;
+
+            return "general";
         }
+
+        // 🆕 Helper method to check if question is a follow-up
+        private bool IsFollowUpQuestion(string question, ConversationContext context)
+        {
+            var followUpIndicators = new[]
+            {
+        "what about", "how about", "also", "and", "additionally", "furthermore",
+        "he", "she", "it", "they", "this", "that", "same", "similar",
+        "phir", "aur", "bhi", "uske", "uska", "iske", "agar"
+    };
+
+            var lowerQuestion = question.ToLowerInvariant();
+            return followUpIndicators.Any(indicator => lowerQuestion.Contains(indicator));
+        }
+
+        public async Task MarkAppreciatedAsync(string sessionId, string question)
+        {
+            try
+            {
+                // Find the conversation in database
+                var conversations = await _conversationStorage.GetSessionConversationsAsync(sessionId);
+                var conversation = conversations.LastOrDefault(c =>
+                    c.Question.Equals(question, StringComparison.OrdinalIgnoreCase));
+
+                if (conversation != null)
+                {
+                    await _conversationStorage.MarkAsAppreciatedAsync(conversation.Id);
+                    _logger.LogInformation($"⭐ Marked conversation {conversation.Id} as appreciated in database");
+                }
+
+                // Also update in-memory cache for immediate use
+                if (_sessionContexts.TryGetValue(sessionId, out var context))
+                {
+                    var turn = context.History.LastOrDefault(t =>
+                        t.Question.Equals(question, StringComparison.OrdinalIgnoreCase));
+                    if (turn != null)
+                    {
+                        var chunks = ConvertToRelevantChunks(context.RelevantChunks ?? new List<EmbeddingData>());
+                        _appreciatedTurns.Add((turn.Question, turn.Answer, new List<RelevantChunk>(chunks)));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to mark conversation as appreciated: {question}");
+            }
+        }
+
+        // 🆕 New method to save corrections to database
+        public async Task SaveCorrectionToDatabase(string sessionId, string question, string correctedAnswer)
+        {
+            try
+            {
+                var conversations = await _conversationStorage.GetSessionConversationsAsync(sessionId);
+                var conversation = conversations.LastOrDefault(c =>
+                    c.Question.Equals(question, StringComparison.OrdinalIgnoreCase));
+
+                if (conversation != null)
+                {
+                    await _conversationStorage.SaveCorrectionAsync(conversation.Id, correctedAnswer);
+                    _logger.LogInformation($"✏️ Saved correction for conversation {conversation.Id}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to save correction: {question}");
+            }
+        }
+
+        // 🆕 New method to get conversation statistics
+        public async Task<ConversationStats> GetConversationStatsAsync()
+        {
+            return await _conversationStorage.GetConversationStatsAsync();
+        }
+
+        // 🆕 New method to get appreciated answers for learning
+        public async Task<List<ConversationEntry>> GetAppreciatedAnswersAsync(string? topicTag = null)
+        {
+            return await _conversationStorage.GetAppreciatedAnswersAsync(topicTag, limit: 100);
+        }
+
+        // 🆕 Method to initialize system with historical appreciated answers
+        public async Task LoadHistoricalAppreciatedAnswersAsync()
+        {
+            try
+            {
+                var appreciatedAnswers = await GetAppreciatedAnswersAsync();
+
+                foreach (var answer in appreciatedAnswers)
+                {
+                    var chunks = new List<RelevantChunk>(); // You might want to reconstruct these
+                    _appreciatedTurns.Add((answer.Question, answer.Answer, chunks));
+                }
+
+                _logger.LogInformation($"📚 Loaded {appreciatedAnswers.Count} historical appreciated answers");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to load historical appreciated answers");
+            }
+        }
+
 
         List<RelevantChunk> ConvertToRelevantChunks(List<EmbeddingData> data)
         {

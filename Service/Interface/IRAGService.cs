@@ -5,12 +5,14 @@ public interface IRAGService
     Task InitializeAsync();
     Task<QueryResponse> ProcessQueryAsync(
     string question,
+    string plant,
     string? generationModel = null,
     string? embeddingModel = null,
     int maxResults = 15,
     bool meaiInfo = true,
     string? sessionId = null,
-    bool useReRanking = true);
+    bool useReRanking = true
+);
 
     Task<bool> IsHealthy();
     //Task SaveCorrectionAsync(string question, string correctAnswer, string model);

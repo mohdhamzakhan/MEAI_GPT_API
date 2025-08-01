@@ -1,6 +1,8 @@
-﻿using MEAI_GPT_API.Models;
+﻿using MEAI_GPT_API.Data;
+using MEAI_GPT_API.Models;
 using MEAI_GPT_API.Service.Interface;
 using MEAI_GPT_API.Services;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.StackExchangeRedis;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -84,13 +86,15 @@ builder.Services.AddOpenTelemetry()
             .AddPrometheusExporter();
     });
 
-
+builder.Services.AddDbContext<ConversationDbContext>(options =>
+    options.UseSqlite("Data Source=conversations.db"));
 builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>();
 builder.Services.AddSingleton<ICacheManager, CacheManager>();
 builder.Services.AddSingleton<IMetricsCollector, MetricsCollector>();
 builder.Services.AddScoped<IRAGService, DynamicRagService>();
 builder.Services.Configure<DynamicRAGConfiguration>(
     builder.Configuration.GetSection("DynamicRAG"));
+builder.Services.AddScoped<IConversationStorageService, ConversationStorageService>();
 
 builder.Services.AddSingleton<Conversation>();
 builder.Services.Configure<PlantSettings>(options =>
@@ -121,11 +125,19 @@ builder.Services.Configure<ChromaDbOptions>(
 
 var app = builder.Build();
 
+// Ensure database is created
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<ConversationDbContext>();
+    context.Database.EnsureCreated();
+}
+
 using (var scope = app.Services.CreateScope())
 {
     var ragService = scope.ServiceProvider.GetRequiredService<IRAGService>();
     await ragService.InitializeAsync();
 }
+
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

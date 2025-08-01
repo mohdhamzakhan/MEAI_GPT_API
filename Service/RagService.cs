@@ -368,14 +368,15 @@ These abbreviations are standard across all MEAI HR policies and should be inter
         }
     }
 
-    public async Task<QueryResponse> ProcessQueryAsync(
-    string question,
-    string generationModel,
-    int maxResults = 15,
-    bool meaiInfo = true,
-    string? sessionId = null,
-    bool useReRanking = true,
-    string? embeddingModel = null)
+    public async Task<QueryResponse> ProcessQueryAsync(string question, 
+        string plant, 
+        string? generationModel = null, 
+        string? embeddingModel = null, 
+        int maxResults = 15, 
+        bool meaiInfo = true, 
+        string? sessionId = null, 
+        bool useReRanking = true)
+
     {
         var stopwatch = Stopwatch.StartNew();
         try
@@ -2378,4 +2379,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
     {
         throw new NotImplementedException();
     }
+
+    
 }

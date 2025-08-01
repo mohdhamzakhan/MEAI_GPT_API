@@ -70,7 +70,7 @@ ScaffoldingReadMe.txt
 StyleCopReport.xml
 
 # Database
-*.db
+*.db*
 
 # Files built by Visual Studio
 *_i.c
