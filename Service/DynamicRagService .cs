@@ -31,7 +31,7 @@ namespace MEAI_GPT_API.Services
         private readonly string _currentUser = "system";
         private bool _isInitialized = false;
         private readonly ConcurrentBag<(string Question, string Answer, List<RelevantChunk> Chunks)> _appreciatedTurns = new();
-
+        private readonly PlantSettings _plants;
         public DynamicRagService(
             IModelManager modelManager,
             DynamicCollectionManager collectionManager,
@@ -42,6 +42,7 @@ namespace MEAI_GPT_API.Services
             IDocumentProcessor documentProcessor,
             ICacheManager cacheManager,
             Conversation conversation,
+            IOptions<PlantSettings> plants,
             IMetricsCollector metrics)
         {
             _modelManager = modelManager;
@@ -55,6 +56,7 @@ namespace MEAI_GPT_API.Services
             _cacheManager = cacheManager;
             _metrics = metrics;
             _conversation = conversation;
+            _plants = plants.Value;
 
             InitializeSessionCleanup();
         }
@@ -95,7 +97,11 @@ namespace MEAI_GPT_API.Services
                 }
 
                 // Process documents for all embedding models
-                await ProcessDocumentsForAllModelsAsync(embeddingModels);
+                foreach (var plant in _plants.Plants.Keys)
+                {
+                    _logger.LogInformation($"🌱 Processing documents for plant: {plant}");
+                    await ProcessDocumentsForAllModelsAsync(embeddingModels, plant);
+                }
 
                 _isInitialized = true;
                 _logger.LogInformation("✅ Dynamic RAG system initialization completed");
@@ -170,9 +176,9 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             }
         }
 
-        private async Task ProcessDocumentsForAllModelsAsync(List<ModelConfiguration> embeddingModels)
+        private async Task ProcessDocumentsForAllModelsAsync(List<ModelConfiguration> embeddingModels, string plant)
         {
-            var policyFiles = GetPolicyFiles();
+            var policyFiles = GetPolicyFiles(plant);
             _logger.LogInformation($"📄 Processing {policyFiles.Count} files for {embeddingModels.Count} embedding models");
 
             var tasks = embeddingModels.Select(async model =>
@@ -183,7 +189,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
                 foreach (var filePath in policyFiles)
                 {
-                    await ProcessFileForModelAsync(filePath, model, collectionId);
+                    await ProcessFileForModelAsync(filePath, model, collectionId, plant);
                 }
 
                 _logger.LogInformation($"✅ Completed document processing for model: {model.Name}");
@@ -192,13 +198,13 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             await Task.WhenAll(tasks);
         }
 
-        private List<string> GetPolicyFiles()
+        private List<string> GetPolicyFiles(string plant)
         {
             var policyFiles = new List<string>();
 
             if (Directory.Exists(_chromaOptions.PolicyFolder))
             {
-                policyFiles.AddRange(Directory.GetFiles(_chromaOptions.PolicyFolder, "*.*", SearchOption.AllDirectories)
+                policyFiles.AddRange(Directory.GetFiles(Path.Combine(_chromaOptions.PolicyFolder,plant), "*.*", SearchOption.AllDirectories)
                     .Where(f => _chromaOptions.SupportedExtensions.Contains(
                         Path.GetExtension(f).ToLowerInvariant())));
             }
@@ -211,7 +217,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             return policyFiles;
         }
 
-        private async Task ProcessFileForModelAsync(string filePath, ModelConfiguration model, string collectionId)
+        private async Task ProcessFileForModelAsync(string filePath, ModelConfiguration model, string collectionId, string plant)
         {
             try
             {
@@ -228,7 +234,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 if (string.IsNullOrWhiteSpace(content)) return;
 
                 var chunks = ChunkText(content, filePath);
-                await ProcessChunkBatchForModelAsync(chunks, model, collectionId, fileInfo.LastWriteTime);
+                await ProcessChunkBatchForModelAsync(chunks, model, collectionId, fileInfo.LastWriteTime, plant);
 
                 await _cacheManager.SetAsync(cacheKey, true, TimeSpan.FromDays(30));
             }
@@ -242,7 +248,8 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             List<(string Text, string SourceFile)> chunks,
             ModelConfiguration model,
             string collectionId,
-            DateTime lastModified)
+            DateTime lastModified,
+            string plant)
         {
             try
             {
@@ -268,7 +275,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                         var chunkId = GenerateChunkId(sourceFile, cleanedText, lastModified, model.Name);
                         ids.Add(chunkId);
 
-                        var metadata = CreateChunkMetadata(sourceFile, lastModified, model.Name, cleanedText);
+                        var metadata = CreateChunkMetadata(sourceFile, lastModified, model.Name, cleanedText, plant);
                         metadatas.Add(metadata);
                     }
                     catch (Exception ex)
@@ -315,6 +322,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
                 safeOptions[kvp.Key] = value;
             }
+
             for (int attempt = 0; attempt < maxRetries; attempt++)
             {
                 try
@@ -673,28 +681,53 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             messages.Add(new
             {
                 role = "system",
-                content = ismeai ? @"You are MEAI HR Policy Assistant, an expert advisor with comprehensive knowledge of company policies.
+                content = ismeai ?
+@"🧠 You are MEAI HR Policy Assistant — an expert advisor with deep knowledge of MEAI company HR policies.
 
-🔑 CRITICAL ABBREVIATION DEFINITIONS (NEVER DEVIATE):
-• CL = Casual Leave (NEVER 'Continuous Learning')
-• SL = Sick Leave  
+🔑 DEFINITIONS — NEVER REINTERPRET:
+• CL = Casual Leave (**never** 'Continuous Learning')
+• SL = Sick Leave
 • COFF = Compensatory Off
 • EL = Earned Leave
-• PL = Privilege Leave  
+• PL = Privilege Leave
 • ML = Maternity Leave
 
-📋 RESPONSE REQUIREMENTS:
-1. Use ALL relevant information from provided policy excerpts
-2. Structure answers with clear headings and bullet points
-3. Include specific procedures, timelines, and requirements
-4. Cite policy sources in [brackets] after each point
-5. If information is partial, state what's available and suggest HR contact for details
-6. Be comprehensive - don't withhold relevant information from the context
-7. Use professional, helpful tone
+📋 HOW TO STRUCTURE YOUR RESPONSE:
+1. Use **all** relevant information from the provided policy excerpts.
+2. Organize the answer with:
+   - ✅ Clear headings  
+   - 🔹 Bullet points  
+   - 🕒 Timelines, procedures, and requirements
+3. After each fact, **cite the source** clearly in brackets: `[DocumentName]`
+4. If the information is **partial or missing**:
+   - State what's available.
+   - Recommend contacting HR for clarification.
+5. Be **comprehensive** — do not ignore useful context.
+6. Use a **professional, concise, and helpful tone**.
 
-⚠️ IMPORTANT: The policy excerpts provided contain official information. Use them fully to provide complete, accurate answers." :
-                @"You are a helpful assistant. Use only the provided context to answer questions accurately and completely."
+⚠️ IMPORTANT:
+You must base your answers **only** on the provided official policy content. Do not assume, hallucinate, or fabricate information."
+
+:
+@"You are an intelligent assistant designed to provide accurate, complete, and helpful responses.
+
+📌 INSTRUCTIONS:
+1. Use only the context provided — do not assume or guess beyond it.
+2. Focus on clarity and relevance in your answers.
+3. If the context is missing something:
+   - State clearly what is not available.
+   - Avoid fabrication or speculation.
+4. Structure responses where possible:
+   - Headings for sections
+   - Bullet points for clarity
+   - Examples if appropriate
+5. Maintain a neutral, professional, and informative tone.
+
+⚠️ IMPORTANT:
+Do not introduce external information or opinions. Stay strictly within the context provided."
             });
+
+
 
             // Add recent conversation history
             foreach (var turn in history.TakeLast(8))
@@ -870,7 +903,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
         }
 
         // Additional helper methods...
-        private Dictionary<string, object> CreateChunkMetadata(string sourceFile, DateTime lastModified, string modelName, string text)
+        private Dictionary<string, object> CreateChunkMetadata(string sourceFile, DateTime lastModified, string modelName, string text, string plant)
         {
             var metadata = new Dictionary<string, object>
             {
@@ -879,7 +912,8 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 { "model", modelName },
                 { "chunk_size", text.Length },
                 { "processed_at", DateTime.UtcNow.ToString("O") },
-                { "processed_by", _currentUser }
+                { "processed_by", _currentUser },
+                { "plant", plant }
             };
 
             if (sourceFile.Contains("abbreviation") || sourceFile.Contains("context"))

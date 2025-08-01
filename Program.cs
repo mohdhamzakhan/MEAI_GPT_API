@@ -93,6 +93,11 @@ builder.Services.Configure<DynamicRAGConfiguration>(
     builder.Configuration.GetSection("DynamicRAG"));
 
 builder.Services.AddSingleton<Conversation>();
+builder.Services.Configure<PlantSettings>(options =>
+{
+    options.Plants = builder.Configuration.GetSection("Plant").Get<Dictionary<string, string>>()!;
+});
+
 builder.Services.AddScoped<IModelManager>(provider =>
 {
     var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();

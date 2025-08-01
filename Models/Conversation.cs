@@ -32,7 +32,8 @@ namespace MEAI_GPT_API.Models
             public List<ConversationTurn> History { get; set; } = new();
             public List<string> NamedEntities { get; set; } = new(); // NEW
             public DateTime LastAccessed { get; set; }
-            public string SessionId { get; set; } = string.Empty;
+            public string SessionId { get; set; } = Guid.NewGuid().ToString();
+            public string Plant { get; set; } = "Centralized";
             public DateTime CreatedAt { get; set; } = DateTime.Now;
             public string LastTopicAnchor { get; set; } = ""; // 🆕 track root of current topic
         }
