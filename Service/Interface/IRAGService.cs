@@ -24,4 +24,5 @@ public interface IRAGService
 
     Task<List<ModelConfiguration>> GetAvailableModelsAsync();
     Task MarkAppreciatedAsync(string sessionId, string question);
+    Task ApplyCorrectionAsync(string sessionId,string question, string correctedAnswer, string model);
 }

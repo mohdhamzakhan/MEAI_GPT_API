@@ -2,10 +2,12 @@
 using DocumentFormat.OpenXml.InkML;
 using MEAI_GPT_API.Models;
 using MEAI_GPT_API.Service.Interface;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualBasic;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using static MEAI_GPT_API.Models.Conversation;
@@ -25,12 +27,13 @@ namespace MEAI_GPT_API.Services
         private readonly ICacheManager _cacheManager;
         private readonly IMetricsCollector _metrics;
         private readonly Conversation _conversation;
-        private readonly ConcurrentDictionary<string, ConversationContext> _sessionContexts = new();
-        private readonly ConcurrentBag<CorrectionEntry> _correctionsCache = new();
+        private static readonly ConcurrentDictionary<string, ConversationContext> _sessionContexts = new();
+        private static readonly ConcurrentBag<CorrectionEntry> _correctionsCache = new();
         private readonly object _lockObject = new();
         private readonly string _currentUser = "system";
         private bool _isInitialized = false;
-        private readonly ConcurrentBag<(string Question, string Answer, List<RelevantChunk> Chunks)> _appreciatedTurns = new();
+        private readonly object _lock = new();
+        private static readonly ConcurrentBag<(string Question, string Answer, List<RelevantChunk> Chunks)> _appreciatedTurns = new();
         private readonly PlantSettings _plants;
         private readonly IConversationStorageService _conversationStorage;
         public DynamicRagService(
@@ -68,10 +71,15 @@ namespace MEAI_GPT_API.Services
         public async Task InitializeAsync()
         {
             if (_isInitialized) return;
-
+            lock (_lock)
+            {
+                if (_isInitialized) return;
+                _isInitialized = true;
+            }
             try
             {
                 _logger.LogInformation("🚀 Starting dynamic RAG system initialization");
+
 
                 // Ensure directories exist
                 EnsureDirectoriesExist();
@@ -109,6 +117,7 @@ namespace MEAI_GPT_API.Services
 
                 // 🆕 Load historical appreciated answers
                 await LoadHistoricalAppreciatedAnswersAsync();
+                await LoadCorrectionCacheAsync();
 
                 _isInitialized = true;
                 _logger.LogInformation("✅ Dynamic RAG system initialization completed");
@@ -134,6 +143,7 @@ namespace MEAI_GPT_API.Services
                 _logger.LogInformation($"Created context folder: {_chromaOptions.ContextFolder}");
             }
         }
+
 
         private void EnsureAbbreviationContext()
         {
@@ -211,7 +221,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
             if (Directory.Exists(_chromaOptions.PolicyFolder))
             {
-                policyFiles.AddRange(Directory.GetFiles(Path.Combine(_chromaOptions.PolicyFolder,plant), "*.*", SearchOption.AllDirectories)
+                policyFiles.AddRange(Directory.GetFiles(Path.Combine(_chromaOptions.PolicyFolder, plant), "*.*", SearchOption.AllDirectories)
                     .Where(f => _chromaOptions.SupportedExtensions.Contains(
                         Path.GetExtension(f).ToLowerInvariant())));
             }
@@ -419,7 +429,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 // 🆕 Check for similar conversations in database first
                 var questionEmbedding = await GetEmbeddingAsync(question, embModel);
                 var similarConversations = await _conversationStorage.SearchSimilarConversationsAsync(
-                    questionEmbedding,plant, threshold: 0.8, limit: 3);
+                    questionEmbedding, plant, threshold: 0.8, limit: 3);
 
                 if (similarConversations.Any())
                 {
@@ -433,7 +443,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                             dbSession.SessionId, question, bestMatch.Entry.Answer,
                             new List<RelevantChunk>(), genModel, embModel,
                             bestMatch.Similarity, stopwatch.ElapsedMilliseconds,
-                            isFromCorrection: false, parentId: null, plant:plant);
+                            isFromCorrection: false, parentId: null, plant: plant);
 
                         return new QueryResponse
                         {
@@ -455,21 +465,33 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
                 // Check corrections (existing logic)
                 var correction = await CheckCorrectionsAsync(question);
+
                 if (correction != null)
                 {
                     _logger.LogInformation($"🎯 Using correction for question: {question}");
 
+                    string finalAnswer = correction.Answer;
+
+                    try
+                    {
+                        finalAnswer = await RephraseWithLLMAsync(correction.Answer, generationModel);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to rephrase correction — using raw answer.");
+                    }
+
                     await SaveConversationToDatabase(
-                        dbSession.SessionId, question, correction.Answer,
+                        dbSession.SessionId, question, finalAnswer,
                         new List<RelevantChunk>(), genModel, embModel,
                         1.0, stopwatch.ElapsedMilliseconds,
-                        isFromCorrection: true, parentId: null,plant:plant);
+                        isFromCorrection: true, parentId: null, plant: plant);
 
                     stopwatch.Stop();
 
                     return new QueryResponse
                     {
-                        Answer = correction.Answer,
+                        Answer = finalAnswer,
                         IsFromCorrection = true,
                         Sources = new List<string> { "User Correction" },
                         Confidence = 1.0,
@@ -483,6 +505,39 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                         }
                     };
                 }
+
+                // ⬇️ Insert the appreciated answer check here:
+                var appreciated = await CheckAppreciatedAnswerAsync(question);
+                if (appreciated != null)
+                {
+                    _logger.LogInformation("✨ Using appreciated answer match for question.");
+                    string finalAnswer = appreciated.Value.Answer;
+                    try
+                    {
+                        finalAnswer = await RephraseWithLLMAsync(appreciated.Value.Answer, generationModel);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to rephrase correction — using raw answer.");
+                    }
+
+                    return new QueryResponse
+                    {
+                        Answer = finalAnswer,
+                        IsFromCorrection = false,
+                        Sources = new List<string> { "Appreciated Answer" },
+                        Confidence = 0.95,
+                        ProcessingTimeMs = stopwatch.ElapsedMilliseconds,
+                        SessionId = dbSession.SessionId,
+                        RelevantChunks = new List<RelevantChunk>(),
+                        ModelsUsed = new Dictionary<string, string>
+                        {
+                            ["generation"] = generationModel,
+                            ["embedding"] = embeddingModel
+                        }
+                    };
+                }
+
 
                 // Check topic change and context
                 if (IsTopicChanged(question, context))
@@ -583,6 +638,64 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 throw new RAGServiceException("Failed to process query", ex);
             }
         }
+        
+
+        private async Task<string> RephraseWithLLMAsync(string originalAnswer, string modelName)
+        {
+            var systemPrompt = "You are a professional assistant. Rephrase the following content to make it sound polished, concise, and formal.";
+            var userMessage = $"Rephrase this:\n\n\"{originalAnswer}\"";
+
+            var messages = new[]
+            {
+        new { role = "system", content = systemPrompt },
+        new { role = "user", content = userMessage }
+    };
+
+            var payload = new
+            {
+                model = modelName,
+                messages = messages,
+                stream = true, // Enable streaming
+                temperature = 0.2
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/chat") // Adjust path as needed
+            {
+                Content = JsonContent.Create(payload)
+            };
+
+            var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+
+            response.EnsureSuccessStatusCode();
+
+            var stream = await response.Content.ReadAsStreamAsync();
+            using var reader = new StreamReader(stream);
+
+            var finalContent = new StringBuilder();
+
+            while (!reader.EndOfStream)
+            {
+                var line = await reader.ReadLineAsync();
+                if (string.IsNullOrWhiteSpace(line)) continue;
+
+                try
+                {
+                    var json = JsonDocument.Parse(line);
+                    if (json.RootElement.TryGetProperty("message", out var msgElem) &&
+                        msgElem.TryGetProperty("content", out var contentElem))
+                    {
+                        finalContent.Append(contentElem.GetString());
+                    }
+                }
+                catch
+                {
+                    // ignore bad JSON or keep logging
+                }
+            }
+
+            return finalContent.ToString();
+        }
+
 
         private async Task<int> SaveConversationToDatabase(
     string sessionId,
@@ -686,6 +799,51 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             var lowerQuestion = question.ToLowerInvariant();
             return followUpIndicators.Any(indicator => lowerQuestion.Contains(indicator));
         }
+        public async Task ApplyCorrectionAsync(string sessionId, string question, string correctedAnswer, string model)
+        {
+            try
+            {
+                // Find the conversation in database
+                var conversations = await _conversationStorage.GetSessionConversationsAsync(sessionId);
+                var conversation = conversations.LastOrDefault(c =>
+                    c.Question.Equals(question, StringComparison.OrdinalIgnoreCase));
+
+                if (conversation != null)
+                {
+                    await _conversationStorage.SaveCorrectionAsync(conversation.Id, correctedAnswer);
+                    _logger.LogInformation($"✏️ Saved correction for conversation {conversation.Id} in database");
+                }
+
+                if (_sessionContexts.TryGetValue(sessionId, out var context))
+                {
+                    var turn = context.History.LastOrDefault(t =>
+                        t.Question.Equals(question, StringComparison.OrdinalIgnoreCase));
+                    if (turn != null)
+                    {
+                        var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
+                        var inputEmbedding = await GetEmbeddingAsync(question, embeddingModel);
+                        CorrectionEntry cr = new CorrectionEntry
+                        {
+                            Question = turn.Question,
+                            Answer = correctedAnswer,
+                            Model = model,
+                            Date = DateTime.Now,
+                            Embedding = inputEmbedding,
+                            Id =sessionId 
+                        };
+                        _correctionsCache.Add(cr);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to apply correction: {question}");
+            }
+            finally
+            {
+                await LoadCorrectionCacheAsync();
+            }
+        }
 
         public async Task MarkAppreciatedAsync(string sessionId, string question)
         {
@@ -717,6 +875,10 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Failed to mark conversation as appreciated: {question}");
+            }
+            finally
+            {
+                await LoadHistoricalAppreciatedAnswersAsync();
             }
         }
 
@@ -771,6 +933,51 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to load historical appreciated answers");
+            }
+        }
+
+        private async Task LoadCorrectionCacheAsync()
+        {
+            try
+            {
+                var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
+                var correctedEntries = await _conversationStorage.GetCorrectedConversationsAsync();
+
+                lock (_lockObject)
+                {
+                    var newBag = new ConcurrentBag<CorrectionEntry>();
+
+                    foreach (var entry in correctedEntries
+                        .Where(c => !string.IsNullOrEmpty(c.QuestionEmbeddingJson))
+                        .Select(c => new CorrectionEntry
+                        {
+                            Id = c.Id.ToString(),
+                            Question = c.Question,
+                            Answer = c.CorrectedAnswer!,
+                            Embedding = c.QuestionEmbedding,
+                            Model = c.GenerationModel,
+                            Date = c.CreatedAt
+                        }))
+                    {
+                        newBag.Add(entry);
+                    }
+
+                    // Instead of assigning (if _correctionsCache is readonly)
+                    while (_correctionsCache.TryTake(out _)) ; // empty the original
+
+                    foreach (var item in newBag)
+                    {
+                        _correctionsCache.Add(item); // repopulate it
+                    }
+                }
+
+
+
+                _logger.LogInformation($"✅ Loaded {_correctionsCache.Count} corrections into cache");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Failed to load corrections into cache");
             }
         }
 
@@ -1202,7 +1409,7 @@ Do not introduce external information or opinions. Stay strictly within the cont
         {
             var cleaned = System.Text.RegularExpressions.Regex.Replace(
                 response,
-                "","",
+                "", "",
                 System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase
             );
 
@@ -1243,7 +1450,7 @@ Do not introduce external information or opinions. Stay strictly within the cont
             }
         }
 
-       
+
 
         // Implement other required methods from IRAGService
         private bool IsHistoryClearRequest(string question)
@@ -1388,28 +1595,28 @@ Do not introduce external information or opinions. Stay strictly within the cont
     "bol rahe the",
     "jis baat ki",
     "fir batao",
-    "agar aisa ho",      
-    "agar main",          
-    "agar mein",          
-    "agar usne",          
-    "agar uska",          
-    "agar uski",          
-    "agar mujhe",         
-    "agar kisi ne",       
-    "agar me",            
-    "agar hum",           
-    "agar vo",            
-    "agar mai",           
-    "agar kuch",          
-    "agar kal",           
-    "agar mujhe chhutti", 
-    "agar leave chahiye", 
-    "agar me chala jau",  
-    "agar combine karu", 
-    "agar CL lo",         
+    "agar aisa ho",
+    "agar main",
+    "agar mein",
+    "agar usne",
+    "agar uska",
+    "agar uski",
+    "agar mujhe",
+    "agar kisi ne",
+    "agar me",
+    "agar hum",
+    "agar vo",
+    "agar mai",
+    "agar kuch",
+    "agar kal",
+    "agar mujhe chhutti",
+    "agar leave chahiye",
+    "agar me chala jau",
+    "agar combine karu",
+    "agar CL lo",
     "agar sick leave",
     "agar SL lo",
-    "agar allowed hai",   
+    "agar allowed hai",
 };
 
 
@@ -1642,7 +1849,7 @@ Do not introduce external information or opinions. Stay strictly within the cont
                 }
 
                 context.LastAccessed = DateTime.Now;
-                
+
                 var extracted = await ExtractEntitiesAsync(answer);
                 foreach (var entity in extracted)
                 {
@@ -1664,24 +1871,106 @@ Do not introduce external information or opinions. Stay strictly within the cont
                 var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
                 var inputEmbedding = await GetEmbeddingAsync(question, embeddingModel);
 
+                if (inputEmbedding == null || inputEmbedding.Count == 0)
+                    return null;
+
+                List<(CorrectionEntry Entry, double Similarity)> matches;
+
                 lock (_lockObject)
                 {
-                    return _correctionsCache
-                        .Select(c => new
-                        {
-                            Entry = c,
-                            Similarity = CosineSimilarity(inputEmbedding, c.Embedding)
-                        })
+                    matches = _correctionsCache
+                        .Where(c => c.Embedding != null && c.Embedding.Count == inputEmbedding.Count)
+                        .Select(c => (
+                            Entry: c,
+                            Similarity: CosineSimilarity(inputEmbedding, c.Embedding)
+                        ))
+                        .Where(x => x.Similarity >= 0.75) // 🔧 You can adjust this
                         .OrderByDescending(x => x.Similarity)
-                        .FirstOrDefault(x => x.Similarity >= 0.8)  // You can tune this threshold
-                        ?.Entry;
+                        .ToList();
                 }
+
+                if (matches.Any())
+                {
+                    _logger.LogInformation($"Correction match found: \"{matches.First().Entry.Question}\" with similarity {matches.First().Similarity:F2}");
+                    return matches.First().Entry;
+                }
+
+                return null;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to check semantic correction match");
+                _logger.LogError(ex, "Failed to check correction match");
                 return null;
             }
+        }
+
+        private async Task<(string Answer, List<RelevantChunk> Chunks)?> CheckAppreciatedAnswerAsync(string question)
+        {
+            try
+            {
+                var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
+                var inputEmbedding = await GetEmbeddingAsync(question, embeddingModel);
+                if (inputEmbedding == null || inputEmbedding.Count == 0)
+                    return null;
+
+                var matches = _appreciatedTurns
+                    .Select(entry => new
+                    {
+                        entry.Answer,
+                        entry.Chunks,
+                        Similarity = CosineSimilarity(inputEmbedding, GetEmbeddingAsync(entry.Question, embeddingModel).Result)
+                    })
+                    .Where(x => x.Similarity >= 0.8) // Threshold can be tuned
+                    .OrderByDescending(x => x.Similarity)
+                    .ToList();
+
+                if (matches.Any())
+                {
+                    var best = matches.First();
+                    _logger.LogInformation($"✅ Appreciated answer match found for \"{question}\" with similarity {best.Similarity:F2}");
+                    return (best.Answer, best.Chunks);
+                }
+
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to check appreciated match");
+                return null;
+            }
+        }
+
+
+        private TEntry? FindBestSemanticMatch<TEntry>(
+    List<TEntry> entries,
+    List<float> inputEmbedding,
+    Func<TEntry, List<float>> embeddingSelector,
+    double threshold,
+    out double similarity)
+        {
+            similarity = 0;
+
+            if (inputEmbedding == null || inputEmbedding.Count == 0)
+                return default;
+
+            var matches = entries
+                .Where(e => embeddingSelector(e) is List<float> emb && emb.Count == inputEmbedding.Count)
+                .Select(e => new
+                {
+                    Entry = e,
+                    Similarity = CosineSimilarity(inputEmbedding, embeddingSelector(e))
+                })
+                .Where(x => x.Similarity >= threshold)
+                .OrderByDescending(x => x.Similarity)
+                .ToList();
+
+            if (matches.Any())
+            {
+                similarity = matches.First().Similarity;
+                return matches.First().Entry;
+            }
+
+            return default;
         }
 
 
@@ -1785,9 +2074,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
             throw new NotImplementedException();
         }
 
-        public Task<QueryResponse> ProcessQueryAsync(string question, string generationModel, int maxResults = 10, bool meaiInfo = true, string? sessionId = null, bool useReRanking = true, string? embeddingModel = null)
-        {
-            throw new NotImplementedException();
-        }
+       
     }
 }

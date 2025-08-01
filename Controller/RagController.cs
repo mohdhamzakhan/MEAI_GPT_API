@@ -89,7 +89,7 @@ namespace MEAI_GPT_API.Controller
 
             try
             {
-               //await _ragService.SaveCorrectionAsync(request.Question, request.CorrectAnswer, request.model);
+               await _ragService.ApplyCorrectionAsync(request.sessionId, request.Question, request.CorrectAnswer, request.model);
                 return Ok(new { message = "Feedback saved successfully" });
             }
             catch (Exception ex)

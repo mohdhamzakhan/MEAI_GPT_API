@@ -2380,5 +2380,8 @@ These abbreviations are standard across all MEAI HR policies and should be inter
         throw new NotImplementedException();
     }
 
-    
+    public Task ApplyCorrectionAsync(string sessionId, string question, string correctedAnswer, string model)
+    {
+        throw new NotImplementedException();
+    }
 }

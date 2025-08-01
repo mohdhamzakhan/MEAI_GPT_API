@@ -16,7 +16,9 @@ namespace MEAI_GPT_API.Service.Interface
         Task<ConversationStats> GetConversationStatsAsync();
         Task CleanupOldSessionsAsync(TimeSpan maxAge);
         Task<List<ConversationEntry>> GetFollowUpChainAsync(int parentId);
+        Task<List<ConversationEntry>> GetCorrectedConversationsAsync();
         Task AssignTopicTagAsync(int conversationId, string topicTag);
         Task<Dictionary<string, List<ConversationEntry>>> GroupConversationsByTopicAsync(string sessionId);
+        Task<ConversationEntry?> TryGetAppreciatedMatchAsync(List<float> inputEmbedding);
     }
 }

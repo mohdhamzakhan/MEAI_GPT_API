@@ -207,6 +207,23 @@ namespace MEAI_GPT_API.Services
                 .ToListAsync();
         }
 
+        public async Task<ConversationEntry?> TryGetAppreciatedMatchAsync(List<float> inputEmbedding)
+        {
+            var appreciatedAnswers = await GetAppreciatedAnswersAsync(); // Uses your existing method
+
+            return appreciatedAnswers
+                .Where(c => c.QuestionEmbedding?.Count > 0)
+                .Select(c => new
+                {
+                    Entry = c,
+                    Similarity = CosineSimilarity(inputEmbedding, c.QuestionEmbedding)
+                })
+                .OrderByDescending(x => x.Similarity)
+                .FirstOrDefault(x => x.Similarity >= 0.85) // Adjust as needed
+                ?.Entry;
+        }
+
+
         public async Task<ConversationStats> GetConversationStatsAsync()
         {
             var totalConversations = await _context.ConversationEntries.CountAsync();
@@ -293,6 +310,14 @@ namespace MEAI_GPT_API.Services
                 .GroupBy(c => c.TopicTag!)
                 .ToDictionary(g => g.Key, g => g.ToList());
         }
+
+        public async Task<List<ConversationEntry>> GetCorrectedConversationsAsync()
+        {
+            return await _context.ConversationEntries
+                .Where(c => c.CorrectedAnswer != null && c.QuestionEmbeddingJson != "")
+                .ToListAsync();
+        }
+
 
         private double CosineSimilarity(List<float> a, List<float> b)
         {
