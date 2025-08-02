@@ -128,7 +128,6 @@ namespace MEAI_GPT_API.Services
                 throw;
             }
         }
-
         private void EnsureDirectoriesExist()
         {
             if (!Directory.Exists(_chromaOptions.PolicyFolder))
@@ -143,8 +142,6 @@ namespace MEAI_GPT_API.Services
                 _logger.LogInformation($"Created context folder: {_chromaOptions.ContextFolder}");
             }
         }
-
-
         private void EnsureAbbreviationContext()
         {
             var abbreviationsPath = Path.Combine(_chromaOptions.ContextFolder, "abbreviations.txt");
@@ -165,7 +162,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 _logger.LogInformation("Created abbreviations context file");
             }
         }
-
         private async Task ConfigureDefaultModelsAsync(List<ModelConfiguration> availableModels)
         {
             if (string.IsNullOrEmpty(_config.DefaultEmbeddingModel))
@@ -192,7 +188,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 }
             }
         }
-
         private async Task ProcessDocumentsForAllModelsAsync(List<ModelConfiguration> embeddingModels, string plant)
         {
             var policyFiles = GetPolicyFiles(plant);
@@ -214,14 +209,14 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
             await Task.WhenAll(tasks);
         }
-
         private List<string> GetPolicyFiles(string plant)
         {
             var policyFiles = new List<string>();
 
-            if (Directory.Exists(_chromaOptions.PolicyFolder))
+            if (Directory.Exists(Path.Combine(_chromaOptions.PolicyFolder, plant)))
             {
-                policyFiles.AddRange(Directory.GetFiles(Path.Combine(_chromaOptions.PolicyFolder, plant), "*.*", SearchOption.AllDirectories)
+                string path = Path.Combine(_chromaOptions.PolicyFolder, plant);
+                policyFiles.AddRange(Directory.GetFiles(path, "*.*", SearchOption.AllDirectories)
                     .Where(f => _chromaOptions.SupportedExtensions.Contains(
                         Path.GetExtension(f).ToLowerInvariant())));
             }
@@ -233,7 +228,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
             return policyFiles;
         }
-
         private async Task ProcessFileForModelAsync(string filePath, ModelConfiguration model, string collectionId, string plant)
         {
             try
@@ -260,144 +254,147 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 _logger.LogError(ex, $"Failed to process file {filePath} for model {model.Name}");
             }
         }
+        //private async Task ProcessChunkBatchForModelAsync(
+        //    List<(string Text, string SourceFile)> chunks,
+        //    ModelConfiguration model,
+        //    string collectionId,
+        //    DateTime lastModified,
+        //    string plant)
+        //{
+        //    try
+        //    {
+        //        var embeddings = new List<List<float>>();
+        //        var documents = new List<string>();
+        //        var metadatas = new List<Dictionary<string, object>>();
+        //        var ids = new List<string>();
 
-        private async Task ProcessChunkBatchForModelAsync(
-            List<(string Text, string SourceFile)> chunks,
-            ModelConfiguration model,
-            string collectionId,
-            DateTime lastModified,
-            string plant)
-        {
-            try
-            {
-                var embeddings = new List<List<float>>();
-                var documents = new List<string>();
-                var metadatas = new List<Dictionary<string, object>>();
-                var ids = new List<string>();
+        //        foreach (var (text, sourceFile) in chunks)
+        //        {
+        //            if (string.IsNullOrWhiteSpace(text)) continue;
 
-                foreach (var (text, sourceFile) in chunks)
-                {
-                    if (string.IsNullOrWhiteSpace(text)) continue;
+        //            try
+        //            {
+        //                var cleanedText = CleanText(text);
+        //                var embedding = await GetEmbeddingAsync(cleanedText, model);
 
-                    try
-                    {
-                        var cleanedText = CleanText(text);
-                        var embedding = await GetEmbeddingAsync(cleanedText, model);
+        //                if (embedding.Count == 0) continue;
 
-                        if (embedding.Count == 0) continue;
+        //                embeddings.Add(embedding);
+        //                documents.Add(cleanedText);
 
-                        embeddings.Add(embedding);
-                        documents.Add(cleanedText);
+        //                var chunkId = GenerateChunkId(sourceFile, cleanedText, lastModified, model.Name);
+        //                ids.Add(chunkId);
 
-                        var chunkId = GenerateChunkId(sourceFile, cleanedText, lastModified, model.Name);
-                        ids.Add(chunkId);
+        //                var metadata = CreateChunkMetadata(sourceFile, lastModified, model.Name, cleanedText, plant);
+        //                metadatas.Add(metadata);
+        //            }
+        //            catch (Exception ex)
+        //            {
+        //                _logger.LogError(ex, $"Failed to process chunk from {sourceFile} for model {model.Name}");
+        //            }
+        //        }
 
-                        var metadata = CreateChunkMetadata(sourceFile, lastModified, model.Name, cleanedText, plant);
-                        metadatas.Add(metadata);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, $"Failed to process chunk from {sourceFile} for model {model.Name}");
-                    }
-                }
-
-                if (embeddings.Any())
-                {
-                    await AddToChromaDBAsync(collectionId, ids, embeddings, documents, metadatas);
-                    _logger.LogInformation($"✅ Added {embeddings.Count} chunks for model {model.Name}");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Failed to process chunk batch for model {model.Name}");
-            }
-        }
-
+        //        if (embeddings.Any())
+        //        {
+        //            await AddToChromaDBAsync(collectionId, ids, embeddings, documents, metadatas);
+        //            _logger.LogInformation($"✅ Added {embeddings.Count} chunks for model {model.Name}");
+        //        }
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        _logger.LogError(ex, $"Failed to process chunk batch for model {model.Name}");
+        //    }
+        //}
         // Updated embedding generation with dynamic model support
-        private async Task<List<float>> GetEmbeddingAsync(string text, ModelConfiguration model)
-        {
-            if (string.IsNullOrWhiteSpace(text))
-                throw new ArgumentException("Text cannot be empty");
+        //private async Task<List<float>> GetEmbeddingAsync(string text, ModelConfiguration model)
+        //{
+        //    if (string.IsNullOrWhiteSpace(text))
+        //        throw new ArgumentException("Text cannot be empty");
 
-            // Dynamic text truncation based on model's context length
-            var maxLength = model.MaxContextLength * 3; // Approximate char to token ratio
-            if (text.Length > maxLength)
-                text = text.Substring(0, maxLength);
+        //    // Dynamic text truncation based on model's context length
+        //    var maxLength = model.MaxContextLength * 3; // Approximate char to token ratio
+        //    if (text.Length > maxLength)
+        //        text = text.Substring(0, maxLength);
 
-            const int maxRetries = 3;
-            var safeOptions = new Dictionary<string, object>();
-            foreach (var kvp in model.ModelOptions)
-            {
-                object value = kvp.Value;
+        //    const int maxRetries = 3;
+        //    var safeOptions = new Dictionary<string, object>();
+        //    foreach (var kvp in model.ModelOptions)
+        //    {
+        //        object value = kvp.Value;
 
-                if (kvp.Key == "num_ctx" && value is String d)
-                    value = int.Parse(d);
-                else if (kvp.Key == "top_p" && value is string e)
-                    value = float.Parse(e);
-                else if (kvp.Key == "temperature" && value is string f)
-                    value = float.Parse(f);
+        //        if (kvp.Key == "num_ctx" && value is String d)
+        //            value = int.Parse(d);
+        //        else if (kvp.Key == "top_p" && value is string e)
+        //            value = float.Parse(e);
+        //        else if (kvp.Key == "temperature" && value is string f)
+        //            value = float.Parse(f);
 
-                safeOptions[kvp.Key] = value;
-            }
+        //        safeOptions[kvp.Key] = value;
+        //    }
 
-            for (int attempt = 0; attempt < maxRetries; attempt++)
-            {
-                try
-                {
-                    var request = new
-                    {
-                        model = model.Name, // Dynamic model name!
-                        prompt = text,
-                        options = safeOptions // Dynamic model options!
-                    };
+        //    for (int attempt = 0; attempt < maxRetries; attempt++)
+        //    {
+        //        try
+        //        {
+        //            var request = new
+        //            {
+        //                model = model.Name, // Dynamic model name!
+        //                prompt = text,
+        //                options = safeOptions // Dynamic model options!
+        //            };
 
-                    var response = await _httpClient.PostAsJsonAsync("/api/embeddings", request);
-                    response.EnsureSuccessStatusCode();
+        //            var response = await _httpClient.PostAsJsonAsync("/api/embeddings", request);
+        //            response.EnsureSuccessStatusCode();
 
-                    var json = await response.Content.ReadAsStringAsync();
-                    using var doc = JsonDocument.Parse(json);
+        //            var json = await response.Content.ReadAsStringAsync();
+        //            using var doc = JsonDocument.Parse(json);
 
-                    if (doc.RootElement.TryGetProperty("embedding", out var embeddingProperty))
-                    {
-                        var embedding = embeddingProperty.EnumerateArray().Select(x => x.GetSingle()).ToList();
+        //            if (doc.RootElement.TryGetProperty("embedding", out var embeddingProperty))
+        //            {
+        //                var embedding = embeddingProperty.EnumerateArray().Select(x => x.GetSingle()).ToList();
 
-                        // Validate embedding dimension matches model configuration
-                        if (embedding.Count != model.EmbeddingDimension)
-                        {
-                            _logger.LogWarning($"Embedding dimension mismatch for {model.Name}. Expected: {model.EmbeddingDimension}, Got: {embedding.Count}");
-                        }
+        //                // Validate embedding dimension matches model configuration
+        //                if (embedding.Count != model.EmbeddingDimension)
+        //                {
+        //                    _logger.LogWarning($"Embedding dimension mismatch for {model.Name}. Expected: {model.EmbeddingDimension}, Got: {embedding.Count}");
+        //                }
 
-                        return embedding;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning($"Embedding attempt {attempt + 1} failed for model {model.Name}: {ex.Message}");
-                    if (attempt == maxRetries - 1)
-                        throw;
-                    await Task.Delay(2000 * (attempt + 1));
-                }
-            }
+        //                return embedding;
+        //            }
+        //        }
+        //        catch (Exception ex)
+        //        {
+        //            _logger.LogWarning($"Embedding attempt {attempt + 1} failed for model {model.Name}: {ex.Message}");
+        //            if (attempt == maxRetries - 1)
+        //                throw;
+        //            await Task.Delay(2000 * (attempt + 1));
+        //        }
+        //    }
 
-            throw new Exception($"Failed to generate embedding with model {model.Name} after all retries");
-        }
-
+        //    throw new Exception($"Failed to generate embedding with model {model.Name} after all retries");
+        //}
         // Updated query processing with dynamic model selection
+        // UPDATE the ProcessQueryAsync method - Add early return for meaiInfo = false
         public async Task<QueryResponse> ProcessQueryAsync(
-    string question,
-        string plant,
-    string? generationModel = null,
-    string? embeddingModel = null,
-    int maxResults = 15,
-    bool meaiInfo = true,
-    string? sessionId = null,
-    bool useReRanking = true
-)
+            string question,
+            string plant,
+            string? generationModel = null,
+            string? embeddingModel = null,
+            int maxResults = 15,
+            bool meaiInfo = true,
+            string? sessionId = null,
+            bool useReRanking = true)
         {
             var stopwatch = Stopwatch.StartNew();
             try
             {
-                // Use provided models or defaults
+                // 🚀 FAST PATH: If meaiInfo is false, skip ALL embedding operations
+                if (!meaiInfo)
+                {
+                    return await ProcessNonMeaiQueryFast(question, sessionId, generationModel, stopwatch);
+                }
+
+                // Use provided models or defaults (ONLY when meaiInfo = true)
                 generationModel ??= _config.DefaultGenerationModel;
                 embeddingModel ??= _config.DefaultEmbeddingModel;
 
@@ -419,14 +416,14 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
                 var context = _conversation.GetOrCreateConversationContext(dbSession.SessionId);
 
-                _logger.LogInformation($"Processing query with models - Gen: {generationModel}, Emb: {embeddingModel}");
+                _logger.LogInformation($"Processing MEAI query with models - Gen: {generationModel}, Emb: {embeddingModel}");
 
                 if (IsHistoryClearRequest(question))
                 {
                     return await HandleHistoryClearRequest(context, dbSession.SessionId);
                 }
 
-                // 🆕 Check for similar conversations in database first
+                // 🆕 Check for similar conversations in database first (ONLY for MEAI queries)
                 var questionEmbedding = await GetEmbeddingAsync(question, embModel);
                 var similarConversations = await _conversationStorage.SearchSimilarConversationsAsync(
                     questionEmbedding, plant, threshold: 0.8, limit: 3);
@@ -463,15 +460,13 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     }
                 }
 
-                // Check corrections (existing logic)
+                // Check corrections (existing logic) - ONLY for MEAI queries
                 var correction = await CheckCorrectionsAsync(question);
-
                 if (correction != null)
                 {
                     _logger.LogInformation($"🎯 Using correction for question: {question}");
 
                     string finalAnswer = correction.Answer;
-
                     try
                     {
                         finalAnswer = await RephraseWithLLMAsync(correction.Answer, generationModel);
@@ -506,7 +501,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     };
                 }
 
-                // ⬇️ Insert the appreciated answer check here:
+                // Check appreciated answers - ONLY for MEAI queries
                 var appreciated = await CheckAppreciatedAnswerAsync(question);
                 if (appreciated != null)
                 {
@@ -538,7 +533,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     };
                 }
 
-
+                // Continue with rest of MEAI-specific logic...
                 // Check topic change and context
                 if (IsTopicChanged(question, context))
                 {
@@ -548,7 +543,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
                 var contextualQuery = BuildContextualQuery(question, context.History);
 
-                // Get relevant chunks
+                // Get relevant chunks - ONLY for MEAI queries
                 var relevantChunks = await GetRelevantChunksAsync(
                     contextualQuery, embModel, maxResults, meaiInfo, context, useReRanking, genModel);
 
@@ -556,7 +551,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 int? parentId = null;
                 if (context.History.Any())
                 {
-                    // Get the last conversation ID from session metadata
                     var lastConversationId = dbSession.Metadata.ContainsKey("lastConversationId")
                         ? Convert.ToInt32(dbSession.Metadata["lastConversationId"])
                         : (int?)null;
@@ -567,7 +561,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     }
                 }
 
-                // Generate answer
+                // Generate answer with MEAI context
                 var answer = await GenerateChatResponseAsync(
                     question, genModel, context.History, relevantChunks, context, ismeai: meaiInfo);
 
@@ -598,7 +592,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 // Compute confidence
                 var confidence = topChunks.FirstOrDefault()?.Similarity ?? 0;
 
-                // 🆕 Save conversation to database
+                // Save conversation to database
                 var conversationId = await SaveConversationToDatabase(
                     dbSession.SessionId, question, answer, topChunks,
                     genModel, embModel, confidence, stopwatch.ElapsedMilliseconds,
@@ -638,8 +632,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 throw new RAGServiceException("Failed to process query", ex);
             }
         }
-        
-
         private async Task<string> RephraseWithLLMAsync(string originalAnswer, string modelName)
         {
             var systemPrompt = "You are a professional assistant. Rephrase the following content to make it sound polished, concise, and formal.";
@@ -695,8 +687,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
             return finalContent.ToString();
         }
-
-
         private async Task<int> SaveConversationToDatabase(
     string sessionId,
     string question,
@@ -754,7 +744,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 return 0; // Return 0 if save fails
             }
         }
-
         // 🆕 Helper method to determine topic tags
         private string DetermineTopicTag(string question, string answer)
         {
@@ -785,7 +774,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
             return "general";
         }
-
         // 🆕 Helper method to check if question is a follow-up
         private bool IsFollowUpQuestion(string question, ConversationContext context)
         {
@@ -799,52 +787,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             var lowerQuestion = question.ToLowerInvariant();
             return followUpIndicators.Any(indicator => lowerQuestion.Contains(indicator));
         }
-        public async Task ApplyCorrectionAsync(string sessionId, string question, string correctedAnswer, string model)
-        {
-            try
-            {
-                // Find the conversation in database
-                var conversations = await _conversationStorage.GetSessionConversationsAsync(sessionId);
-                var conversation = conversations.LastOrDefault(c =>
-                    c.Question.Equals(question, StringComparison.OrdinalIgnoreCase));
-
-                if (conversation != null)
-                {
-                    await _conversationStorage.SaveCorrectionAsync(conversation.Id, correctedAnswer);
-                    _logger.LogInformation($"✏️ Saved correction for conversation {conversation.Id} in database");
-                }
-
-                if (_sessionContexts.TryGetValue(sessionId, out var context))
-                {
-                    var turn = context.History.LastOrDefault(t =>
-                        t.Question.Equals(question, StringComparison.OrdinalIgnoreCase));
-                    if (turn != null)
-                    {
-                        var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
-                        var inputEmbedding = await GetEmbeddingAsync(question, embeddingModel);
-                        CorrectionEntry cr = new CorrectionEntry
-                        {
-                            Question = turn.Question,
-                            Answer = correctedAnswer,
-                            Model = model,
-                            Date = DateTime.Now,
-                            Embedding = inputEmbedding,
-                            Id =sessionId 
-                        };
-                        _correctionsCache.Add(cr);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Failed to apply correction: {question}");
-            }
-            finally
-            {
-                await LoadCorrectionCacheAsync();
-            }
-        }
-
         public async Task MarkAppreciatedAsync(string sessionId, string question)
         {
             try
@@ -881,7 +823,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 await LoadHistoricalAppreciatedAnswersAsync();
             }
         }
-
         // 🆕 New method to save corrections to database
         public async Task SaveCorrectionToDatabase(string sessionId, string question, string correctedAnswer)
         {
@@ -902,19 +843,16 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 _logger.LogError(ex, $"Failed to save correction: {question}");
             }
         }
-
         // 🆕 New method to get conversation statistics
         public async Task<ConversationStats> GetConversationStatsAsync()
         {
             return await _conversationStorage.GetConversationStatsAsync();
         }
-
         // 🆕 New method to get appreciated answers for learning
         public async Task<List<ConversationEntry>> GetAppreciatedAnswersAsync(string? topicTag = null)
         {
             return await _conversationStorage.GetAppreciatedAnswersAsync(topicTag, limit: 100);
         }
-
         // 🆕 Method to initialize system with historical appreciated answers
         public async Task LoadHistoricalAppreciatedAnswersAsync()
         {
@@ -935,7 +873,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 _logger.LogError(ex, "Failed to load historical appreciated answers");
             }
         }
-
         private async Task LoadCorrectionCacheAsync()
         {
             try
@@ -980,8 +917,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 _logger.LogError(ex, "❌ Failed to load corrections into cache");
             }
         }
-
-
         List<RelevantChunk> ConvertToRelevantChunks(List<EmbeddingData> data)
         {
             return data.Select(d => new RelevantChunk
@@ -1005,47 +940,44 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
             return dot / (Math.Sqrt(normA) * Math.Sqrt(normB));
         }
-
-
         // Updated search with model-specific collection
-        private async Task<List<RelevantChunk>> SearchChromaDBAsync(string query, ModelConfiguration embeddingModel, int maxResults)
-        {
-            try
-            {
-                var collectionId = await _collectionManager.GetOrCreateCollectionAsync(embeddingModel);
-                if (string.IsNullOrEmpty(collectionId))
-                {
-                    throw new InvalidOperationException($"No collection found for embedding model {embeddingModel.Name}");
-                }
+        //private async Task<List<RelevantChunk>> SearchChromaDBAsync(string query, ModelConfiguration embeddingModel, int maxResults)
+        //{
+        //    try
+        //    {
+        //        var collectionId = await _collectionManager.GetOrCreateCollectionAsync(embeddingModel);
+        //        if (string.IsNullOrEmpty(collectionId))
+        //        {
+        //            throw new InvalidOperationException($"No collection found for embedding model {embeddingModel.Name}");
+        //        }
 
-                _logger.LogInformation($"Searching with model {embeddingModel.Name} in collection {collectionId}");
+        //        _logger.LogInformation($"Searching with model {embeddingModel.Name} in collection {collectionId}");
 
-                var queryEmbedding = await GetEmbeddingAsync(query, embeddingModel);
+        //        var queryEmbedding = await GetEmbeddingAsync(query, embeddingModel);
 
-                var searchData = new
-                {
-                    query_embeddings = new List<List<float>> { queryEmbedding },
-                    n_results = maxResults * 2,
-                    include = new[] { "documents", "metadatas", "distances" }
-                };
+        //        var searchData = new
+        //        {
+        //            query_embeddings = new List<List<float>> { queryEmbedding },
+        //            n_results = maxResults * 2,
+        //            include = new[] { "documents", "metadatas", "distances" }
+        //        };
 
-                var response = await _chromaClient.PostAsJsonAsync(
-                    $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
-                    searchData);
+        //        var response = await _chromaClient.PostAsJsonAsync(
+        //            $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+        //            searchData);
 
-                var responseContent = await response.Content.ReadAsStringAsync();
-                response.EnsureSuccessStatusCode();
+        //        var responseContent = await response.Content.ReadAsStringAsync();
+        //        response.EnsureSuccessStatusCode();
 
-                using var doc = JsonDocument.Parse(responseContent);
-                return ParseSearchResults(doc.RootElement, maxResults);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"ChromaDB search failed for model {embeddingModel.Name}");
-                return new List<RelevantChunk>();
-            }
-        }
-
+        //        using var doc = JsonDocument.Parse(responseContent);
+        //        return ParseSearchResults(doc.RootElement, maxResults);
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        _logger.LogError(ex, $"ChromaDB search failed for model {embeddingModel.Name}");
+        //        return new List<RelevantChunk>();
+        //    }
+        //}
         private List<RelevantChunk> ParseSearchResults(JsonElement root, int maxResults)
         {
             var relevantChunks = new List<RelevantChunk>();
@@ -1092,7 +1024,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 .Take(maxResults)
                 .ToList();
         }
-
         private async Task<string> GenerateChatResponseAsync(
     string question,
     ModelConfiguration generationModel,
@@ -1241,15 +1172,11 @@ Do not introduce external information or opinions. Stay strictly within the cont
                 return "I apologize, but I'm having trouble generating a response right now. Please try again or contact HR directly for assistance.";
             }
         }
-
-
-
         // API endpoint to get available models
         public async Task<List<ModelConfiguration>> GetAvailableModelsAsync()
         {
             return await _modelManager.DiscoverAvailableModelsAsync();
         }
-
         public async Task<SystemStatus> GetSystemStatusAsync()
         {
             var models = await GetAvailableModelsAsync();
@@ -1271,7 +1198,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
                 DefaultGenerationModel = _config.DefaultGenerationModel ?? ""
             };
         }
-
         private async Task<int> GetTotalEmbeddingsAcrossModelsAsync()
         {
             try
@@ -1304,7 +1230,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
                 return 0;
             }
         }
-
         private async Task<int> GetCollectionCountAsync(string collectionId)
         {
             try
@@ -1327,7 +1252,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
                 return 0;
             }
         }
-
         // Additional helper methods...
         private Dictionary<string, object> CreateChunkMetadata(string sourceFile, DateTime lastModified, string modelName, string text, string plant)
         {
@@ -1350,7 +1274,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
 
             return metadata;
         }
-
         private string GenerateChunkId(string sourceFile, string text, DateTime lastModified, string modelName)
         {
             var fileName = Path.GetFileNameWithoutExtension(sourceFile);
@@ -1359,7 +1282,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
             var modelHash = modelName.GetHashCode().ToString("X");
             return $"{fileName}_{textHash}_{timeStamp}_{modelHash}";
         }
-
         private List<(string Text, string SourceFile)> ChunkText(string text, string sourceFile, int maxTokens = 200)
         {
             var chunks = new List<(string, string)>();
@@ -1391,7 +1313,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
 
             return chunks.Where(c => !string.IsNullOrWhiteSpace(c.Item1)).ToList();
         }
-
         private string CleanText(string text)
         {
             text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
@@ -1399,12 +1320,10 @@ Do not introduce external information or opinions. Stay strictly within the cont
             text = text.Replace("\r\n", "\n").Replace("\r", "\n");
             return text.Trim();
         }
-
         private int EstimateTokenCount(string text)
         {
             return string.IsNullOrWhiteSpace(text) ? 0 : text.Length / 4;
         }
-
         private string CleanAndEnhanceResponse(string response)
         {
             var cleaned = System.Text.RegularExpressions.Regex.Replace(
@@ -1416,7 +1335,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
             cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"\n\s*\n\s*\n", "\n\n");
             return cleaned.Trim();
         }
-
         // Session management methods
         private void InitializeSessionCleanup()
         {
@@ -1426,7 +1344,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
                 dueTime: TimeSpan.FromMinutes(30),
                 period: TimeSpan.FromMinutes(30));
         }
-
         private void CleanupExpiredSessions()
         {
             try
@@ -1449,16 +1366,12 @@ Do not introduce external information or opinions. Stay strictly within the cont
                 _logger.LogError(ex, "Failed to cleanup expired sessions");
             }
         }
-
-
-
         // Implement other required methods from IRAGService
         private bool IsHistoryClearRequest(string question)
         {
             var clearKeywords = new[] { "clear", "delete", "history", "reset", "start over" };
             return clearKeywords.Any(keyword => question.ToLower().Contains(keyword));
         }
-
         private async Task<QueryResponse> HandleHistoryClearRequest(ConversationContext context, string? sessionId)
         {
             ClearContext(context);
@@ -1473,181 +1386,12 @@ Do not introduce external information or opinions. Stay strictly within the cont
                 SessionId = sessionId
             };
         }
-
         private void ClearContext(ConversationContext context)
         {
             context.History.Clear();
             context.RelevantChunks.Clear();
             context.LastAccessed = DateTime.Now;
         }
-
-        private bool IsTopicChanged(string question, ConversationContext context)
-        {
-            if (string.IsNullOrWhiteSpace(question)) return true;
-
-            var lowerQuestion = question.ToLowerInvariant();
-
-            // Broader follow-up phrase detection (not only at start)
-            string[] contextualPhrases = new[]
-{
-    // English follow-up cues
-    "what about",
-    "how about",
-    "what is his",
-    "what is her",
-    "how is she",
-    "how is he",
-    "what will",
-    "what if",
-    "what else",
-    "can she",
-    "can he",
-    "do they",
-    "did she",
-    "did he",
-    "does it",
-    "does he",
-    "does she",
-    "is that true",
-    "tell me more",
-    "more info",
-    "additional info",
-    "continue",
-    "next",
-    "go on",
-    "expand on that",
-    "in addition",
-    "related to",
-    "following that",
-    "based on that",
-    "regarding that",
-    "same as",
-    "just like",
-    "similar to",
-    "and then",
-    "after that",
-    "he",
-    "she",
-    "it",
-    "them",
-    "they",
-    "their",
-    "that",
-    "his",
-    "her",
-    "this person",
-    "that person",
-    "the individual",
-    "the person you mentioned",
-    "okay",
-    "got it",
-    "alright",
-    "yes and",
-    "oh",
-    "hmm",
-    "also",
-    "too",
-    "by the way",
-    "btw",
-    "on that topic",
-    "as you said",
-    "like you said",
-    "you mentioned",
-    "back to that",
-    "about that",
-    "is that still true",
-    "with that in mind",
-
-    // Hinglish / Hindi-English expressions
-    "phir kya",
-    "fir kya",
-    "uske baad",
-    "aur batao",
-    "aur kya",
-    "baki kya",
-    "aur info do",
-    "kya usne",
-    "kya uska",
-    "kya uski",
-    "toh kya",
-    "fir kya hua",
-    "ab kya",
-    "ab uska",
-    "wo kya karega",
-    "wo kya karegi",
-    "usse kya",
-    "usse related",
-    "iski info",
-    "uski info",
-    "wo bhi",
-    "iske alawa",
-    "yeh kya hai",
-    "matlab kya",
-    "next batao",
-    "aur details",
-    "ye kisne bola",
-    "phir kya hua",
-    "us topic pe",
-    "wahi wala",
-    "uske bare me",
-    "pehle jo bola tha",
-    "jaise aapne bola",
-    "bol rahe the",
-    "jis baat ki",
-    "fir batao",
-    "agar aisa ho",
-    "agar main",
-    "agar mein",
-    "agar usne",
-    "agar uska",
-    "agar uski",
-    "agar mujhe",
-    "agar kisi ne",
-    "agar me",
-    "agar hum",
-    "agar vo",
-    "agar mai",
-    "agar kuch",
-    "agar kal",
-    "agar mujhe chhutti",
-    "agar leave chahiye",
-    "agar me chala jau",
-    "agar combine karu",
-    "agar CL lo",
-    "agar sick leave",
-    "agar SL lo",
-    "agar allowed hai",
-};
-
-
-
-            // 1. If it contains follow-up terms, assume same topic
-            // ✅ Check fuzzy match on contextual phrases
-            if (IsFollowUpPhraseFuzzy(question, contextualPhrases))
-            {
-                return false;
-            }
-
-            // 2. Use anchor if present and valid
-            var anchor = context.LastTopicAnchor ?? "";
-            if (!string.IsNullOrWhiteSpace(anchor))
-            {
-                double anchorSim = CalculateTextSimilarity(question, anchor);
-                if (anchorSim >= 0.4) return false;
-            }
-
-            // 3. Fallback: check similarity with last question
-            if (context.History.Count > 0)
-            {
-                var lastQuestion = context.History.Last().Question;
-                double lastSim = CalculateTextSimilarity(question, lastQuestion);
-                if (lastSim >= 0.4) return false;
-            }
-
-            // 4. Default to "changed"
-            return true;
-        }
-
         public static int LevenshteinDistance(string s, string t)
         {
             if (string.IsNullOrEmpty(s)) return t.Length;
@@ -1673,7 +1417,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
 
             return d[s.Length, t.Length];
         }
-
         private bool IsFollowUpPhraseFuzzy(string question, string[] knownPhrases, int maxDistance = 2)
         {
             string lowerQ = question.ToLowerInvariant();
@@ -1687,7 +1430,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
                 return LevenshteinDistance(sub, phrase) <= maxDistance;
             });
         }
-
         private string ResolvePronouns(string question, ConversationContext context)
         {
             if (context.NamedEntities.Count == 0) return question;
@@ -1699,8 +1441,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
             question = question.Replace("their", lastEntity, StringComparison.OrdinalIgnoreCase);
             return question;
         }
-
-
         private string BuildContextualQuery(string currentQuestion, List<ConversationTurn> history)
         {
             if (history.Count == 0) return currentQuestion;
@@ -1745,8 +1485,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
 
             return currentQuestion;
         }
-
-
         private async Task<List<string>> ExtractEntitiesAsync(string text)
         {
             var prompt = $"Extract all named entities (people, organizations, titles, etc.) from the following text:\n\n\"{text}\"\n\nEntities:";
@@ -1780,8 +1518,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
                 return new List<string>();
             }
         }
-
-
         private double CalculateTextSimilarity(string text1, string text2)
         {
             var words1 = text1.ToLower().Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
@@ -1790,25 +1526,30 @@ Do not introduce external information or opinions. Stay strictly within the cont
             var union = words1.Union(words2).Count();
             return union == 0 ? 0.0 : (double)intersection / union;
         }
-
         private async Task<List<RelevantChunk>> GetRelevantChunksAsync(
-            string query,
-            ModelConfiguration embeddingModel,
-            int maxResults,
-            bool meaiInfo,
-            ConversationContext context,
-            bool useReRanking,
-            ModelConfiguration generationModel)
+    string query,
+    ModelConfiguration embeddingModel,
+    int maxResults,
+    bool meaiInfo,
+    ConversationContext context,
+    bool useReRanking,
+    ModelConfiguration generationModel)
         {
+            // If meaiInfo is false, return empty chunks (no embeddings needed)
             if (!meaiInfo)
+            {
+                _logger.LogInformation("🚫 Skipping relevant chunks retrieval (meaiInfo = false)");
                 return new List<RelevantChunk>();
+            }
 
             try
             {
+                // Check corrections first (only for MEAI queries)
                 var correction = await CheckCorrectionsAsync(query);
                 if (correction != null)
                     return new List<RelevantChunk>();
 
+                // Perform ChromaDB search (only for MEAI queries)
                 var chunks = await SearchChromaDBAsync(query, embeddingModel, maxResults);
                 return chunks;
             }
@@ -1818,12 +1559,11 @@ Do not introduce external information or opinions. Stay strictly within the cont
                 return new List<RelevantChunk>();
             }
         }
-
         private async Task UpdateConversationHistory(
-     ConversationContext context,
-     string question,
-     string answer,
-     List<RelevantChunk> relevantChunks)
+    ConversationContext context,
+    string question,
+    string answer,
+    List<RelevantChunk> relevantChunks)
         {
             try
             {
@@ -1842,14 +1582,24 @@ Do not introduce external information or opinions. Stay strictly within the cont
                     context.History = context.History.TakeLast(10).ToList();
                 }
 
-                // If it's a new topic, update anchor
-                if (IsTopicChanged(question, context))
+                // Smart topic anchor update
+                var currentTopics = ExtractKeyTopics(question);
+                if (currentTopics.Any())
                 {
-                    context.LastTopicAnchor = question; // 🆕 update anchor
+                    // Update anchor only if this seems like a main topic question (not a follow-up)
+                    var isMainTopic = !IsQuestionPatternContinuation(question, context) &&
+                                     question.Split(' ').Length >= 4; // Substantial question
+
+                    if (isMainTopic)
+                    {
+                        context.LastTopicAnchor = question;
+                        _logger.LogDebug($"Updated topic anchor: {question}");
+                    }
                 }
 
                 context.LastAccessed = DateTime.Now;
 
+                // Extract entities as before
                 var extracted = await ExtractEntitiesAsync(answer);
                 foreach (var entity in extracted)
                 {
@@ -1862,48 +1612,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
                 _logger.LogError(ex, "Failed to update conversation history");
             }
         }
-
-
-        private async Task<CorrectionEntry?> CheckCorrectionsAsync(string question)
-        {
-            try
-            {
-                var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
-                var inputEmbedding = await GetEmbeddingAsync(question, embeddingModel);
-
-                if (inputEmbedding == null || inputEmbedding.Count == 0)
-                    return null;
-
-                List<(CorrectionEntry Entry, double Similarity)> matches;
-
-                lock (_lockObject)
-                {
-                    matches = _correctionsCache
-                        .Where(c => c.Embedding != null && c.Embedding.Count == inputEmbedding.Count)
-                        .Select(c => (
-                            Entry: c,
-                            Similarity: CosineSimilarity(inputEmbedding, c.Embedding)
-                        ))
-                        .Where(x => x.Similarity >= 0.75) // 🔧 You can adjust this
-                        .OrderByDescending(x => x.Similarity)
-                        .ToList();
-                }
-
-                if (matches.Any())
-                {
-                    _logger.LogInformation($"Correction match found: \"{matches.First().Entry.Question}\" with similarity {matches.First().Similarity:F2}");
-                    return matches.First().Entry;
-                }
-
-                return null;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to check correction match");
-                return null;
-            }
-        }
-
         private async Task<(string Answer, List<RelevantChunk> Chunks)?> CheckAppreciatedAnswerAsync(string question)
         {
             try
@@ -1939,8 +1647,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
                 return null;
             }
         }
-
-
         private TEntry? FindBestSemanticMatch<TEntry>(
     List<TEntry> entries,
     List<float> inputEmbedding,
@@ -1972,8 +1678,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
 
             return default;
         }
-
-
         private async Task<int> GetCorrectionsCountAsync()
         {
             lock (_lockObject)
@@ -1981,7 +1685,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
                 return _correctionsCache.Count;
             }
         }
-
         public async Task<bool> IsHealthy()
         {
             try
@@ -1995,7 +1698,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
                 return false;
             }
         }
-
         private async Task<bool> AddToChromaDBAsync(
             string collectionId,
             List<string> ids,
@@ -2025,7 +1727,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
                 return false;
             }
         }
-
         // Implement other required interface methods...
         public async Task SaveCorrectionAsync(string question, string correctAnswer, string model)
         {
@@ -2048,32 +1749,1137 @@ Do not introduce external information or opinions. Stay strictly within the cont
 
             _logger.LogInformation("✅ Correction saved for question: {Question}", question);
         }
-
-
         public Task RefreshEmbeddingsAsync(string model = "mistral:latest")
         {
             // Implementation here - you can modify this to be dynamic
             throw new NotImplementedException();
         }
-
         public Task<List<CorrectionEntry>> GetRecentCorrections(int limit = 50)
         {
             // Implementation here
             throw new NotImplementedException();
         }
-
         public Task<bool> DeleteCorrectionAsync(string id)
         {
             // Implementation here
             throw new NotImplementedException();
         }
-
         public Task ProcessUploadedPolicyAsync(Stream fileStream, string fileName, string model)
         {
             // Implementation here
             throw new NotImplementedException();
         }
+        private List<string> ExtractKeyTopics(string text)
+        {
+            var lowerText = text.ToLowerInvariant();
+            var topics = new HashSet<string>();
 
-       
+            // Common topic indicators - domain nouns
+            string[] topicKeywords = new[]
+            {
+        // General categories
+        "names", "suggestions", "options", "ideas", "list", "examples", "types", "kinds",
+        "methods", "ways", "approaches", "solutions", "strategies", "techniques", "tips",
+        "advice", "recommendations", "guidelines", "rules", "policies", "procedures",
+        "steps", "process", "information", "details", "facts", "data", "statistics",
+        
+        // Specific domains
+        "leave", "policy", "salary", "benefits", "training", "attendance", "performance",
+        "food", "recipe", "cooking", "health", "exercise", "medicine", "travel",
+        "places", "locations", "books", "movies", "music", "technology", "software",
+        "business", "career", "education", "learning", "courses", "skills"
+    };
+
+            // Extract topic keywords present in the text
+            foreach (var keyword in topicKeywords)
+            {
+                if (lowerText.Contains(keyword))
+                {
+                    topics.Add(keyword);
+                }
+            }
+
+            // Extract potential nouns (simple approach)
+            var words = lowerText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            foreach (var word in words)
+            {
+                // Add words that are likely to be topic nouns (length > 3, not common words)
+                if (word.Length > 3 && !IsCommonWord(word))
+                {
+                    topics.Add(word);
+                }
+            }
+
+            return topics.ToList();
+        }
+        private bool IsCommonWord(string word)
+        {
+            string[] commonWords = new[]
+            {
+        "this", "that", "with", "have", "will", "from", "they", "know", "want",
+        "been", "good", "much", "some", "time", "very", "when", "come", "here",
+        "just", "like", "long", "make", "many", "over", "such", "take", "than",
+        "them", "well", "were", "what", "your", "could", "should", "would",
+        "about", "after", "again", "before", "being", "below", "between",
+        "during", "further", "having", "other", "since", "through", "under",
+        "until", "while", "above", "against", "because", "down", "into", "off",
+        "once", "only", "same", "there", "these", "those", "where", "which",
+        "more", "most", "each", "few", "how", "its", "may", "no", "not", "now",
+        "old", "see", "two", "way", "who", "boy", "did", "has", "let", "put",
+        "too", "use"
+    };
+
+            return commonWords.Contains(word.ToLowerInvariant());
+        }
+        private bool IsTopicChanged(string question, ConversationContext context)
+        {
+            if (string.IsNullOrWhiteSpace(question)) return true;
+
+            var lowerQuestion = question.ToLowerInvariant();
+
+            // 1. Universal continuation indicators
+            string[] universalContinuation = new[]
+            {
+        // Direct continuation requests
+        "more", "other", "different", "additional", "extra", "another", "else",
+        "further", "continue", "next", "also", "too", "as well", "besides",
+        
+        // Modification requests  
+        "but", "however", "though", "although", "instead", "rather", "better",
+        "alternative", "similar", "like", "unlike", "compared", "versus",
+        
+        // Expansion requests
+        "tell me more", "give me more", "show me more", "any other", "what other",
+        "can you", "could you", "would you", "please", "help me", "suggest",
+        
+        // Clarification/Follow-up
+        "what about", "how about", "what if", "suppose", "assuming", "given",
+        "in case", "regarding", "concerning", "about", "related", "same",
+        
+        // Pronouns (strong continuation indicators)
+        "it", "this", "that", "these", "those", "they", "them", "he", "she",
+        "his", "her", "their", "its"
+    };
+
+            // 2. Check for universal continuation phrases
+            if (universalContinuation.Any(phrase => lowerQuestion.Contains(phrase)))
+            {
+                _logger.LogDebug($"Universal continuation detected: {question}");
+                return false;
+            }
+
+            // 3. Smart topic overlap detection
+            if (context.History.Any())
+            {
+                var currentTopics = ExtractKeyTopics(question);
+                var lastQuestion = context.History.Last().Question;
+                var lastTopics = ExtractKeyTopics(lastQuestion);
+
+                // Calculate topic overlap
+                var commonTopics = currentTopics.Intersect(lastTopics, StringComparer.OrdinalIgnoreCase).ToList();
+                var overlapRatio = commonTopics.Count > 0 ?
+                    (double)commonTopics.Count / Math.Max(currentTopics.Count, lastTopics.Count) : 0;
+
+                if (overlapRatio >= 0.3) // 30% topic overlap indicates same domain
+                {
+                    _logger.LogDebug($"Topic overlap detected ({overlapRatio:P0}): {string.Join(", ", commonTopics)}");
+                    return false;
+                }
+            }
+
+            // 4. Semantic similarity with conversation history
+            if (context.History.Count > 0)
+            {
+                var recentQuestions = context.History.TakeLast(3).Select(h => h.Question).ToList();
+
+                foreach (var recentQ in recentQuestions)
+                {
+                    double similarity = CalculateAdvancedSimilarity(question, recentQ);
+                    if (similarity >= 0.25) // Lower threshold for better continuity
+                    {
+                        _logger.LogDebug($"Semantic similarity detected ({similarity:P0}) with: {recentQ}");
+                        return false;
+                    }
+                }
+            }
+
+            // 5. Pattern-based continuation detection
+            if (IsQuestionPatternContinuation(question, context))
+            {
+                return false;
+            }
+
+            // 6. Use topic anchor (last resort)
+            var anchor = context.LastTopicAnchor ?? "";
+            if (!string.IsNullOrWhiteSpace(anchor))
+            {
+                double anchorSim = CalculateAdvancedSimilarity(question, anchor);
+                if (anchorSim >= 0.2)
+                {
+                    _logger.LogDebug($"Topic anchor similarity ({anchorSim:P0}): {anchor}");
+                    return false;
+                }
+            }
+
+            // 7. Default: Topic changed
+            _logger.LogDebug($"Topic change detected for: {question}");
+            return true;
+        }
+        private double CalculateAdvancedSimilarity(string text1, string text2)
+        {
+            // Jaccard similarity for word overlap
+            var words1 = text1.ToLowerInvariant()
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Where(w => w.Length > 2 && !IsCommonWord(w))
+                .ToHashSet();
+
+            var words2 = text2.ToLowerInvariant()
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Where(w => w.Length > 2 && !IsCommonWord(w))
+                .ToHashSet();
+
+            if (!words1.Any() || !words2.Any()) return 0;
+
+            var intersection = words1.Intersect(words2).Count();
+            var union = words1.Union(words2).Count();
+
+            var jaccardSim = (double)intersection / union;
+
+            // Boost similarity if question structures are similar
+            var structuralBoost = GetStructuralSimilarity(text1, text2);
+
+            return Math.Min(1.0, jaccardSim + structuralBoost);
+        }
+        private double GetStructuralSimilarity(string q1, string q2)
+        {
+            var q1Lower = q1.ToLowerInvariant().Trim();
+            var q2Lower = q2.ToLowerInvariant().Trim();
+
+            // Question starters
+            string[] questionStarters = { "what", "how", "can", "could", "would", "tell", "give", "show" };
+
+            var q1Starter = questionStarters.FirstOrDefault(s => q1Lower.StartsWith(s));
+            var q2Starter = questionStarters.FirstOrDefault(s => q2Lower.StartsWith(s));
+
+            if (q1Starter != null && q1Starter == q2Starter)
+            {
+                return 0.1; // Small boost for same question pattern
+            }
+
+            return 0;
+        }
+        private bool IsQuestionPatternContinuation(string question, ConversationContext context)
+        {
+            if (!context.History.Any()) return false;
+
+            var lowerQ = question.ToLowerInvariant().Trim();
+
+            // Patterns that usually indicate continuation
+            string[] continuationPatterns = new[]
+            {
+        // Request patterns
+        @"^(can|could|would|will) you (tell|give|show|suggest|recommend)",
+        @"^(tell|give|show|suggest) me (more|other|different|some)",
+        @"^(what|which) (other|else|more|about)",
+        @"^(any|some) (other|more|different)",
+        
+        // Comparative patterns  
+        @"^(but|however|instead|rather) ",
+        @"little (different|more)",
+        @"bit (different|more)",
+        @"something (else|different|more)",
+        
+        // Follow-up patterns
+        @"^(also|too|as well)",
+        @"^(and|plus|additionally)",
+        @"^(or|maybe|perhaps)",
+    };
+
+            foreach (var pattern in continuationPatterns)
+            {
+                if (System.Text.RegularExpressions.Regex.IsMatch(lowerQ, pattern))
+                {
+                    _logger.LogDebug($"Continuation pattern matched: {pattern}");
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        private async Task<QueryResponse> ProcessNonMeaiQueryFast(
+            string question,
+            string? sessionId,
+            string? generationModel,
+            Stopwatch stopwatch)
+        {
+            try
+            {
+                _logger.LogInformation("🚀 Processing NON-MEAI query (skipping embeddings but checking corrections)");
+
+                // Get session (lightweight)
+                var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
+                    sessionId ?? Guid.NewGuid().ToString(), _currentUser);
+
+                var context = _conversation.GetOrCreateConversationContext(dbSession.SessionId);
+
+                // Handle history clear request
+                if (IsHistoryClearRequest(question))
+                {
+                    return await HandleHistoryClearRequest(context, dbSession.SessionId);
+                }
+
+                // 🆕 CHECK FOR CORRECTIONS (even in non-MEAI mode)
+                var correction = await CheckCorrectionsAsync(question);
+                if (correction != null)
+                {
+                    _logger.LogInformation($"🎯 Using correction for NON-MEAI question: {question}");
+
+                    string finalAnswer = correction.Answer;
+                    try
+                    {
+                        finalAnswer = await RephraseWithLLMAsync(correction.Answer, generationModel ?? _config.DefaultGenerationModel);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to rephrase correction — using raw answer.");
+                    }
+
+                    // Save correction usage to database (optional - for tracking)
+                    try
+                    {
+                        var genModel = await _modelManager.GetModelAsync(generationModel ?? _config.DefaultGenerationModel);
+                        await SaveNonMeaiConversationToDatabase(
+                            dbSession.SessionId, question, finalAnswer,
+                            genModel, 1.0, stopwatch.ElapsedMilliseconds,
+                            isFromCorrection: true, "General");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to save non-MEAI correction to database");
+                    }
+
+                    stopwatch.Stop();
+
+                    return new QueryResponse
+                    {
+                        Answer = finalAnswer,
+                        IsFromCorrection = true,
+                        Sources = new List<string> { "User Correction" },
+                        Confidence = 1.0,
+                        ProcessingTimeMs = stopwatch.ElapsedMilliseconds,
+                        RelevantChunks = new List<RelevantChunk>(),
+                        SessionId = dbSession.SessionId,
+                        ModelsUsed = new Dictionary<string, string>
+                        {
+                            ["generation"] = generationModel ?? _config.DefaultGenerationModel,
+                            ["embedding"] = "skipped"
+                        }
+                    };
+                }
+
+                // Lightweight topic change detection (no embeddings)
+                if (IsTopicChangedLightweight(question, context))
+                {
+                    _logger.LogInformation($"Topic changed for session {context.SessionId}, clearing context");
+                    ClearContext(context);
+                }
+
+                // Generate response directly (no policy context, no embeddings)
+                var answer = await GenerateNonMeaiChatResponseAsync(question, generationModel, context.History);
+
+                // Save conversation to database (optional - for learning)
+                try
+                {
+                    var genModel = await _modelManager.GetModelAsync(generationModel ?? _config.DefaultGenerationModel);
+                    await SaveNonMeaiConversationToDatabase(
+                        dbSession.SessionId, question, answer,
+                        genModel, 0.8, stopwatch.ElapsedMilliseconds,
+                        isFromCorrection: false, "General");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to save non-MEAI conversation to database");
+                }
+
+                // Lightweight conversation tracking
+                await UpdateConversationHistoryLightweight(context, question, answer);
+
+                stopwatch.Stop();
+
+                _logger.LogInformation($"✅ NON-MEAI query completed in {stopwatch.ElapsedMilliseconds}ms");
+
+                return new QueryResponse
+                {
+                    Answer = answer,
+                    IsFromCorrection = false,
+                    Sources = new List<string> { "General Knowledge" },
+                    Confidence = 0.8,
+                    ProcessingTimeMs = stopwatch.ElapsedMilliseconds,
+                    RelevantChunks = new List<RelevantChunk>(),
+                    SessionId = dbSession.SessionId,
+                    ModelsUsed = new Dictionary<string, string>
+                    {
+                        ["generation"] = generationModel ?? _config.DefaultGenerationModel,
+                        ["embedding"] = "skipped"
+                    }
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Fast non-MEAI query processing failed");
+                throw;
+            }
+        }
+        // ADD THIS METHOD - Chat response generator for non-MEAI queries
+        private async Task<string> GenerateNonMeaiChatResponseAsync(
+            string question,
+            string? modelName,
+            List<ConversationTurn> history)
+        {
+            var messages = new List<object>();
+
+            // System prompt for general conversation (NO policy context)
+            messages.Add(new
+            {
+                role = "system",
+                content = @"You are a helpful and knowledgeable AI assistant.
+
+🎯 INSTRUCTIONS:
+1. Provide accurate, helpful, and engaging responses on any topic
+2. Be conversational and natural in your tone  
+3. For general knowledge questions, use your training knowledge
+4. For suggestions/recommendations, provide practical and useful options
+5. Keep responses well-structured and informative
+6. If you don't know something, say so honestly
+7. You can discuss any topic - you are NOT limited to any specific domain
+
+✨ Be helpful, friendly, and informative!"
+            });
+
+            // Add recent conversation history (limited for speed)
+            foreach (var turn in history.TakeLast(6))
+            {
+                messages.Add(new { role = "user", content = turn.Question });
+                messages.Add(new { role = "assistant", content = turn.Answer });
+            }
+
+            // Add current question
+            messages.Add(new { role = "user", content = question });
+
+            var requestData = new
+            {
+                model = modelName ?? _config.DefaultGenerationModel,
+                messages,
+                temperature = 0.7,
+                stream = false,
+                options = new Dictionary<string, object>
+        {
+            { "num_ctx", 4096 }, // Reduced context for faster processing
+            { "top_p", 0.9 }
+        }
+            };
+
+            try
+            {
+                var response = await _httpClient.PostAsJsonAsync("/api/chat", requestData);
+                response.EnsureSuccessStatusCode();
+
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+                var content = doc.RootElement.GetProperty("message").GetProperty("content").GetString() ?? "";
+
+                return content.Trim();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Non-MEAI chat generation failed");
+                return "I apologize, but I'm having trouble generating a response right now. Please try again.";
+            }
+        }
+        private bool IsTopicChangedLightweight(string question, ConversationContext context)
+        {
+            if (!context.History.Any()) return false;
+
+            var lowerQuestion = question.ToLowerInvariant();
+
+            // Quick continuation check
+            string[] quickContinuation = { "more", "other", "different", "also", "and", "but" };
+            if (quickContinuation.Any(word => lowerQuestion.Contains(word)))
+                return false;
+
+            // Simple word overlap with last question
+            if (context.History.Any())
+            {
+                var lastQ = context.History.Last().Question.ToLowerInvariant();
+                var words1 = question.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                var words2 = lastQ.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                var overlap = words1.Intersect(words2, StringComparer.OrdinalIgnoreCase).Count();
+
+                if (overlap >= 2) return false; // At least 2 common words = same topic
+            }
+
+            return true; // Default to changed for general queries
+        }
+        // 6. ADD THIS METHOD - Lightweight conversation update
+        private async Task UpdateConversationHistoryLightweight(
+            ConversationContext context,
+            string question,
+            string answer)
+        {
+            try
+            {
+                var turn = new ConversationTurn
+                {
+                    Question = question,
+                    Answer = answer,
+                    Timestamp = DateTime.Now,
+                    Sources = new List<string>()
+                };
+
+                context.History.Add(turn);
+                if (context.History.Count > 10)
+                {
+                    context.History = context.History.TakeLast(10).ToList();
+                }
+
+                context.LastAccessed = DateTime.Now;
+                // Skip entity extraction for general queries
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to update conversation history (lightweight)");
+            }
+        }
+        private async Task<int> SaveNonMeaiConversationToDatabase(
+    string sessionId,
+    string question,
+    string answer,
+    ModelConfiguration generationModel,
+    double confidence,
+    long processingTimeMs,
+    bool isFromCorrection,
+    string plant)
+        {
+            try
+            {
+                // For non-MEAI queries, we skip embedding generation but still save conversation
+                var entry = new ConversationEntry
+                {
+                    SessionId = sessionId,
+                    Question = question,
+                    Answer = answer,
+                    CreatedAt = DateTime.UtcNow,
+                    QuestionEmbedding = new List<float>(), // Empty for non-MEAI
+                    AnswerEmbedding = new List<float>(),   // Empty for non-MEAI
+                    NamedEntities = new List<string>(),    // Skip entity extraction for speed
+                    WasAppreciated = false,
+                    TopicTag = "general", // Simple tag for non-MEAI queries
+                    FollowUpToId = null,
+                    GenerationModel = generationModel.Name,
+                    EmbeddingModel = "none", // No embedding model used
+                    Confidence = confidence,
+                    ProcessingTimeMs = processingTimeMs,
+                    RelevantChunksCount = 0,
+                    Sources = isFromCorrection ? new List<string> { "User Correction" } : new List<string> { "General Knowledge" },
+                    IsFromCorrection = isFromCorrection,
+                    Plant = plant
+                };
+
+                await _conversationStorage.SaveConversationAsync(entry);
+
+                _logger.LogInformation($"💾 Saved non-MEAI conversation {entry.Id} to database");
+                return entry.Id;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to save non-MEAI conversation to database");
+                return 0;
+            }
+        }
+     public async Task ApplyCorrectionAsync(string sessionId, string question, string correctedAnswer, string model)
+        {
+            try
+            {
+                // Find the conversation in database
+                var conversations = await _conversationStorage.GetSessionConversationsAsync(sessionId);
+                var conversation = conversations.LastOrDefault(c =>
+                    c.Question.Equals(question, StringComparison.OrdinalIgnoreCase));
+
+                if (conversation != null)
+                {
+                    await _conversationStorage.SaveCorrectionAsync(conversation.Id, correctedAnswer);
+                    _logger.LogInformation($"✏️ Saved correction for conversation {conversation.Id} in database");
+                }
+
+                // Update in-memory corrections cache
+                if (_sessionContexts.TryGetValue(sessionId, out var context))
+                {
+                    var turn = context.History.LastOrDefault(t =>
+                        t.Question.Equals(question, StringComparison.OrdinalIgnoreCase));
+                    if (turn != null)
+                    {
+                        // 🆕 For non-MEAI corrections, we can use a simpler approach
+                        List<float> inputEmbedding;
+                        try
+                        {
+                            // Try to generate embedding for better matching
+                            var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
+                            inputEmbedding = await GetEmbeddingAsync(question, embeddingModel!);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to generate embedding for correction, using empty embedding");
+                            // Fallback: use empty embedding (will still work for exact text matches)
+                            inputEmbedding = new List<float>();
+                        }
+
+                        var correctionEntry = new CorrectionEntry
+                        {
+                            Question = turn.Question,
+                            Answer = correctedAnswer,
+                            Model = model,
+                            Date = DateTime.Now,
+                            Embedding = inputEmbedding,
+                            Id = sessionId
+                        };
+
+                        _correctionsCache.Add(correctionEntry);
+                        _logger.LogInformation($"✅ Added correction to cache: {question}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to apply correction: {question}");
+            }
+            finally
+            {
+                await LoadCorrectionCacheAsync();
+            }
+        }
+        // UPDATE CheckCorrectionsAsync to work with both MEAI and non-MEAI queries
+     private async Task<CorrectionEntry?> CheckCorrectionsAsync(string question)
+        {
+            try
+            {
+                List<float> inputEmbedding = new List<float>();
+
+                // Try to generate embedding for semantic matching (if embedding model available)
+                try
+                {
+                    var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
+                    if (embeddingModel != null)
+                    {
+                        inputEmbedding = await GetEmbeddingAsync(question, embeddingModel);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not generate embedding for correction check, falling back to text matching");
+                }
+
+                List<(CorrectionEntry Entry, double Similarity)> matches = new List<(CorrectionEntry, double)>();
+
+                lock (_lockObject)
+                {
+                    foreach (var correction in _correctionsCache)
+                    {
+                        double similarity = 0;
+
+                        // Method 1: Semantic similarity (if embeddings available)
+                        if (inputEmbedding.Count > 0 &&
+                            correction.Embedding != null &&
+                            correction.Embedding.Count == inputEmbedding.Count)
+                        {
+                            similarity = CosineSimilarity(inputEmbedding, correction.Embedding);
+                        }
+                        // Method 2: Fallback to text similarity
+                        else
+                        {
+                            similarity = CalculateTextSimilarity(question.ToLowerInvariant(), correction.Question.ToLowerInvariant());
+                        }
+
+                        // Accept matches with similarity >= 0.75 for semantic, >= 0.8 for text-only
+                        double threshold = (inputEmbedding.Count > 0 && correction.Embedding?.Count > 0) ? 0.75 : 0.8;
+
+                        if (similarity >= threshold)
+                        {
+                            matches.Add((correction, similarity));
+                        }
+                    }
+                }
+
+                if (matches.Any())
+                {
+                    var bestMatch = matches.OrderByDescending(x => x.Similarity).First();
+                    _logger.LogInformation($"✅ Correction match found: \"{bestMatch.Entry.Question}\" with similarity {bestMatch.Similarity:F2}");
+                    return bestMatch.Entry;
+                }
+
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to check correction match");
+                return null;
+            }
+        }
+        // OPTIONAL: Add method to get non-MEAI conversation stats
+     public async Task<NonMeaiConversationStats> GetNonMeaiConversationStatsAsync()
+        {
+            try
+            {
+                // Optionally, get overall stats if needed
+                var stats = await _conversationStorage.GetConversationStatsAsync();
+
+                // Pull all conversations with EmbeddingModel == "none"
+                var nonMeaiConversations = await _conversationStorage.GetConversationAsync("none", 1000);
+
+                return new NonMeaiConversationStats
+                {
+                    TotalNonMeaiConversations = nonMeaiConversations.Count,
+                    NonMeaiCorrections = nonMeaiConversations.Count(c => c.IsFromCorrection),
+                    NonMeaiAppreciated = nonMeaiConversations.Count(c => c.WasAppreciated),
+                    AverageProcessingTime = nonMeaiConversations.Any() ?
+                        nonMeaiConversations.Average(c => c.ProcessingTimeMs) : 0,
+                    TopGeneralTopics = nonMeaiConversations
+                        .Where(c => !string.IsNullOrEmpty(c.TopicTag))
+                        .GroupBy(c => c.TopicTag)
+                        .OrderByDescending(g => g.Count())
+                        .Take(5)
+                        .ToDictionary(g => g.Key!, g => g.Count())
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get non-MEAI conversation stats");
+                return new NonMeaiConversationStats();
+            }
+        }
+        // ADD THIS CLASS for non-MEAI stats
+     public class NonMeaiConversationStats
+        {
+            public int TotalNonMeaiConversations { get; set; }
+            public int NonMeaiCorrections { get; set; }
+            public int NonMeaiAppreciated { get; set; }
+            public double AverageProcessingTime { get; set; }
+            public Dictionary<string, int> TopGeneralTopics { get; set; } = new();
+        }
+
+
+        private async Task<List<List<float>>> GetEmbeddingsBatchAsync(
+        List<string> texts,
+        ModelConfiguration model,
+        int batchSize = 10)
+        {
+            var results = new List<List<float>>();
+
+            // Process in parallel batches
+            var batches = texts.Chunk(batchSize);
+            var tasks = new List<Task<List<List<float>>>>();
+
+            foreach (var batch in batches)
+            {
+                tasks.Add(ProcessEmbeddingBatchAsync(batch.ToList(), model));
+            }
+
+            var batchResults = await Task.WhenAll(tasks);
+
+            foreach (var batchResult in batchResults)
+            {
+                results.AddRange(batchResult);
+            }
+
+            return results;
+        }
+
+        private async Task<List<List<float>>> ProcessEmbeddingBatchAsync(
+    List<string> texts,
+    ModelConfiguration model)
+        {
+            var embeddings = new List<List<float>>();
+
+            // Use semaphore to limit concurrent requests
+            using var semaphore = new SemaphoreSlim(3, 3); // Max 3 concurrent requests
+
+            var tasks = texts.Select(async text =>
+            {
+                await semaphore.WaitAsync();
+                try
+                {
+                    return await GetEmbeddingAsync(text, model);
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
+
+            var results = await Task.WhenAll(tasks);
+            return results.ToList();
+        }
+
+        private readonly ConcurrentDictionary<string, List<float>> _embeddingCache = new();
+        private readonly SemaphoreSlim _embeddingSemaphore = new(5, 5); // Limit concurrent embedding requests
+
+        private async Task<List<float>> GetEmbeddingAsync(string text, ModelConfiguration model)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return new List<float>();
+
+            // Generate cache key
+            var cacheKey = $"{model.Name}:{text.GetHashCode():X}";
+
+            // Check cache first
+            if (_embeddingCache.TryGetValue(cacheKey, out var cachedEmbedding))
+            {
+                return cachedEmbedding;
+            }
+
+            await _embeddingSemaphore.WaitAsync();
+            try
+            {
+                // Double-check cache after acquiring semaphore
+                if (_embeddingCache.TryGetValue(cacheKey, out cachedEmbedding))
+                {
+                    return cachedEmbedding;
+                }
+
+                // Optimize text length based on model
+                var maxLength = model.MaxContextLength * 3;
+                if (text.Length > maxLength)
+                    text = text.Substring(0, maxLength);
+
+                var request = new
+                {
+                    model = model.Name,
+                    prompt = text,
+                    options = CreateOptimizedModelOptions(model)
+                };
+
+                // Use optimized HTTP client settings
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                var response = await _httpClient.PostAsJsonAsync("/api/embeddings", request, cts.Token);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning($"Embedding request failed: {response.StatusCode}");
+                    return new List<float>();
+                }
+
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+
+                if (doc.RootElement.TryGetProperty("embedding", out var embeddingProperty))
+                {
+                    var embedding = embeddingProperty.EnumerateArray()
+                        .Select(x => x.GetSingle())
+                        .ToList();
+
+                    // Cache the result (with size limit)
+                    if (_embeddingCache.Count < 10000) // Prevent memory bloat
+                    {
+                        _embeddingCache.TryAdd(cacheKey, embedding);
+                    }
+
+                    return embedding;
+                }
+
+                return new List<float>();
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning($"Embedding request timed out for model {model.Name}");
+                return new List<float>();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Embedding generation failed for model {model.Name}");
+                return new List<float>();
+            }
+            finally
+            {
+                _embeddingSemaphore.Release();
+            }
+        }
+
+        private Dictionary<string, object> CreateOptimizedModelOptions(ModelConfiguration model)
+        {
+            var options = new Dictionary<string, object>();
+
+            foreach (var kvp in model.ModelOptions)
+            {
+                object value = kvp.Value;
+
+                // Convert string values to proper types
+                switch (kvp.Key)
+                {
+                    case "num_ctx":
+                        value = value is string s1 ? Math.Min(int.Parse(s1), 2048) : value; // Limit context
+                        break;
+                    case "top_p":
+                        value = value is string s2 ? float.Parse(s2) : value;
+                        break;
+                    case "temperature":
+                        value = value is string s3 ? Math.Min(float.Parse(s3), 0.1f) : value; // Low temp for embeddings
+                        break;
+                }
+
+                options[kvp.Key] = value;
+            }
+
+            // Add embedding-specific optimizations
+            options["num_predict"] = 1; // Embeddings don't need text generation
+            options["repeat_penalty"] = 1.0f;
+
+            return options;
+        }
+
+        private async Task ProcessChunkBatchForModelAsync(
+    List<(string Text, string SourceFile)> chunks,
+    ModelConfiguration model,
+    string collectionId,
+    DateTime lastModified,
+    string plant)
+        {
+            try
+            {
+                // Filter and prepare chunks in parallel
+                var validChunks = chunks
+                    .Where(chunk => !string.IsNullOrWhiteSpace(chunk.Text))
+                    .Select(chunk => new
+                    {
+                        Text = CleanText(chunk.Text),
+                        SourceFile = chunk.SourceFile,
+                        ChunkId = GenerateChunkId(chunk.SourceFile, chunk.Text, lastModified, model.Name)
+                    })
+                    .Where(chunk => !string.IsNullOrWhiteSpace(chunk.Text))
+                    .ToList();
+
+                if (!validChunks.Any()) return;
+
+                // Check which chunks already exist (batch check)
+                var existingChunks = await CheckExistingChunksAsync(collectionId, validChunks.Select(c => c.ChunkId).ToList());
+                var newChunks = validChunks.Where(c => !existingChunks.Contains(c.ChunkId)).ToList();
+
+                if (!newChunks.Any())
+                {
+                    _logger.LogDebug($"All chunks already exist for {model.Name}");
+                    return;
+                }
+
+                // Generate embeddings in batches
+                var texts = newChunks.Select(c => c.Text).ToList();
+                var embeddings = await GetEmbeddingsBatchAsync(texts, model, batchSize: 5);
+
+                // Prepare data for ChromaDB
+                var documents = new List<string>();
+                var metadatas = new List<Dictionary<string, object>>();
+                var ids = new List<string>();
+                var validEmbeddings = new List<List<float>>();
+
+                for (int i = 0; i < newChunks.Count && i < embeddings.Count; i++)
+                {
+                    if (embeddings[i].Count == 0) continue;
+
+                    documents.Add(newChunks[i].Text);
+                    ids.Add(newChunks[i].ChunkId);
+                    validEmbeddings.Add(embeddings[i]);
+
+                    var metadata = CreateChunkMetadata(newChunks[i].SourceFile, lastModified, model.Name, newChunks[i].Text, plant);
+                    metadatas.Add(metadata);
+                }
+
+                if (validEmbeddings.Any())
+                {
+                    await AddToChromaDBAsync(collectionId, ids, validEmbeddings, documents, metadatas);
+                    _logger.LogInformation($"✅ Added {validEmbeddings.Count} new chunks for model {model.Name}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to process chunk batch for model {model.Name}");
+            }
+        }
+        private async Task<HashSet<string>> CheckExistingChunksAsync(string collectionId, List<string> chunkIds)
+        {
+            try
+            {
+                var batchSize = 100;
+                var existingIds = new HashSet<string>();
+
+                for (int i = 0; i < chunkIds.Count; i += batchSize)
+                {
+                    var batch = chunkIds.Skip(i).Take(batchSize).ToList();
+
+                    var request = new
+                    {
+                        ids = batch,
+                        include = new[] { "metadatas" }
+                    };
+
+                    var response = await _chromaClient.PostAsJsonAsync(
+                        $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/get",
+                        request);
+
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var json = await response.Content.ReadAsStringAsync();
+                        using var doc = JsonDocument.Parse(json);
+
+                        if (doc.RootElement.TryGetProperty("ids", out var idsArray))
+                        {
+                            foreach (var id in idsArray.EnumerateArray())
+                            {
+                                var idStr = id.GetString();
+                                if (!string.IsNullOrEmpty(idStr))
+                                    existingIds.Add(idStr);
+                            }
+                        }
+                    }
+                }
+
+                return existingIds;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to check existing chunks");
+                return new HashSet<string>();
+            }
+        }
+        private readonly ConcurrentDictionary<string, (List<RelevantChunk> Results, DateTime Timestamp)> _searchCache = new();
+        private async Task<List<RelevantChunk>> SearchChromaDBAsync(string query, ModelConfiguration embeddingModel, int maxResults)
+        {
+            var cacheKey = $"{query.GetHashCode():X}:{embeddingModel.Name}:{maxResults}";
+
+            // Check cache (5-minute TTL)
+            if (_searchCache.TryGetValue(cacheKey, out var cached) &&
+                DateTime.Now - cached.Timestamp < TimeSpan.FromMinutes(5))
+            {
+                _logger.LogDebug("Using cached search results");
+                return cached.Results;
+            }
+
+            try
+            {
+                var collectionId = await _collectionManager.GetOrCreateCollectionAsync(embeddingModel);
+                if (string.IsNullOrEmpty(collectionId))
+                {
+                    return new List<RelevantChunk>();
+                }
+
+                var queryEmbedding = await GetEmbeddingAsync(query, embeddingModel);
+                if (queryEmbedding.Count == 0)
+                {
+                    return new List<RelevantChunk>();
+                }
+
+                var searchData = new
+                {
+                    query_embeddings = new List<List<float>> { queryEmbedding },
+                    n_results = Math.Min(maxResults * 2, 50), // Limit results
+                    include = new[] { "documents", "metadatas", "distances" },
+                    where = new Dictionary<string, object>() // Add filters if needed
+                };
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                var response = await _chromaClient.PostAsJsonAsync(
+                    $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+                    searchData, cts.Token);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning($"ChromaDB search failed: {response.StatusCode}");
+                    return new List<RelevantChunk>();
+                }
+
+                var responseContent = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(responseContent);
+                var results = ParseSearchResults(doc.RootElement, maxResults);
+
+                // Cache results
+                if (_searchCache.Count < 1000) // Prevent memory bloat
+                {
+                    _searchCache.TryAdd(cacheKey, (results, DateTime.Now));
+                }
+
+                return results;
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("ChromaDB search timed out");
+                return new List<RelevantChunk>();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"ChromaDB search failed for model {embeddingModel.Name}");
+                return new List<RelevantChunk>();
+            }
+        }
+        public static void ConfigureOptimizedHttpClient(IServiceCollection services)
+        {
+            services.AddHttpClient("OllamaAPI", client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(60);
+                client.DefaultRequestHeaders.Add("Connection", "keep-alive");
+            })
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+            {
+                MaxConnectionsPerServer = 10,
+                UseCookies = false
+            });
+
+            services.AddHttpClient("ChromaDB", client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(30);
+                client.DefaultRequestHeaders.Add("Connection", "keep-alive");
+            })
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+            {
+                MaxConnectionsPerServer = 20,
+                UseCookies = false
+            });
+        }
+        public async Task WarmUpEmbeddingsAsync()
+        {
+            try
+            {
+                _logger.LogInformation("🔥 Starting embedding warm-up");
+
+                var models = await _modelManager.DiscoverAvailableModelsAsync();
+                var embeddingModels = models.Where(m => m.Type == "embedding" || m.Type == "both").ToList();
+
+                var warmUpTexts = new[]
+                {
+            "Sample text for warm-up",
+            "Another sample for model initialization",
+            "HR policy warm-up text"
+        };
+
+                var tasks = embeddingModels.Select(async model =>
+                {
+                    try
+                    {
+                        foreach (var text in warmUpTexts)
+                        {
+                            await GetEmbeddingAsync(text, model);
+                        }
+                        _logger.LogInformation($"✅ Warmed up model: {model.Name}");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, $"Failed to warm up model: {model.Name}");
+                    }
+                });
+
+                await Task.WhenAll(tasks);
+                _logger.LogInformation("🔥 Embedding warm-up completed");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Embedding warm-up failed");
+            }
+        }
+
     }
 }

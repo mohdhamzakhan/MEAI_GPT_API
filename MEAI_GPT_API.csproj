@@ -9,6 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="Service\RagService.cs" />
     <Compile Remove="Service\RagService_Old.cs" />
   </ItemGroup>
 

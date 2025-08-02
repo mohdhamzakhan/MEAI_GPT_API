@@ -62,31 +62,7 @@ public class RagService : IRAGService
         });
     }
 
-    //public async Task InitializeAsync()
-    //{
-    //    try
-    //    {
-    //        await _initializationLock.WaitAsync();
-    //        _logger.LogInformation("Initializing RAG system with ChromaDB...");
-
-    //        await EnsureChromaDBHealthyAsync();
-    //        _collectionId = await InitializeCollectionAsync();
-
-    //        var embeddingModel = await EnsureEmbeddingModelAvailableAsync();
-    //        await LoadOrGenerateEmbeddings(embeddingModel);
-
-    //        _logger.LogInformation("RAG system initialization completed successfully");
-    //    }
-    //    catch (Exception ex)
-    //    {
-    //        _logger.LogError(ex, "Failed to initialize RAG system");
-    //        throw new RAGServiceException("Failed to initialize RAG system", ex);
-    //    }
-    //    finally
-    //    {
-    //        _initializationLock.Release();
-    //    }
-    //}
+   
     private void EnsureAbbreviationContext()
     {
         var abbreviationsPath = Path.Combine(_options.ContextFolder, "abbreviations.txt");
@@ -139,9 +115,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             throw;
         }
     }
-
-
-
     private async Task<string> GetEmbeddingsVersionAsync()
     {
         var policyFiles = new List<string>();
@@ -162,8 +135,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
         return Convert.ToBase64String(Encoding.UTF8.GetBytes(filesHash));
     }
-
-
     private async Task<string> InitializeCollectionAsync()
     {
         try
@@ -211,7 +182,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             throw new ChromaDBException("Failed to initialize collection", ex);
         }
     }
-
     public async Task<bool> IsHealthy()
     {
         try
@@ -227,7 +197,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             return false;
         }
     }
-
     private async Task<string?> GetCollectionIdByNameAsync(string collectionName)
     {
         try
@@ -247,7 +216,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             throw new ChromaDBException($"Failed to get collection ID for {collectionName}", ex);
         }
     }
-
     private async Task EnsureChromaDBHealthyAsync()
     {
         try
@@ -265,7 +233,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             throw new ChromaDBException("Failed to verify ChromaDB health", ex);
         }
     }
-
     private async Task<string> EnsureEmbeddingModelAvailableAsync()
     {
         var preferredModels = new[]
@@ -295,7 +262,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
         throw new RAGServiceException("No suitable embedding model available");
     }
-
     private async Task LoadOrGenerateEmbeddings(string model)
     {
         try
@@ -367,7 +333,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             throw new RAGServiceException("Failed to process policy files", ex);
         }
     }
-
     public async Task<QueryResponse> ProcessQueryAsync(string question, 
         string plant, 
         string? generationModel = null, 
@@ -472,24 +437,19 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             throw new RAGServiceException("Failed to process query", ex);
         }
     }
-
-
     private class ModelTagsResponse
     {
         public List<ModelInfo> Models { get; set; } = new();
     }
-
     private class ModelInfo
     {
         public string Name { get; set; } = string.Empty;
     }
-
     private async Task<bool> IsFileProcessedAsync(string filePath, DateTime lastModified)
     {
         var cacheKey = $"file_processed:{filePath}:{lastModified.Ticks}";
         return await _cacheManager.ExistsAsync(cacheKey);
     }
-
     private async Task ProcessFileAsync(string filePath, string model, DateTime lastModified)
     {
         var content = await _documentProcessor.ExtractTextAsync(filePath);
@@ -511,7 +471,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
         var cacheKey = $"file_processed:{filePath}:{lastModified.Ticks}";
         await _cacheManager.SetAsync(cacheKey, true, TimeSpan.FromDays(30));
     }
-
     private async Task<QueryResponse> HandleHistoryClearRequest(
      ConversationContext context,
      string? sessionId)
@@ -540,7 +499,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             SessionId = sessionId
         };
     }
-
     private void CleanupExpiredSessions()
     {
         try
@@ -565,7 +523,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             _logger.LogError(ex, "Failed to cleanup expired sessions");
         }
     }
-
     private void InitializeSessionCleanup()
     {
         // Run cleanup every 30 minutes
@@ -577,14 +534,12 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
         _logger.LogInformation("Session cleanup timer initialized");
     }
-
     private void ClearContext(ConversationContext context)
     {
         context.History.Clear();
         context.RelevantChunks.Clear();
         context.LastAccessed = DateTime.Now;
     }
-
     private async Task<List<RelevantChunk>> GetRelevantChunksAsync(
     string query,
     string embeddingModel,
@@ -640,7 +595,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             return new List<RelevantChunk>();
         }
     }
-
     private ConversationContext GetOrCreateConversationContext(string? sessionId)
     {
         if (string.IsNullOrEmpty(sessionId))
@@ -719,10 +673,8 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
         return hasFollowUpIndicator || hasContextualReference;
     }
-
     private bool IsTopicChanged(string question, List<ConversationTurn> history) =>
        history.Count > 0 && CalculateTextSimilarity(question, history.Last().Question) < 0.3;
-
     private string BuildContextualQuery(string currentQuestion, List<ConversationTurn> history)
     {
         if (history.Count == 0) return currentQuestion;
@@ -847,7 +799,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             return "I apologize, but I'm having trouble generating a response right now. Please try again or contact HR directly for assistance.";
         }
     }
-
     private string CleanAndEnhanceResponse(string response)
     {
         // Remove thinking tags and clean up
@@ -867,7 +818,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
         return cleaned;
     }
-
     private string EnsureCorrectAbbreviations(string text)
     {
         // Fix common abbreviation misinterpretations
@@ -875,8 +825,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
         return text;
     }
-
-
     private string CleanResponse(string response)
     {
         // Remove thinking tags if present (for models like qwen)
@@ -937,7 +885,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
         return chunks.Where(c => !string.IsNullOrWhiteSpace(c.Item1)).ToList();
     }
-
     private List<string> SplitIntoSections(string text)
     {
         // Split by common section markers
@@ -966,7 +913,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
         return sections.Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
     }
-
     private bool IsLikelySectionHeader(string line)
     {
         // Detect section headers
@@ -975,7 +921,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 System.Text.RegularExpressions.Regex.IsMatch(line, @"^\d+\.") ||
                 line.All(c => char.IsUpper(c) || char.IsWhiteSpace(c) || char.IsPunctuation(c)));
     }
-
     private List<string> SplitIntoSentences(string text)
     {
         // Better sentence splitting
@@ -985,7 +930,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
         return sentences;
     }
-
     private async Task<List<RelevantChunk>> SearchChromaDBAsync(string query, string embeddingModel, int maxResults)
     {
         try
@@ -1070,7 +1014,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             return new List<RelevantChunk>();
         }
     }
-
     private string EnhanceQueryForSearch(string query)
     {
         // Expand abbreviations in query
@@ -1091,7 +1034,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
         return enhanced;
     }
-
     private double DetermineThreshold(string query)
     {
         // Lower threshold for specific policy questions
@@ -1103,7 +1045,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
         return 0.2; // Standard threshold
     }
-
     private double BoostRelevanceScore(double similarity, string text, string sourceFile, string query)
     {
         // Boost for exact keyword matches
@@ -1127,7 +1068,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
         return similarity;
     }
-
     private async Task<List<RelevantChunk>> ReRankChunksAsync
         (
     string query,
@@ -1167,7 +1107,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             return chunks.OrderByDescending(c => c.Similarity).Take(maxResults).ToList();
         }
     }
-
     public async Task<Dictionary<string, object>> AnalyzeChunkSizes()
     {
         try
@@ -1209,7 +1148,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             return new Dictionary<string, object> { { "error", ex.Message } };
         }
     }
-
     private async Task ProcessChunkBatch(
      List<(string Text, string SourceFile)> chunks,
      string model,
@@ -1305,7 +1243,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             throw;
         }
     }
-
     private List<(string Text, string SourceFile)> GetContextChunksFromFiles()
     {
         var chunks = new List<(string, string)>();
@@ -1329,8 +1266,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
         return chunks;
     }
-
-
     private string CleanText(string text)
     {
         // Remove extra whitespace
@@ -1344,7 +1279,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
         return text.Trim();
     }
-
     private string GenerateChunkId(string filePath, string text, DateTime lastModified)
     {
         var fileName = Path.GetFileNameWithoutExtension(filePath);
@@ -1364,7 +1298,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
         var union = words1.Union(words2).Count();
         return union == 0 ? 0.0 : (double)intersection / union;
     }
-
     private async Task<List<float>> GetEmbedding(string text, string model, int maxRetries = 3)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -1419,7 +1352,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
         throw new Exception("Failed to generate embedding after all retries");
     }
-
     private string PreprocessTextForEmbedding(string text)
     {
         // Clean and normalize text for better embeddings
@@ -1438,7 +1370,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
         return text;
     }
-
     private string ExtractKeywords(string text)
     {
         var stopWords = new HashSet<string>
@@ -1456,7 +1387,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
         return string.Join(" ", words);
     }
-
     public async Task<bool> AddToChromaDBAsync(
     List<string> ids,
     List<List<float>> embeddings,
@@ -1625,8 +1555,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             return null;
         }
     }
-
-
     public async Task<List<CorrectionEntry>> DebugGetAllCorrections()
     {
         try
@@ -1697,8 +1625,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             return new List<CorrectionEntry>();
         }
     }
-
-
     private void UpdateConversationHistory(
     ConversationContext context,
     string question,
@@ -1751,13 +1677,11 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             // Don't throw - this is not critical for the response
         }
     }
-
     private class ChromaGetResponse
     {
         public List<string>? Documents { get; set; }
         public List<Dictionary<string, object>>? Metadatas { get; set; }
     }
-
     public async Task RefreshEmbeddingsAsync(string model = "mistral:latest")
     {
         try
@@ -1781,7 +1705,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             throw;
         }
     }
-
     private async Task DeletePolicyDocumentsAsync()
     {
         try
@@ -1817,9 +1740,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             throw;
         }
     }
-
-
-
     private async Task DeleteCollectionIfExistsAsync(string collectionName)
     {
         try
@@ -1876,9 +1796,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             throw;
         }
     }
-
-
-
     public async Task SaveCorrectionAsync(string question, string correctAnswer, string model)
     {
         try
@@ -1970,8 +1887,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             throw;
         }
     }
-
-
     public SystemStatus GetSystemStatus()
     {
         try
@@ -1998,7 +1913,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             throw;
         }
     }
-
     private bool IsSystemHealthy()
     {
         try
@@ -2024,7 +1938,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             return false;
         }
     }
-
     private async Task<int> GetCorrectionsCountAsync()
     {
         try
@@ -2048,7 +1961,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             return 0;
         }
     }
-
     public List<CorrectionEntry> GetRecentCorrections(int limit = 50)
     {
         try
@@ -2069,7 +1981,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             throw;
         }
     }
-
     public async Task<bool> DeleteCorrectionAsync(string id)
     {
         try
@@ -2110,7 +2021,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             throw;
         }
     }
-
     public async Task ProcessUploadedPolicyAsync(Stream fileStream, string fileName, string model)
     {
         try
@@ -2263,7 +2173,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             return new List<CorrectionEntry>();
         }
     }
-
     private async Task RestoreCorrectionsAsync(List<CorrectionEntry> corrections, string model)
     {
         try
@@ -2304,7 +2213,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             throw;
         }
     }
-
     private async Task RestoreCorrectionBatch(List<CorrectionEntry> corrections, string embeddingModel)
     {
         try
@@ -2364,24 +2272,19 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             throw;
         }
     }
-
     public Task<List<ModelConfiguration>> GetAvailableModelsAsync()
     {
         throw new NotImplementedException();
     }
-
-    public Task<QueryResponse> ProcessQueryAsync(string question, string? generationModel = null, string? embeddingModel = null, int maxResults = 15, bool meaiInfo = true, string? sessionId = null, bool useReRanking = true)
-    {
-        throw new NotImplementedException();
-    }
-
     public Task MarkAppreciatedAsync(string sessionId, string question)
     {
         throw new NotImplementedException();
     }
-
     public Task ApplyCorrectionAsync(string sessionId, string question, string correctedAnswer, string model)
     {
         throw new NotImplementedException();
     }
+
+
+
 }

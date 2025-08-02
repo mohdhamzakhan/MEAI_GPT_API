@@ -55,6 +55,38 @@ namespace MEAI_GPT_API.Services
                 .FirstOrDefaultAsync(c => c.Id == id);
         }
 
+        public async Task<List<ConversationEntry>> GetConversationAsync(string filter, int limit = 1000)
+        {
+            // Simple parser for filters like: EmbeddingModel == "value"
+            string? embeddingModelValue = null;
+            if (!string.IsNullOrEmpty(filter) && filter.Contains("EmbeddingModel"))
+            {
+                var parts = filter.Split(new[] { "==" }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 2)
+                {
+                    embeddingModelValue = parts[1].Trim().Trim('"');
+                }
+            }
+
+            // Start query
+            IQueryable<ConversationEntry> query = _context.ConversationEntries;
+
+            // Apply filter if present
+            if (!string.IsNullOrEmpty(embeddingModelValue))
+            {
+                query = query.Where(c => c.EmbeddingModel == embeddingModelValue);
+            }
+
+            // Limit and fetch first result
+            var entry = await query
+                .OrderByDescending(c => c.CreatedAt)   // or any relevant order
+                .Take(limit)
+                .ToListAsync();
+
+            return entry;
+        }
+
+
         public async Task<List<ConversationEntry>> GetSessionConversationsAsync(string sessionId, int limit = 50)
         {
             return await _context.ConversationEntries

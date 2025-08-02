@@ -6,6 +6,8 @@ namespace MEAI_GPT_API.Service.Interface
     {
         Task SaveConversationAsync(ConversationEntry entry);
         Task<ConversationEntry?> GetConversationAsync(int id);
+        Task<List<ConversationEntry>> GetConversationAsync(string filter, int limit=1000);
+
         Task<List<ConversationEntry>> GetSessionConversationsAsync(string sessionId, int limit = 50);
         Task<ConversationSession> GetOrCreateSessionAsync(string sessionId, string? userId = null, string? plant = null);
         Task UpdateSessionAsync(ConversationSession session);
