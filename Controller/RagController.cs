@@ -107,11 +107,11 @@ namespace MEAI_GPT_API.Controller
         }
 
         [HttpPost("refresh-embeddings")]
-        public async Task<ActionResult> RefreshEmbeddings([FromBody] string model)
+        public async Task<ActionResult> RefreshEmbeddings()
         {
             try
             {
-                //await _ragService.RefreshEmbeddingsAsync(model);
+                await _ragService.InitializeAsync();
                 return Ok(new { message = "Embeddings refreshed successfully" });
             }
             catch (Exception ex)
