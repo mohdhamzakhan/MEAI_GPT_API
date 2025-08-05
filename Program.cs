@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using Serilog;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
@@ -62,6 +63,12 @@ else
     builder.Services.AddDistributedMemoryCache();
 }
 
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(10);
+    options.Limits.RequestHeadersTimeout = TimeSpan.FromMinutes(5);
+});
+
 // Add OpenTelemetry
 // Configure OpenTelemetry
 builder.Services.AddOpenTelemetry()
@@ -90,10 +97,15 @@ builder.Services.AddDbContext<ConversationDbContext>(options =>
 builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>();
 builder.Services.AddSingleton<ICacheManager, CacheManager>();
 builder.Services.AddSingleton<IMetricsCollector, MetricsCollector>();
+
+// FIXED: Keep RAGService as scoped
 builder.Services.AddScoped<IRAGService, DynamicRagService>();
 builder.Services.Configure<DynamicRAGConfiguration>(
     builder.Configuration.GetSection("DynamicRAG"));
 builder.Services.AddScoped<IConversationStorageService, ConversationStorageService>();
+
+// FIXED: Modified hosted service to use IServiceScopeFactory
+builder.Services.AddHostedService<RagInitializationService>();
 
 builder.Services.AddSingleton<Conversation>();
 builder.Services.Configure<PlantSettings>(options =>
@@ -101,6 +113,7 @@ builder.Services.Configure<PlantSettings>(options =>
     options.Plants = builder.Configuration.GetSection("Plant").Get<Dictionary<string, string>>()!;
 });
 
+// Keep ModelManager as scoped
 builder.Services.AddScoped<IModelManager>(provider =>
 {
     var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
@@ -110,17 +123,26 @@ builder.Services.AddScoped<IModelManager>(provider =>
 
     return new ModelManager(httpClient, logger, configOptions);
 });
+
 builder.Services.AddSingleton<DynamicCollectionManager>(provider =>
 {
     var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
     var chromaClient = httpClientFactory.CreateClient("ChromaDB");
     var chromaOptions = provider.GetRequiredService<IOptions<ChromaDbOptions>>().Value;
     var logger = provider.GetRequiredService<ILogger<DynamicCollectionManager>>();
-    return new DynamicCollectionManager(chromaClient, chromaOptions, logger); // ✅ fixed
+    return new DynamicCollectionManager(chromaClient, chromaOptions, logger);
 });
+
+
+builder.Host.UseSerilog((context, config) =>
+{
+    config
+        .MinimumLevel.Information()
+        .WriteTo.File("Logs/server-log.txt", rollingInterval: RollingInterval.Day);
+});
+
 builder.Services.Configure<ChromaDbOptions>(
     builder.Configuration.GetSection("ChromaDB"));
-
 
 var app = builder.Build();
 
@@ -131,12 +153,13 @@ using (var scope = app.Services.CreateScope())
     context.Database.EnsureCreated();
 }
 
-using (var scope = app.Services.CreateScope())
-{
-    var ragService = scope.ServiceProvider.GetRequiredService<IRAGService>();
-    await ragService.InitializeAsync();
-}
-
+// FIXED: This manual initialization is now handled by the hosted service
+// Remove this manual initialization since RagInitializationService will handle it
+// using (var scope = app.Services.CreateScope())
+// {
+//     var ragService = scope.ServiceProvider.GetRequiredService<IRAGService>();
+//     await ragService.InitializeAsync();
+// }
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
@@ -144,12 +167,12 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+
 // Add Prometheus metrics endpoint
 app.UseOpenTelemetryPrometheusScrapingEndpoint();
 app.UseCors("AllowAll");
 app.UseRouting();
 app.MapControllers();
 app.UseMetrics();
-
 
 app.Run();

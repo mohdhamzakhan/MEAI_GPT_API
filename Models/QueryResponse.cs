@@ -12,5 +12,7 @@
         public string ContextUsed { get; set; } // New
         public string? SessionId { get; set; } // Add this 
         public Dictionary<string, string> ModelsUsed { get; set; } = new();
+        public string Plant { get; set; }
+        public bool HasSufficientPolicyCoverage { get; set; } = true;
     }
 }

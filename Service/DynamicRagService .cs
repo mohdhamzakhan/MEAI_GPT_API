@@ -14,6 +14,16 @@ using static MEAI_GPT_API.Models.Conversation;
 
 namespace MEAI_GPT_API.Services
 {
+    public static class StringExtensions
+    {
+        public static string ToTitleCase(this string input)
+        {
+            if (string.IsNullOrEmpty(input))
+                return input;
+
+            return char.ToUpper(input[0]) + input.Substring(1).ToLower();
+        }
+    }
     public class DynamicRagService : IRAGService
     {
         private readonly IModelManager _modelManager;
@@ -31,7 +41,7 @@ namespace MEAI_GPT_API.Services
         private static readonly ConcurrentBag<CorrectionEntry> _correctionsCache = new();
         private readonly object _lockObject = new();
         private readonly string _currentUser = "system";
-        private bool _isInitialized = false;
+        public bool _isInitialized = false;
         private readonly object _lock = new();
         private static readonly ConcurrentBag<(string Question, string Answer, List<RelevantChunk> Chunks)> _appreciatedTurns = new();
         private readonly PlantSettings _plants;
@@ -213,19 +223,36 @@ These abbreviations are standard across all MEAI HR policies and should be inter
         {
             var policyFiles = new List<string>();
 
-            if (Directory.Exists(Path.Combine(_chromaOptions.PolicyFolder, plant)))
+            // Plant-specific policies
+            var plantSpecificPath = Path.Combine(_chromaOptions.PolicyFolder, plant);
+            if (Directory.Exists(plantSpecificPath))
             {
-                string path = Path.Combine(_chromaOptions.PolicyFolder, plant);
-                policyFiles.AddRange(Directory.GetFiles(path, "*.*", SearchOption.AllDirectories)
+                policyFiles.AddRange(Directory.GetFiles(plantSpecificPath, "*.*", SearchOption.AllDirectories)
                     .Where(f => _chromaOptions.SupportedExtensions.Contains(
                         Path.GetExtension(f).ToLowerInvariant())));
+
+                _logger.LogInformation($"📁 Found {policyFiles.Count} plant-specific files for {plant}");
             }
 
+            // Centralized policies
+            var centralizedPath = Path.Combine(_chromaOptions.PolicyFolder, "Centralized");
+            if (Directory.Exists(centralizedPath))
+            {
+                var centralizedFiles = Directory.GetFiles(centralizedPath, "*.*", SearchOption.AllDirectories)
+                    .Where(f => _chromaOptions.SupportedExtensions.Contains(
+                        Path.GetExtension(f).ToLowerInvariant()));
+
+                policyFiles.AddRange(centralizedFiles);
+                _logger.LogInformation($"📁 Found {centralizedFiles.Count()} centralized policy files");
+            }
+
+            // Context files (apply to all plants)
             if (Directory.Exists(_chromaOptions.ContextFolder))
             {
                 policyFiles.AddRange(Directory.GetFiles(_chromaOptions.ContextFolder, "*.txt", SearchOption.AllDirectories));
             }
 
+            _logger.LogInformation($"📋 Total files for {plant}: {policyFiles.Count}");
             return policyFiles;
         }
         private async Task ProcessFileForModelAsync(string filePath, ModelConfiguration model, string collectionId, string plant)
@@ -254,127 +281,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 _logger.LogError(ex, $"Failed to process file {filePath} for model {model.Name}");
             }
         }
-        //private async Task ProcessChunkBatchForModelAsync(
-        //    List<(string Text, string SourceFile)> chunks,
-        //    ModelConfiguration model,
-        //    string collectionId,
-        //    DateTime lastModified,
-        //    string plant)
-        //{
-        //    try
-        //    {
-        //        var embeddings = new List<List<float>>();
-        //        var documents = new List<string>();
-        //        var metadatas = new List<Dictionary<string, object>>();
-        //        var ids = new List<string>();
-
-        //        foreach (var (text, sourceFile) in chunks)
-        //        {
-        //            if (string.IsNullOrWhiteSpace(text)) continue;
-
-        //            try
-        //            {
-        //                var cleanedText = CleanText(text);
-        //                var embedding = await GetEmbeddingAsync(cleanedText, model);
-
-        //                if (embedding.Count == 0) continue;
-
-        //                embeddings.Add(embedding);
-        //                documents.Add(cleanedText);
-
-        //                var chunkId = GenerateChunkId(sourceFile, cleanedText, lastModified, model.Name);
-        //                ids.Add(chunkId);
-
-        //                var metadata = CreateChunkMetadata(sourceFile, lastModified, model.Name, cleanedText, plant);
-        //                metadatas.Add(metadata);
-        //            }
-        //            catch (Exception ex)
-        //            {
-        //                _logger.LogError(ex, $"Failed to process chunk from {sourceFile} for model {model.Name}");
-        //            }
-        //        }
-
-        //        if (embeddings.Any())
-        //        {
-        //            await AddToChromaDBAsync(collectionId, ids, embeddings, documents, metadatas);
-        //            _logger.LogInformation($"✅ Added {embeddings.Count} chunks for model {model.Name}");
-        //        }
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        _logger.LogError(ex, $"Failed to process chunk batch for model {model.Name}");
-        //    }
-        //}
-        // Updated embedding generation with dynamic model support
-        //private async Task<List<float>> GetEmbeddingAsync(string text, ModelConfiguration model)
-        //{
-        //    if (string.IsNullOrWhiteSpace(text))
-        //        throw new ArgumentException("Text cannot be empty");
-
-        //    // Dynamic text truncation based on model's context length
-        //    var maxLength = model.MaxContextLength * 3; // Approximate char to token ratio
-        //    if (text.Length > maxLength)
-        //        text = text.Substring(0, maxLength);
-
-        //    const int maxRetries = 3;
-        //    var safeOptions = new Dictionary<string, object>();
-        //    foreach (var kvp in model.ModelOptions)
-        //    {
-        //        object value = kvp.Value;
-
-        //        if (kvp.Key == "num_ctx" && value is String d)
-        //            value = int.Parse(d);
-        //        else if (kvp.Key == "top_p" && value is string e)
-        //            value = float.Parse(e);
-        //        else if (kvp.Key == "temperature" && value is string f)
-        //            value = float.Parse(f);
-
-        //        safeOptions[kvp.Key] = value;
-        //    }
-
-        //    for (int attempt = 0; attempt < maxRetries; attempt++)
-        //    {
-        //        try
-        //        {
-        //            var request = new
-        //            {
-        //                model = model.Name, // Dynamic model name!
-        //                prompt = text,
-        //                options = safeOptions // Dynamic model options!
-        //            };
-
-        //            var response = await _httpClient.PostAsJsonAsync("/api/embeddings", request);
-        //            response.EnsureSuccessStatusCode();
-
-        //            var json = await response.Content.ReadAsStringAsync();
-        //            using var doc = JsonDocument.Parse(json);
-
-        //            if (doc.RootElement.TryGetProperty("embedding", out var embeddingProperty))
-        //            {
-        //                var embedding = embeddingProperty.EnumerateArray().Select(x => x.GetSingle()).ToList();
-
-        //                // Validate embedding dimension matches model configuration
-        //                if (embedding.Count != model.EmbeddingDimension)
-        //                {
-        //                    _logger.LogWarning($"Embedding dimension mismatch for {model.Name}. Expected: {model.EmbeddingDimension}, Got: {embedding.Count}");
-        //                }
-
-        //                return embedding;
-        //            }
-        //        }
-        //        catch (Exception ex)
-        //        {
-        //            _logger.LogWarning($"Embedding attempt {attempt + 1} failed for model {model.Name}: {ex.Message}");
-        //            if (attempt == maxRetries - 1)
-        //                throw;
-        //            await Task.Delay(2000 * (attempt + 1));
-        //        }
-        //    }
-
-        //    throw new Exception($"Failed to generate embedding with model {model.Name} after all retries");
-        //}
-        // Updated query processing with dynamic model selection
-        // UPDATE the ProcessQueryAsync method - Add early return for meaiInfo = false
+        
         public async Task<QueryResponse> ProcessQueryAsync(
             string question,
             string plant,
@@ -545,7 +452,8 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
                 // Get relevant chunks - ONLY for MEAI queries
                 var relevantChunks = await GetRelevantChunksAsync(
-                    contextualQuery, embModel, maxResults, meaiInfo, context, useReRanking, genModel);
+                                    contextualQuery, embModel, maxResults, meaiInfo, context, useReRanking, genModel, plant);
+
 
                 // Determine parent conversation ID for follow-ups
                 int? parentId = null;
@@ -563,7 +471,8 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
                 // Generate answer with MEAI context
                 var answer = await GenerateChatResponseAsync(
-                    question, genModel, context.History, relevantChunks, context, ismeai: meaiInfo);
+                            question, genModel, context.History, relevantChunks, context, ismeai: meaiInfo, plant: plant);
+
 
                 var answerEmbedding = await GetEmbeddingAsync(answer, embModel);
 
@@ -608,6 +517,8 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 stopwatch.Stop();
                 _metrics.RecordQueryProcessing(stopwatch.ElapsedMilliseconds, relevantChunks.Count, true);
 
+                var hasSufficientCoverage = CheckPolicyCoverage(relevantChunks, question);
+
                 return new QueryResponse
                 {
                     Answer = answer,
@@ -621,7 +532,9 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     {
                         ["generation"] = generationModel,
                         ["embedding"] = embeddingModel
-                    }
+                    },
+                    Plant = plant,
+                    HasSufficientPolicyCoverage = hasSufficientCoverage
                 };
             }
             catch (Exception ex)
@@ -629,7 +542,8 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 stopwatch.Stop();
                 _logger.LogError(ex, "Query processing failed for session {SessionId}", sessionId);
                 _metrics.RecordQueryProcessing(stopwatch.ElapsedMilliseconds, 0, false);
-                throw new RAGServiceException("Failed to process query", ex);
+                _logger.LogError(ex, "Query processing failed for session {SessionId} and plant {Plant}", sessionId, plant);
+                throw new RAGServiceException($"Failed to process query for plant {plant}", ex);
             }
         }
         private async Task<string> RephraseWithLLMAsync(string originalAnswer, string modelName)
@@ -940,178 +854,104 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
             return dot / (Math.Sqrt(normA) * Math.Sqrt(normB));
         }
-        // Updated search with model-specific collection
-        //private async Task<List<RelevantChunk>> SearchChromaDBAsync(string query, ModelConfiguration embeddingModel, int maxResults)
-        //{
-        //    try
-        //    {
-        //        var collectionId = await _collectionManager.GetOrCreateCollectionAsync(embeddingModel);
-        //        if (string.IsNullOrEmpty(collectionId))
-        //        {
-        //            throw new InvalidOperationException($"No collection found for embedding model {embeddingModel.Name}");
-        //        }
 
-        //        _logger.LogInformation($"Searching with model {embeddingModel.Name} in collection {collectionId}");
-
-        //        var queryEmbedding = await GetEmbeddingAsync(query, embeddingModel);
-
-        //        var searchData = new
-        //        {
-        //            query_embeddings = new List<List<float>> { queryEmbedding },
-        //            n_results = maxResults * 2,
-        //            include = new[] { "documents", "metadatas", "distances" }
-        //        };
-
-        //        var response = await _chromaClient.PostAsJsonAsync(
-        //            $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
-        //            searchData);
-
-        //        var responseContent = await response.Content.ReadAsStringAsync();
-        //        response.EnsureSuccessStatusCode();
-
-        //        using var doc = JsonDocument.Parse(responseContent);
-        //        return ParseSearchResults(doc.RootElement, maxResults);
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        _logger.LogError(ex, $"ChromaDB search failed for model {embeddingModel.Name}");
-        //        return new List<RelevantChunk>();
-        //    }
-        //}
-        private List<RelevantChunk> ParseSearchResults(JsonElement root, int maxResults)
-        {
-            var relevantChunks = new List<RelevantChunk>();
-
-            if (root.TryGetProperty("documents", out var documentsArray) &&
-                documentsArray.GetArrayLength() > 0 &&
-                documentsArray[0].GetArrayLength() > 0)
-            {
-                var documents = documentsArray[0].EnumerateArray().ToArray();
-                var metadatas = root.GetProperty("metadatas")[0].EnumerateArray().ToArray();
-                var distances = root.GetProperty("distances")[0].EnumerateArray().ToArray();
-
-                for (int i = 0; i < documents.Length; i++)
-                {
-                    var similarity = 1.0 - distances[i].GetDouble();
-
-                    if (similarity < 0.15) continue; // Lowered threshold for broader coverage
-
-                    var metadata = metadatas[i];
-                    var sourceFile = metadata.TryGetProperty("source_file", out var sf)
-                        ? Path.GetFileName(sf.GetString() ?? "")
-                        : "Unknown";
-
-                    var documentText = documents[i].GetString() ?? "";
-
-                    // Priority boost for context files
-                    if (sourceFile.Contains("abbreviation") || sourceFile.Contains("context") ||
-                        documentText.ToUpper().Contains("CL =") || documentText.ToUpper().Contains("CASUAL LEAVE"))
-                    {
-                        similarity = Math.Min(0.95, similarity + 0.2);
-                    }
-
-                    relevantChunks.Add(new RelevantChunk
-                    {
-                        Text = documentText,
-                        Source = sourceFile,
-                        Similarity = similarity
-                    });
-                }
-            }
-
-            return relevantChunks
-                .OrderByDescending(c => c.Similarity)
-                .Take(maxResults)
-                .ToList();
-        }
         private async Task<string> GenerateChatResponseAsync(
-    string question,
-    ModelConfiguration generationModel,
-    List<ConversationTurn> history,
-    List<RelevantChunk> chunks,
-    ConversationContext context,
-    bool ismeai = true)
+     string question,
+     ModelConfiguration generationModel,
+     List<ConversationTurn> history,
+     List<RelevantChunk> chunks,
+     ConversationContext context,
+     bool ismeai = true,
+     string plant = "")
         {
             var messages = new List<object>();
 
-            // Improved system prompt
+            // Check policy coverage first
+            var hasSufficientCoverage = CheckPolicyCoverage(chunks, question);
+
+            // IF INSUFFICIENT COVERAGE, RETURN FALLBACK MESSAGE IMMEDIATELY
+            if (ismeai && !hasSufficientCoverage)
+            {
+                _logger.LogWarning($"⚠️ Insufficient policy coverage for {plant}, returning fallback message");
+                return $"I don't have sufficient policy information to answer this question for {plant}. Please contact your supervisor or HR department for clarification on this matter.";
+            }
+
+            // ENHANCED SYSTEM PROMPT
             messages.Add(new
             {
                 role = "system",
                 content = ismeai ?
-@"🧠 You are MEAI HR Policy Assistant — an expert advisor with deep knowledge of MEAI company HR policies.
+            $@"🧠 You are MEAI HR Policy Assistant for {plant} — an expert advisor with deep knowledge of MEAI company HR policies.
 
 🔑 DEFINITIONS — NEVER REINTERPRET:
 • CL = Casual Leave (**never** 'Continuous Learning')
-• SL = Sick Leave
+• SL = Sick Leave  
 • COFF = Compensatory Off
 • EL = Earned Leave
 • PL = Privilege Leave
 • ML = Maternity Leave
 
-📋 HOW TO STRUCTURE YOUR RESPONSE:
-1. Use **all** relevant information from the provided policy excerpts.
-2. Organize the answer with:
-   - ✅ Clear headings  
-   - 🔹 Bullet points  
-   - 🕒 Timelines, procedures, and requirements
-3. After each fact, **cite the source** clearly in brackets: `[DocumentName]`
-4. If the information is **partial or missing**:
-   - State what's available.
-   - Recommend contacting HR for clarification.
-5. Be **comprehensive** — do not ignore useful context.
-6. Use a **professional, concise, and helpful tone**.
+🏭 PLANT-SPECIFIC GUIDANCE:
+• You are answering for: **{plant}**
+• Policies may be plant-specific or centralized
+• If plant-specific policy exists, prioritize it
+• If only centralized policy exists, mention it applies across all plants
 
-⚠️ IMPORTANT:
-You must base your answers **only** on the provided official policy content. Do not assume, hallucinate, or fabricate information."
+📋 RESPONSE REQUIREMENTS:
+1. Provide a COMPLETE, DETAILED answer
+2. Use **all** relevant information from the provided policy excerpts
+3. Organize with clear headings, bullet points, and procedures
+4. Cite sources clearly: `[DocumentName]`
+5. If information is partial, state what's available from policies
+6. NEVER truncate your response - provide the full answer
 
-:
-@"You are an intelligent assistant designed to provide accurate, complete, and helpful responses.
+🎯 IMPORTANT: Base answers ONLY on provided official policy content. Provide complete, comprehensive responses."
+
+            :
+            @"You are an intelligent assistant designed to provide accurate, complete, and helpful responses.
 
 📌 INSTRUCTIONS:
-1. Use only the context provided — do not assume or guess beyond it.
-2. Focus on clarity and relevance in your answers.
-3. If the context is missing something:
-   - State clearly what is not available.
-   - Avoid fabrication or speculation.
-4. Structure responses where possible:
-   - Headings for sections
-   - Bullet points for clarity
-   - Examples if appropriate
-5. Maintain a neutral, professional, and informative tone.
+1. Use only the context provided — do not assume or guess beyond it
+2. Focus on clarity and relevance in your answers  
+3. If context is insufficient, clearly state limitations
+4. Structure responses with headings and bullet points where appropriate
+5. Maintain a professional, informative tone
+6. Provide COMPLETE responses - never truncate
 
-⚠️ IMPORTANT:
-Do not introduce external information or opinions. Stay strictly within the context provided."
+⚠️ IMPORTANT: Do not introduce external information or opinions. Always provide full, complete answers."
             });
 
-
-
-            // Add recent conversation history
-            foreach (var turn in history.TakeLast(8))
+            // Add conversation history
+            foreach (var turn in history.TakeLast(6)) // Reduced from 8 to save tokens
             {
                 messages.Add(new { role = "user", content = turn.Question });
                 messages.Add(new { role = "assistant", content = turn.Answer });
             }
 
-            // Enhanced context building
-            if (chunks.Any() && ismeai)
+            // BUILD CONTEXT ONLY FOR SUFFICIENT COVERAGE
+            if (chunks.Any() && ismeai && hasSufficientCoverage)
             {
                 var contextBuilder = new StringBuilder();
-                contextBuilder.AppendLine("=== OFFICIAL POLICY INFORMATION ===");
+                contextBuilder.AppendLine($"=== OFFICIAL POLICY INFORMATION FOR {plant.ToUpper()} ===");
                 contextBuilder.AppendLine();
 
-                var groupedChunks = chunks
+                var highQualityChunks = chunks.Where(c => c.Similarity >= 0.25).ToList(); // Lowered threshold
+                var groupedChunks = highQualityChunks
                     .GroupBy(c => c.Source)
                     .OrderByDescending(g => g.Max(c => c.Similarity))
-                    .Take(6);
+                    .Take(5); // Reduced to save tokens
 
                 foreach (var group in groupedChunks)
                 {
-                    contextBuilder.AppendLine($"📄 {group.Key}:");
-                    foreach (var chunk in group.OrderByDescending(c => c.Similarity).Take(10))
+                    var policyType = group.Key.ToLowerInvariant().Contains("centralized") ||
+                                   group.Key.ToLowerInvariant().Contains("general")
+                                   ? "Centralized Policy" : $"{plant} Specific Policy";
+
+                    contextBuilder.AppendLine($"📄 {group.Key} ({policyType}):");
+
+                    foreach (var chunk in group.OrderByDescending(c => c.Similarity).Take(6)) // Reduced from 8
                     {
                         contextBuilder.AppendLine($"• {chunk.Text.Trim()}");
-                        contextBuilder.AppendLine($"  (Relevance: {chunk.Similarity:F2})");
                         contextBuilder.AppendLine();
                     }
                 }
@@ -1119,59 +959,169 @@ Do not introduce external information or opinions. Stay strictly within the cont
                 messages.Add(new { role = "system", content = contextBuilder.ToString() });
             }
 
+            // Resolve pronouns and add current question
             question = ResolvePronouns(question, context);
-
-            // Then add to messages
             messages.Add(new { role = "user", content = question });
 
-            // Add current question
-            messages.Add(new { role = "user", content = question });
-
-            var safeOptions = new Dictionary<string, object>();
-            foreach (var kvp in generationModel.ModelOptions)
-            {
-                object value = kvp.Value;
-
-                Type t = value.GetType();
-                if (kvp.Key == "num_ctx" && value is String d)
-                    value = int.Parse(d);
-                else if (kvp.Key == "top_p" && value is string e)
-                    value = float.Parse(e);
-                else if (kvp.Key == "temperature" && value is string f)
-                    value = float.Parse(f);
-
-                safeOptions[kvp.Key] = value;
-
-            }
-
+            // FIXED: Generate response with proper error handling and token management
             var requestData = new
             {
                 model = generationModel.Name,
                 messages,
-                temperature = generationModel.Temperature,
-                stream = false,
-                options = safeOptions
+                temperature = Math.Min(generationModel.Temperature, 0.3), // Lower temperature for more consistent responses
+                stream = false, // IMPORTANT: Disable streaming for now
+                options = new Dictionary<string, object>
+        {
+            { "num_ctx", Math.Min(8192, generationModel.MaxContextLength) }, // Ensure sufficient context
+            { "num_predict", 2048 }, // Allow longer responses
+            { "top_p", 0.9 },
+            { "repeat_penalty", 1.1 },
+            { "stop", new[] { "[STOP]", "[END]" } } // Add stop tokens
+        }
             };
 
             try
             {
-                var response = await _httpClient.PostAsJsonAsync("/api/chat", requestData);
-                var responseContent = await response.Content.ReadAsStringAsync();
-                _logger.LogError("Raw Ollama response: {Content}", responseContent);
-                response.EnsureSuccessStatusCode();
+                _logger.LogInformation($"🤖 Generating response with model: {generationModel.Name}");
+
+                // Increase timeout for complex responses
+                using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(4));
+
+                var response = await _httpClient.PostAsJsonAsync("/api/chat", requestData, cts.Token);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    _logger.LogError($"❌ Chat generation failed: {response.StatusCode} - {errorContent}");
+
+                    return ismeai
+                        ? $"I apologize, but I'm having trouble generating a response right now. Please contact your supervisor or HR department for assistance regarding {plant} policies."
+                        : "I apologize, but I'm having trouble generating a response right now. Please try again.";
+                }
 
                 var json = await response.Content.ReadAsStringAsync();
-                using var doc = JsonDocument.Parse(json);
-                var content = doc.RootElement.GetProperty("message").GetProperty("content").GetString() ?? "";
 
-                return CleanAndEnhanceResponse(content);
+                // Log response for debugging
+                _logger.LogDebug($"🔍 Raw LLM response: {json.Substring(0, Math.Min(200, json.Length))}...");
+
+                // Handle potential streaming format in non-streaming response
+                if (json.Contains("}\n{") || json.Contains("data: "))
+                {
+                    _logger.LogWarning("⚠️ Received streaming format in non-streaming response, attempting to parse");
+                    return await HandleStreamingResponse(json);
+                }
+
+                using var doc = JsonDocument.Parse(json);
+
+                if (!doc.RootElement.TryGetProperty("message", out var messageElement) ||
+                    !messageElement.TryGetProperty("content", out var contentElement))
+                {
+                    _logger.LogError("❌ Unexpected response format from LLM");
+                    return "I apologize, but I received an unexpected response format. Please try again.";
+                }
+
+                var content = contentElement.GetString() ?? "";
+
+                if (string.IsNullOrWhiteSpace(content))
+                {
+                    _logger.LogError("❌ Empty content received from LLM");
+                    return "I apologize, but I received an empty response. Please try again.";
+                }
+
+                var cleanedResponse = CleanAndEnhanceResponse(content);
+
+                _logger.LogInformation($"✅ Generated response length: {cleanedResponse.Length} characters");
+
+                return cleanedResponse;
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogError("❌ Response generation timed out");
+                return ismeai
+                    ? $"The response generation timed out. Please contact your supervisor or HR department for assistance regarding {plant} policies."
+                    : "The response generation timed out. Please try a simpler question.";
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "❌ JSON parsing failed in response generation");
+                return "I apologize, but I received a malformed response. Please try again.";
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Chat generation failed");
-                return "I apologize, but I'm having trouble generating a response right now. Please try again or contact HR directly for assistance.";
+                _logger.LogError(ex, "❌ Chat generation failed");
+                return ismeai
+                    ? $"I apologize, but I'm having trouble generating a response right now. Please contact your supervisor or HR department for assistance regarding {plant} policies."
+                    : "I apologize, but I'm having trouble generating a response right now. Please try again.";
             }
         }
+
+        private async Task<string> HandleStreamingResponse(string rawResponse)
+        {
+            try
+            {
+                var contentBuilder = new StringBuilder();
+
+                // Split by lines and process each JSON object
+                var lines = rawResponse.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+                foreach (var line in lines)
+                {
+                    var trimmedLine = line.Trim();
+
+                    // Skip empty lines and data: prefixes
+                    if (string.IsNullOrEmpty(trimmedLine) || trimmedLine.StartsWith("data: "))
+                    {
+                        if (trimmedLine.StartsWith("data: "))
+                            trimmedLine = trimmedLine.Substring(6).Trim();
+                        else
+                            continue;
+                    }
+
+                    // Skip [DONE] markers
+                    if (trimmedLine.Equals("[DONE]", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    try
+                    {
+                        if (trimmedLine.StartsWith("{") && trimmedLine.EndsWith("}"))
+                        {
+                            using var doc = JsonDocument.Parse(trimmedLine);
+
+                            if (doc.RootElement.TryGetProperty("message", out var messageElement) &&
+                                messageElement.TryGetProperty("content", out var contentElement))
+                            {
+                                var content = contentElement.GetString();
+                                if (!string.IsNullOrEmpty(content))
+                                {
+                                    contentBuilder.Append(content);
+                                }
+                            }
+                        }
+                    }
+                    catch (JsonException)
+                    {
+                        // Skip malformed JSON lines
+                        continue;
+                    }
+                }
+
+                var result = contentBuilder.ToString();
+
+                if (string.IsNullOrWhiteSpace(result))
+                {
+                    _logger.LogWarning("⚠️ No content extracted from streaming response");
+                    return "I apologize, but I couldn't process the response properly. Please try again.";
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to handle streaming response");
+                return "I apologize, but I couldn't process the response properly. Please try again.";
+            }
+        }
+
         // API endpoint to get available models
         public async Task<List<ModelConfiguration>> GetAvailableModelsAsync()
         {
@@ -1252,28 +1202,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
                 return 0;
             }
         }
-        // Additional helper methods...
-        private Dictionary<string, object> CreateChunkMetadata(string sourceFile, DateTime lastModified, string modelName, string text, string plant)
-        {
-            var metadata = new Dictionary<string, object>
-            {
-                { "source_file", sourceFile },
-                { "last_modified", lastModified.ToString("O") },
-                { "model", modelName },
-                { "chunk_size", text.Length },
-                { "processed_at", DateTime.UtcNow.ToString("O") },
-                { "processed_by", _currentUser },
-                { "plant", plant }
-            };
-
-            if (sourceFile.Contains("abbreviation") || sourceFile.Contains("context"))
-            {
-                metadata["is_context"] = true;
-                metadata["priority"] = "high";
-            }
-
-            return metadata;
-        }
         private string GenerateChunkId(string sourceFile, string text, DateTime lastModified, string modelName)
         {
             var fileName = Path.GetFileNameWithoutExtension(sourceFile);
@@ -1326,14 +1254,35 @@ Do not introduce external information or opinions. Stay strictly within the cont
         }
         private string CleanAndEnhanceResponse(string response)
         {
+            if (string.IsNullOrWhiteSpace(response))
+                return "I apologize, but I couldn't generate a proper response. Please try again.";
+
+            // Remove any XML/HTML-like tags that might be interfering
             var cleaned = System.Text.RegularExpressions.Regex.Replace(
                 response,
-                "", "",
+                @"<[^>]*>", "",
                 System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase
             );
 
+            // Clean up excessive whitespace
             cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"\n\s*\n\s*\n", "\n\n");
-            return cleaned.Trim();
+            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @" {2,}", " ");
+
+            // Ensure the response doesn't end abruptly
+            cleaned = cleaned.Trim();
+
+            // If response seems truncated (ends with incomplete sentence), add a note
+            if (!string.IsNullOrEmpty(cleaned) &&
+                !cleaned.EndsWith(".") &&
+                !cleaned.EndsWith("!") &&
+                !cleaned.EndsWith("?") &&
+                !cleaned.EndsWith("]]") &&
+                cleaned.Length > 10)
+            {
+                _logger.LogWarning($"⚠️ Response may be truncated: ends with '{cleaned.Substring(Math.Max(0, cleaned.Length - 20))}'");
+            }
+
+            return cleaned;
         }
         // Session management methods
         private void InitializeSessionCleanup()
@@ -1491,26 +1440,65 @@ Do not introduce external information or opinions. Stay strictly within the cont
 
             var request = new
             {
-                model = "mistral:latest", // or your current generation model
+                model = _config.DefaultGenerationModel ?? "mistral:latest",
                 messages = new[]
                 {
             new { role = "user", content = prompt }
         },
-                temperature = 0.1
+                temperature = 0.1,
+                stream = false // Ensure non-streaming response
             };
 
             try
             {
                 var response = await _httpClient.PostAsJsonAsync("/api/chat", request);
-                var json = await response.Content.ReadAsStringAsync();
-                var doc = JsonDocument.Parse(json);
-                var content = doc.RootElement.GetProperty("message").GetProperty("content").GetString() ?? "";
 
-                return content.Split(new[] { ',', '\n' }, StringSplitOptions.RemoveEmptyEntries)
-                              .Select(e => e.Trim())
-                              .Where(e => e.Length > 1)
-                              .Distinct(StringComparer.OrdinalIgnoreCase)
-                              .ToList();
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning($"Entity extraction failed: {response.StatusCode}");
+                    return new List<string>();
+                }
+
+                var json = await response.Content.ReadAsStringAsync();
+
+                // Log the raw response for debugging
+                _logger.LogDebug($"Entity extraction response: {json}");
+
+                // Handle potential streaming response format
+                if (json.Contains("}\n{"))
+                {
+                    // Split by newlines and take the last valid JSON object
+                    var lines = json.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                    var lastValidJson = lines.LastOrDefault(line => line.Trim().StartsWith("{") && line.Trim().EndsWith("}"));
+
+                    if (lastValidJson != null)
+                    {
+                        json = lastValidJson;
+                    }
+                }
+
+                using var doc = JsonDocument.Parse(json);
+
+                if (!doc.RootElement.TryGetProperty("message", out var messageElement) ||
+                    !messageElement.TryGetProperty("content", out var contentElement))
+                {
+                    _logger.LogWarning("Unexpected response format from entity extraction");
+                    return new List<string>();
+                }
+
+                var content = contentElement.GetString() ?? "";
+
+                return content.Split(new[] { ',', '\n', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                             .Select(e => e.Trim().Trim('"', '\'', '-', '*'))
+                             .Where(e => e.Length > 1 && !string.IsNullOrWhiteSpace(e))
+                             .Distinct(StringComparer.OrdinalIgnoreCase)
+                             .Take(10) // Limit to prevent excessive entities
+                             .ToList();
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, $"JSON parsing failed in entity extraction. Raw response might be malformed.");
+                return new List<string>();
             }
             catch (Exception ex)
             {
@@ -1525,39 +1513,6 @@ Do not introduce external information or opinions. Stay strictly within the cont
             var intersection = words1.Intersect(words2).Count();
             var union = words1.Union(words2).Count();
             return union == 0 ? 0.0 : (double)intersection / union;
-        }
-        private async Task<List<RelevantChunk>> GetRelevantChunksAsync(
-    string query,
-    ModelConfiguration embeddingModel,
-    int maxResults,
-    bool meaiInfo,
-    ConversationContext context,
-    bool useReRanking,
-    ModelConfiguration generationModel)
-        {
-            // If meaiInfo is false, return empty chunks (no embeddings needed)
-            if (!meaiInfo)
-            {
-                _logger.LogInformation("🚫 Skipping relevant chunks retrieval (meaiInfo = false)");
-                return new List<RelevantChunk>();
-            }
-
-            try
-            {
-                // Check corrections first (only for MEAI queries)
-                var correction = await CheckCorrectionsAsync(query);
-                if (correction != null)
-                    return new List<RelevantChunk>();
-
-                // Perform ChromaDB search (only for MEAI queries)
-                var chunks = await SearchChromaDBAsync(query, embeddingModel, maxResults);
-                return chunks;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to get relevant chunks");
-                return new List<RelevantChunk>();
-            }
         }
         private async Task UpdateConversationHistory(
     ConversationContext context,
@@ -1689,7 +1644,7 @@ Do not introduce external information or opinions. Stay strictly within the cont
         {
             try
             {
-                var chromaHealth = await _chromaClient.GetAsync("cc");
+                var chromaHealth = await _chromaClient.GetAsync("/api/v2/heartbeat");
                 var ollamaHealth = await _httpClient.GetAsync("/api/tags");
                 return chromaHealth.IsSuccessStatusCode && ollamaHealth.IsSuccessStatusCode;
             }
@@ -1754,9 +1709,8 @@ Do not introduce external information or opinions. Stay strictly within the cont
             // Implementation here - you can modify this to be dynamic
             throw new NotImplementedException();
         }
-        public Task<List<CorrectionEntry>> GetRecentCorrections(int limit = 50)
+        public async Task<List<CorrectionEntry>> GetRecentCorrections(int limit = 50)
         {
-            // Implementation here
             throw new NotImplementedException();
         }
         public Task<bool> DeleteCorrectionAsync(string id)
@@ -2500,7 +2454,7 @@ Do not introduce external information or opinions. Stay strictly within the cont
             var embeddings = new List<List<float>>();
 
             // Use semaphore to limit concurrent requests
-            using var semaphore = new SemaphoreSlim(3, 3); // Max 3 concurrent requests
+            using var semaphore = new SemaphoreSlim(1, 1); // Max 3 concurrent requests
 
             var tasks = texts.Select(async text =>
             {
@@ -2520,7 +2474,7 @@ Do not introduce external information or opinions. Stay strictly within the cont
         }
 
         private readonly ConcurrentDictionary<string, List<float>> _embeddingCache = new();
-        private readonly SemaphoreSlim _embeddingSemaphore = new(5, 5); // Limit concurrent embedding requests
+        private readonly SemaphoreSlim _embeddingSemaphore = new(1, 1); // Limit concurrent embedding requests
 
         private async Task<List<float>> GetEmbeddingAsync(string text, ModelConfiguration model)
         {
@@ -2748,74 +2702,8 @@ Do not introduce external information or opinions. Stay strictly within the cont
             }
         }
         private readonly ConcurrentDictionary<string, (List<RelevantChunk> Results, DateTime Timestamp)> _searchCache = new();
-        private async Task<List<RelevantChunk>> SearchChromaDBAsync(string query, ModelConfiguration embeddingModel, int maxResults)
-        {
-            var cacheKey = $"{query.GetHashCode():X}:{embeddingModel.Name}:{maxResults}";
+      
 
-            // Check cache (5-minute TTL)
-            if (_searchCache.TryGetValue(cacheKey, out var cached) &&
-                DateTime.Now - cached.Timestamp < TimeSpan.FromMinutes(5))
-            {
-                _logger.LogDebug("Using cached search results");
-                return cached.Results;
-            }
-
-            try
-            {
-                var collectionId = await _collectionManager.GetOrCreateCollectionAsync(embeddingModel);
-                if (string.IsNullOrEmpty(collectionId))
-                {
-                    return new List<RelevantChunk>();
-                }
-
-                var queryEmbedding = await GetEmbeddingAsync(query, embeddingModel);
-                if (queryEmbedding.Count == 0)
-                {
-                    return new List<RelevantChunk>();
-                }
-
-                var searchData = new
-                {
-                    query_embeddings = new List<List<float>> { queryEmbedding },
-                    n_results = Math.Min(maxResults * 2, 50), // Limit results
-                    include = new[] { "documents", "metadatas", "distances" },
-                    where = new Dictionary<string, object>() // Add filters if needed
-                };
-
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                var response = await _chromaClient.PostAsJsonAsync(
-                    $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
-                    searchData, cts.Token);
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    _logger.LogWarning($"ChromaDB search failed: {response.StatusCode}");
-                    return new List<RelevantChunk>();
-                }
-
-                var responseContent = await response.Content.ReadAsStringAsync();
-                using var doc = JsonDocument.Parse(responseContent);
-                var results = ParseSearchResults(doc.RootElement, maxResults);
-
-                // Cache results
-                if (_searchCache.Count < 1000) // Prevent memory bloat
-                {
-                    _searchCache.TryAdd(cacheKey, (results, DateTime.Now));
-                }
-
-                return results;
-            }
-            catch (OperationCanceledException)
-            {
-                _logger.LogWarning("ChromaDB search timed out");
-                return new List<RelevantChunk>();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"ChromaDB search failed for model {embeddingModel.Name}");
-                return new List<RelevantChunk>();
-            }
-        }
         public static void ConfigureOptimizedHttpClient(IServiceCollection services)
         {
             services.AddHttpClient("OllamaAPI", client =>
@@ -2881,5 +2769,661 @@ Do not introduce external information or opinions. Stay strictly within the cont
             }
         }
 
+        private Dictionary<string, object> CreatePlantFilter(string plant)
+        {
+            // Handle multiple plants and centralized policies
+            var plants = plant.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                             .Select(p => p.Trim().ToLowerInvariant())
+                             .ToList();
+
+            // Always include centralized policies
+            if (!plants.Contains("centralized"))
+            {
+                plants.Add("centralized");
+            }
+
+            _logger.LogInformation($"🏭 Filtering for plants: {string.Join(", ", plants)}");
+
+            // ChromaDB filter for multiple plants using $in operator
+            return new Dictionary<string, object>
+            {
+                ["plant"] = new Dictionary<string, object>
+                {
+                    ["$in"] = plants
+                }
+            };
+        }
+
+        private async Task<List<RelevantChunk>> GetRelevantChunksAsync(
+     string query,
+     ModelConfiguration embeddingModel,
+     int maxResults,
+     bool meaiInfo,
+     ConversationContext context,
+     bool useReRanking,
+     ModelConfiguration generationModel,
+     string plant) // 🆕 Added plant parameter
+        {
+
+            _logger.LogWarning($"🔍 Retrieving relevant chunks for query: {query} (plant: {plant})");
+            if (!meaiInfo)
+            {
+                _logger.LogInformation("🚫 Skipping relevant chunks retrieval (meaiInfo = false)");
+                return new List<RelevantChunk>();
+            }
+
+            try
+            {
+                // Check corrections first
+                var correction = await CheckCorrectionsAsync(query);
+                if (correction != null)
+                    return new List<RelevantChunk>();
+
+                // Perform plant-specific ChromaDB search
+                var chunks = await SearchChromaDBAsync(query, embeddingModel, maxResults, plant);
+
+                // 🆕 POLICY COVERAGE CHECK
+                if (!chunks.Any() || chunks.All(c => c.Similarity < 0.3))
+                {
+                    _logger.LogWarning($"⚠️ Low policy coverage for plant {plant} and query: {query}");
+                    // This will be handled in answer generation
+                }
+
+                return chunks;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get relevant chunks");
+                return new List<RelevantChunk>();
+            }
+        }
+        public async Task<QueryResponse> ProcessQueryWithCoverageCheck(string question, string plant)
+        {
+            var response = await ProcessQueryAsync(
+                question: question,
+                plant: plant,
+                meaiInfo: true
+            );
+
+            // Check if we need to show additional UI elements
+            if (!response.HasSufficientPolicyCoverage)
+            {
+                // Frontend can show:
+                // - "Contact HR" button
+                // - Alternative suggestion box
+                // - Policy upload option for admins
+                _logger.LogInformation($"⚠️ Insufficient coverage for {plant} - suggest HR contact");
+            }
+
+            return response;
+        }
+        // 1. UPDATE: More lenient policy coverage check
+        private bool CheckPolicyCoverage(List<RelevantChunk> chunks, string question)
+        {
+            if (!chunks.Any())
+            {
+                _logger.LogWarning($"⚠️ No relevant chunks found for question: {question}");
+                return false;
+            }
+
+            // More flexible coverage criteria for HR policies
+            var veryHighQuality = chunks.Where(c => c.Similarity >= 0.7).ToList();
+            var highQualityChunks = chunks.Where(c => c.Similarity >= 0.4).ToList(); // Lowered from 0.5
+            var mediumQualityChunks = chunks.Where(c => c.Similarity >= 0.25).ToList(); // Lowered from 0.3
+            var anyRelevantChunks = chunks.Where(c => c.Similarity >= 0.15).ToList(); // Very permissive
+
+            // Check for HR policy keywords in the chunks
+            var hrPolicyKeywords = new[] { "leave", "cl", "casual", "sick", "policy", "employee", "hr", "rule", "regulation", "procedure" };
+            var hasHrPolicyContent = chunks.Any(c =>
+                hrPolicyKeywords.Any(keyword => c.Text.ToLowerInvariant().Contains(keyword)) ||
+                c.Source.ToLowerInvariant().Contains("policy") ||
+                c.Source.ToLowerInvariant().Contains("hr"));
+
+            // Enhanced coverage criteria:
+            var hasSufficientCoverage =
+                veryHighQuality.Any() ||                           // At least one very high match
+                highQualityChunks.Count >= 1 ||                    // At least one good match  
+                (mediumQualityChunks.Count >= 2 && hasHrPolicyContent) || // Multiple medium matches with HR content
+                (anyRelevantChunks.Count >= 3 && hasHrPolicyContent);      // Many low matches with HR content
+
+            if (!hasSufficientCoverage)
+            {
+                _logger.LogWarning($"⚠️ Insufficient policy coverage for question: {question}. " +
+                                  $"Very High: {veryHighQuality.Count}, High: {highQualityChunks.Count}, " +
+                                  $"Medium: {mediumQualityChunks.Count}, Any: {anyRelevantChunks.Count}, " +
+                                  $"HR Content: {hasHrPolicyContent}");
+
+                // Log chunk details for debugging
+                foreach (var chunk in chunks.Take(3))
+                {
+                    _logger.LogInformation($"📄 Chunk: {chunk.Source} | Similarity: {chunk.Similarity:F3} | Text: {chunk.Text.Substring(0, Math.Min(100, chunk.Text.Length))}...");
+                }
+            }
+            else
+            {
+                _logger.LogInformation($"✅ Sufficient policy coverage found. " +
+                                      $"Very High: {veryHighQuality.Count}, High: {highQualityChunks.Count}, " +
+                                      $"Medium: {mediumQualityChunks.Count}");
+            }
+
+            return hasSufficientCoverage;
+        }
+
+        // 2. UPDATE: More lenient similarity thresholds in search parsing
+        private List<RelevantChunk> ParseSearchResults(JsonElement root, int maxResults, string currentPlant)
+        {
+            var relevantChunks = new List<RelevantChunk>();
+
+            if (root.TryGetProperty("documents", out var documentsArray) &&
+                documentsArray.GetArrayLength() > 0 &&
+                documentsArray[0].GetArrayLength() > 0)
+            {
+                var documents = documentsArray[0].EnumerateArray().ToArray();
+                var metadatas = root.GetProperty("metadatas")[0].EnumerateArray().ToArray();
+                var distances = root.GetProperty("distances")[0].EnumerateArray().ToArray();
+
+                for (int i = 0; i < documents.Length; i++)
+                {
+                    var similarity = 1.0 - distances[i].GetDouble();
+                    if (similarity < 0.10) continue;
+
+                    var metadata = metadatas[i];
+                    var sourceFile = metadata.TryGetProperty("source_file", out var sf)
+                        ? Path.GetFileName(sf.GetString() ?? "")
+                        : "Unknown";
+
+                    var documentText = documents[i].GetString() ?? "";
+
+                    // ✅ FIXED: Correct policy type determination
+                    string policyType = DeterminePolicyType(metadata, sourceFile, currentPlant);
+
+                    // Priority boost logic (unchanged)
+                    var isPolicyDocument = sourceFile.ToLowerInvariant().Contains("policy") ||
+                                         sourceFile.ToLowerInvariant().Contains("hr") ||
+                                         documentText.ToLowerInvariant().Contains("policy");
+
+                    if (sourceFile.Contains("abbreviation") || sourceFile.Contains("context") ||
+                        documentText.ToUpper().Contains("CL =") || isPolicyDocument)
+                    {
+                        similarity = Math.Min(0.95, similarity + 0.15);
+                    }
+
+                    // Extra boost for plant-specific content
+                    if (sourceFile.ToLowerInvariant().Contains(currentPlant.ToLowerInvariant()))
+                    {
+                        similarity = Math.Min(0.98, similarity + 0.10);
+                    }
+
+                    relevantChunks.Add(new RelevantChunk
+                    {
+                        Text = documentText,
+                        Source = sourceFile,
+                        Similarity = similarity,
+                        PolicyType = policyType // ✅ NEW: Add policy type to chunk
+                    });
+                }
+            }
+
+            var results = relevantChunks
+                .OrderByDescending(c => c.Similarity)
+                .Take(maxResults)
+                .ToList();
+
+            _logger.LogInformation($"📊 Parsed {results.Count} relevant chunks for plant: {currentPlant}");
+
+            // Log what we found for debugging
+            foreach (var chunk in results.Take(3))
+            {
+                _logger.LogInformation($"🔍 Found: {chunk.Source} ({chunk.PolicyType}) - Similarity: {chunk.Similarity:F3}");
+            }
+
+            return results;
+        }
+
+        // 3. ADD: Diagnostic method to debug search issues
+        public async Task<DiagnosticInfo> DiagnoseSearchIssueAsync(string question, string plant)
+        {
+            var diagnostic = new DiagnosticInfo
+            {
+                Question = question,
+                Plant = plant,
+                Timestamp = DateTime.UtcNow
+            };
+
+            try
+            {
+                // Check if files exist
+                var policyFiles = GetPolicyFiles(plant);
+                diagnostic.PolicyFilesFound = policyFiles.Count;
+                diagnostic.PolicyFiles = policyFiles.Select(Path.GetFileName).ToList();
+
+                // Check embedding model
+                var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
+                diagnostic.EmbeddingModel = embeddingModel?.Name ?? "NOT FOUND";
+
+                // Check collection
+                var collectionId = await _collectionManager.GetOrCreateCollectionAsync(embeddingModel);
+                diagnostic.CollectionId = collectionId;
+
+                // Get collection count
+                diagnostic.TotalEmbeddings = await GetCollectionCountAsync(collectionId);
+
+                // Perform search
+                var chunks = await SearchChromaDBAsync(question, embeddingModel, 20, plant);
+                diagnostic.ChunksFound = chunks.Count;
+                diagnostic.ChunkDetails = chunks.Take(5).Select(c => new ChunkDiagnostic
+                {
+                    Source = c.Source,
+                    Similarity = c.Similarity,
+                    TextPreview = c.Text.Substring(0, Math.Min(200, c.Text.Length))
+                }).ToList();
+
+                // Check coverage
+                diagnostic.HasSufficientCoverage = CheckPolicyCoverage(chunks, question);
+
+                _logger.LogInformation($"🔍 Diagnostic completed for question: {question}");
+                return diagnostic;
+            }
+            catch (Exception ex)
+            {
+                diagnostic.Error = ex.Message;
+                _logger.LogError(ex, "Diagnostic failed");
+                return diagnostic;
+            }
+        }
+
+        private async Task<List<RelevantChunk>> SearchChromaDBAsync(
+    string query,
+    ModelConfiguration embeddingModel,
+    int maxResults,
+    string plant)
+        {
+            var normalizedPlant = plant.Trim().ToLowerInvariant();
+            var cacheKey = $"{query.GetHashCode():X}:{embeddingModel.Name}:{maxResults}:{normalizedPlant}";
+
+            _logger.LogInformation($"🔍 Searching ChromaDB for plant '{plant}' with query: '{query}'");
+
+            // Check cache (5-minute TTL)
+            if (_searchCache.TryGetValue(cacheKey, out var cached) &&
+                DateTime.Now - cached.Timestamp < TimeSpan.FromMinutes(5))
+            {
+                _logger.LogDebug($"✅ Using cached search results for plant: {plant}");
+                return cached.Results;
+            }
+
+            try
+            {
+                var collectionId = await _collectionManager.GetOrCreateCollectionAsync(embeddingModel);
+                if (string.IsNullOrEmpty(collectionId))
+                {
+                    _logger.LogError($"❌ No collection found for embedding model: {embeddingModel.Name}");
+                    return new List<RelevantChunk>();
+                }
+
+                var queryEmbedding = await GetEmbeddingAsync(query, embeddingModel);
+                if (queryEmbedding.Count == 0)
+                {
+                    _logger.LogError($"❌ Failed to generate embedding for query: {query}");
+                    return new List<RelevantChunk>();
+                }
+
+                // ✅ FIXED: More precise plant-specific filter
+                var whereFilter = new Dictionary<string, object>
+        {
+            { "$or", new List<Dictionary<string, object>>
+                {
+                    // Exact plant match
+                    new Dictionary<string, object> { { "plant", normalizedPlant } },
+                    // Centralized policies (apply to all plants)
+                    new Dictionary<string, object> { { "plant", "centralized" } },
+                    new Dictionary<string, object> { { "is_centralized", true } },
+                    // Context files (apply to all plants)
+                    new Dictionary<string, object> { { "is_context", true } }
+                }
+            }
+        };
+
+                _logger.LogInformation($"🔎 Plant filter for '{normalizedPlant}': {JsonSerializer.Serialize(whereFilter)}");
+
+                var searchData = new
+                {
+                    query_embeddings = new List<List<float>> { queryEmbedding },
+                    n_results = Math.Min(maxResults * 3, 100),
+                    include = new[] { "documents", "metadatas", "distances" },
+                    //where = whereFilter
+                };
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                var response = await _chromaClient.PostAsJsonAsync(
+                    $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+                    searchData, cts.Token);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    _logger.LogError($"❌ ChromaDB search failed: {response.StatusCode} - {errorContent}");
+                    return await FallbackSearchAsync(query, embeddingModel, maxResults, collectionId);
+                }
+
+                var responseContent = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(responseContent);
+                var results = ParseSearchResults(doc.RootElement, maxResults, plant);
+
+                // ✅ FIXED: Strict plant filtering after search
+                results = FilterResultsByPlant(results, normalizedPlant);
+
+                _logger.LogInformation($"📊 Search completed: {results.Count} results found for plant '{plant}'");
+
+                // Cache results
+                if (_searchCache.Count < 1000)
+                {
+                    _searchCache.TryAdd(cacheKey, (results, DateTime.Now));
+                }
+
+                return results;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"❌ ChromaDB search failed for model {embeddingModel.Name} and plant {plant}");
+                return new List<RelevantChunk>();
+            }
+        }
+
+        private async Task<List<RelevantChunk>> FallbackSearchAsync(
+    string query,
+    ModelConfiguration embeddingModel,
+    int maxResults,
+    string collectionId)
+        {
+            try
+            {
+                var queryEmbedding = await GetEmbeddingAsync(query, embeddingModel);
+
+                var searchData = new
+                {
+                    query_embeddings = new List<List<float>> { queryEmbedding },
+                    n_results = maxResults * 2,
+                    include = new[] { "documents", "metadatas", "distances" }
+                    // No where clause - search everything
+                };
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                var response = await _chromaClient.PostAsJsonAsync(
+                    $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+                    searchData, cts.Token);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var responseContent = await response.Content.ReadAsStringAsync();
+                    using var doc = JsonDocument.Parse(responseContent);
+                    var results = ParseSearchResults(doc.RootElement, maxResults, ""); // No plant filter
+
+                    _logger.LogInformation($"🔄 Fallback search found {results.Count} results");
+                    return results;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Fallback search also failed");
+            }
+
+            return new List<RelevantChunk>();
+        }
+
+        private async Task<List<RelevantChunk>> DiagnosticSearchAsync(
+    string query,
+    ModelConfiguration embeddingModel,
+    string collectionId)
+        {
+            try
+            {
+                var queryEmbedding = await GetEmbeddingAsync(query, embeddingModel);
+
+                var searchData = new
+                {
+                    query_embeddings = new List<List<float>> { queryEmbedding },
+                    n_results = 50,
+                    include = new[] { "documents", "metadatas", "distances" }
+                };
+
+                var response = await _chromaClient.PostAsJsonAsync(
+                    $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+                    searchData);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var responseContent = await response.Content.ReadAsStringAsync();
+                    using var doc = JsonDocument.Parse(responseContent);
+                    return ParseSearchResults(doc.RootElement, 50, "");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Diagnostic search failed");
+            }
+
+            return new List<RelevantChunk>();
+        }
+
+        // Supporting classes for diagnostics
+        public class DiagnosticInfo
+        {
+            public string Question { get; set; } = "";
+            public string Plant { get; set; } = "";
+            public DateTime Timestamp { get; set; }
+            public int PolicyFilesFound { get; set; }
+            public List<string> PolicyFiles { get; set; } = new();
+            public string EmbeddingModel { get; set; } = "";
+            public string CollectionId { get; set; } = "";
+            public int TotalEmbeddings { get; set; }
+            public int ChunksFound { get; set; }
+            public List<ChunkDiagnostic> ChunkDetails { get; set; } = new();
+            public bool HasSufficientCoverage { get; set; }
+            public string? Error { get; set; }
+        }
+
+        public class ChunkDiagnostic
+        {
+            public string Source { get; set; } = "";
+            public double Similarity { get; set; }
+            public string TextPreview { get; set; } = "";
+        }
+
+        private List<RelevantChunk> FilterResultsByPlant(List<RelevantChunk> chunks, string targetPlant)
+        {
+            var filteredChunks = new List<RelevantChunk>();
+
+            foreach (var chunk in chunks)
+            {
+                var source = chunk.Source.ToLowerInvariant();
+                var isValid = false;
+                string policyType = "";
+
+                // 1. Target plant-specific files
+                if (source.Contains(targetPlant))
+                {
+                    isValid = true;
+                    policyType = $"{targetPlant.ToTitleCase()} Specific Policy";
+                }
+                // 2. Centralized policies (apply to all plants)
+                else if (source.Contains("centralized") || source.Contains("general"))
+                {
+                    isValid = true;
+                    policyType = "Centralized Policy";
+                }
+                // 3. Context files (abbreviations, etc.)
+                else if (source.Contains("abbreviation") || source.Contains("context"))
+                {
+                    isValid = true;
+                    policyType = "Context Information";
+                }
+                // 4. REJECT other plant-specific files
+                else
+                {
+                    var otherPlants = new[] { "manesar", "sanand" }; // Add all your plants
+                    var isOtherPlant = otherPlants.Any(plant =>
+                        plant != targetPlant && source.Contains(plant));
+
+                    if (isOtherPlant)
+                    {
+                        _logger.LogDebug($"🚫 Filtered out {chunk.Source} - belongs to different plant");
+                        continue; // Skip this chunk
+                    }
+                    else
+                    {
+                        // Unknown source - include with warning
+                        isValid = true;
+                        policyType = "General Policy";
+                        _logger.LogWarning($"⚠️ Unknown source classification: {chunk.Source}");
+                    }
+                }
+
+                if (isValid)
+                {
+                    // ✅ FIXED: Set correct policy type label
+                    chunk.PolicyType = policyType;
+                    filteredChunks.Add(chunk);
+                }
+            }
+
+            _logger.LogInformation($"🎯 Plant filtering: {chunks.Count} → {filteredChunks.Count} chunks for {targetPlant}");
+            return filteredChunks;
+        }
+        private Dictionary<string, object> CreateChunkMetadata(string sourceFile, DateTime lastModified, string modelName, string text, string plant)
+        {
+            var fileName = Path.GetFileName(sourceFile).ToLowerInvariant();
+            var folderPath = Path.GetDirectoryName(sourceFile)?.ToLowerInvariant() ?? "";
+            var normalizedPlant = plant.ToLowerInvariant();
+
+            var metadata = new Dictionary<string, object>
+    {
+        { "source_file", sourceFile },
+        { "last_modified", lastModified.ToString("O") },
+        { "model", modelName },
+        { "chunk_size", text.Length },
+        { "processed_at", DateTime.UtcNow.ToString("O") },
+        { "processed_by", _currentUser }
+    };
+
+            // ✅ FIXED: Proper plant classification logic
+            if (fileName.Contains("abbreviation") || fileName.Contains("context") ||
+                folderPath.Contains("context"))
+            {
+                // Context files apply to all plants
+                metadata["plant"] = "context";
+                metadata["is_context"] = true;
+                metadata["priority"] = "high";
+                metadata["applies_to_all_plants"] = true;
+            }
+            else if (folderPath.Contains("centralized") || fileName.Contains("centralized") ||
+                     fileName.Contains("general"))
+            {
+                // Centralized policies apply to all plants
+                metadata["plant"] = "centralized";
+                metadata["is_centralized"] = true;
+                metadata["applies_to_all_plants"] = true;
+            }
+            else if (folderPath.Contains(normalizedPlant) || fileName.Contains(normalizedPlant))
+            {
+                // Plant-specific policies
+                metadata["plant"] = normalizedPlant;
+                metadata["is_plant_specific"] = true;
+                metadata["applies_to_all_plants"] = false;
+            }
+            else
+            {
+                // Check if it belongs to another plant
+                var knownPlants = new[] { "manesar", "sanand" };
+                var detectedPlant = knownPlants.FirstOrDefault(p =>
+                    folderPath.Contains(p) || fileName.Contains(p));
+
+                if (detectedPlant != null)
+                {
+                    metadata["plant"] = detectedPlant;
+                    metadata["is_plant_specific"] = true;
+                    metadata["applies_to_all_plants"] = false;
+                }
+                else
+                {
+                    // Unknown - treat as general
+                    metadata["plant"] = "general";
+                    metadata["is_general"] = true;
+                    metadata["applies_to_all_plants"] = true;
+                }
+            }
+
+            _logger.LogDebug($"🏷️ Metadata for {fileName}: plant={metadata["plant"]}, applies_to_all={metadata.GetValueOrDefault("applies_to_all_plants", false)}");
+
+            return metadata;
+        }
+        private string BuildPolicySourcesDisplay(List<RelevantChunk> chunks)
+        {
+            var sourceGroups = chunks
+                .GroupBy(c => c.Source)
+                .Select(g => new
+                {
+                    Source = g.Key,
+                    PolicyType = g.First().PolicyType,
+                    MaxSimilarity = g.Max(c => c.Similarity)
+                })
+                .OrderByDescending(g => g.MaxSimilarity)
+                .Take(5);
+
+            var sourcesText = new StringBuilder();
+            sourcesText.AppendLine("Sources:");
+
+            foreach (var group in sourceGroups)
+            {
+                sourcesText.AppendLine($" {group.Source} ({group.PolicyType})");
+            }
+
+            return sourcesText.ToString();
+        }
+        private string DeterminePolicyType(JsonElement metadata, string sourceFile, string currentPlant)
+        {
+            var fileName = sourceFile.ToLowerInvariant();
+
+            // Check metadata first
+            if (metadata.TryGetProperty("is_context", out var isContext) && isContext.GetBoolean())
+            {
+                return "Context Information";
+            }
+
+            if (metadata.TryGetProperty("is_centralized", out var isCentralized) && isCentralized.GetBoolean())
+            {
+                return "Centralized Policy";
+            }
+
+            if (metadata.TryGetProperty("plant", out var plantProperty))
+            {
+                var plantValue = plantProperty.GetString()?.ToLowerInvariant() ?? "";
+
+                if (plantValue == "context")
+                    return "Context Information";
+                if (plantValue == "centralized" || plantValue == "general")
+                    return "Centralized Policy";
+                if (plantValue == currentPlant.ToLowerInvariant())
+                    return $"{currentPlant.ToTitleCase()} Specific Policy";
+                if (plantValue != currentPlant.ToLowerInvariant() && !string.IsNullOrEmpty(plantValue))
+                    return $"{plantValue.ToTitleCase()} Policy (Cross-Reference)";
+            }
+
+            // Fallback to file name analysis
+            if (fileName.Contains("abbreviation") || fileName.Contains("context"))
+                return "Context Information";
+            if (fileName.Contains("centralized") || fileName.Contains("general"))
+                return "Centralized Policy";
+            if (fileName.Contains(currentPlant.ToLowerInvariant()))
+                return $"{currentPlant.ToTitleCase()} Specific Policy";
+
+            return "General Policy";
+        }
+
+        public async Task DeleteModelDataFromChroma(string modelName)
+        {
+            await _collectionManager.DeleteModelCollectionAsync(modelName);
+        }
+
     }
+
 }

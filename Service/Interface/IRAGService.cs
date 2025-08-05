@@ -20,4 +20,5 @@ public interface IRAGService
     Task RefreshEmbeddingsAsync(string model = "mistral:latest");
     Task SaveCorrectionAsync(string question, string correctAnswer, string model);
     Task SaveCorrectionToDatabase(string sessionId, string question, string correctedAnswer);
+    Task DeleteModelDataFromChroma(string modelName);
 }
