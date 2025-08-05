@@ -1572,7 +1572,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             try
             {
                 var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
-                var inputEmbedding = await GetEmbeddingAsync(question, embeddingModel!);
+                var inputEmbedding = await GetEmbeddingAsync(question, embeddingModel);
                 if (inputEmbedding == null || inputEmbedding.Count == 0)
                     return null;
 
@@ -2713,7 +2713,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             })
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
             {
-                MaxConnectionsPerServer = 50,
+                MaxConnectionsPerServer = 10,
                 UseCookies = false
             });
 
