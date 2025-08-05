@@ -1,6 +1,7 @@
 ﻿// Services/DynamicRagService.cs
 using DocumentFormat.OpenXml.InkML;
 using MEAI_GPT_API.Models;
+using MEAI_GPT_API.Service;
 using MEAI_GPT_API.Service.Interface;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -46,6 +47,7 @@ namespace MEAI_GPT_API.Services
         private static readonly ConcurrentBag<(string Question, string Answer, List<RelevantChunk> Chunks)> _appreciatedTurns = new();
         private readonly PlantSettings _plants;
         private readonly IConversationStorageService _conversationStorage;
+        private readonly AbbreviationExpansionService _abbreviationService;
         public DynamicRagService(
             IModelManager modelManager,
             DynamicCollectionManager collectionManager,
@@ -58,7 +60,8 @@ namespace MEAI_GPT_API.Services
             Conversation conversation,
             IOptions<PlantSettings> plants,
             IMetricsCollector metrics,
-            IConversationStorageService conversationStorage)
+            IConversationStorageService conversationStorage,
+            AbbreviationExpansionService abbreviationService)
         {
             _modelManager = modelManager;
             _collectionManager = collectionManager;
@@ -73,6 +76,7 @@ namespace MEAI_GPT_API.Services
             _conversation = conversation;
             _plants = plants.Value;
             _conversationStorage = conversationStorage;
+            _abbreviationService = abbreviationService;
 
             InitializeSessionCleanup();
         }
@@ -451,7 +455,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 var contextualQuery = BuildContextualQuery(question, context.History);
 
                 // Get relevant chunks - ONLY for MEAI queries
-                var relevantChunks = await GetRelevantChunksAsync(
+                var relevantChunks = await GetRelevantChunksWithExpansionAsync(
                                     contextualQuery, embModel, maxResults, meaiInfo, context, useReRanking, genModel, plant);
 
 
@@ -864,7 +868,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
      bool ismeai = true,
      string plant = "")
         {
-            var messages = new List<object>();
+             var messages = new List<object>();
 
             // Check policy coverage first
             var hasSufficientCoverage = CheckPolicyCoverage(chunks, question);
@@ -1212,26 +1216,74 @@ These abbreviations are standard across all MEAI HR policies and should be inter
         }
         private List<(string Text, string SourceFile)> ChunkText(string text, string sourceFile, int maxTokens = 200)
         {
-            var chunks = new List<(string, string)>();
-            var sentences = text.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries)
-                .Select(s => s.Trim()).Where(s => s.Length > 0).ToList();
+            var chunks = new List<(string Text, string SourceFile)>();
+
+            // Normalize the text
+            text = text.Replace("\r", "").Replace("\t", " ").Trim();
+
+            // Split by paragraphs (double newline)
+            var paragraphs = text.Split(new[] { "\n\n", "\n\r\n", "\n \n" }, StringSplitOptions.RemoveEmptyEntries)
+                                 .Select(p => p.Trim())
+                                 .Where(p => !string.IsNullOrWhiteSpace(p))
+                                 .ToList();
 
             var sb = new StringBuilder();
             int tokenCount = 0;
 
-            foreach (var sentence in sentences)
+            foreach (var paragraph in paragraphs)
             {
-                int sentenceTokens = EstimateTokenCount(sentence);
+                var paragraphTokenCount = EstimateTokenCount(paragraph);
 
-                if (tokenCount + sentenceTokens > maxTokens && sb.Length > 0)
+                // If current paragraph fits in the limit, append
+                if (tokenCount + paragraphTokenCount <= maxTokens)
                 {
-                    chunks.Add((sb.ToString().Trim(), sourceFile));
-                    sb.Clear();
-                    tokenCount = 0;
+                    sb.AppendLine(paragraph);
+                    sb.AppendLine(); // Preserve spacing between paragraphs
+                    tokenCount += paragraphTokenCount;
                 }
+                else
+                {
+                    // Commit current chunk
+                    if (sb.Length > 0)
+                    {
+                        chunks.Add((sb.ToString().Trim(), sourceFile));
+                        sb.Clear();
+                        tokenCount = 0;
+                    }
 
-                sb.AppendLine(sentence);
-                tokenCount += sentenceTokens;
+                    // If single paragraph is too big, split it into sentences
+                    if (paragraphTokenCount > maxTokens)
+                    {
+                        var sentences = paragraph.Split(new[] { '.', '!', '?' }, StringSplitOptions.RemoveEmptyEntries);
+                        var tempSb = new StringBuilder();
+                        int tempTokens = 0;
+
+                        foreach (var sentence in sentences)
+                        {
+                            var sentenceText = sentence.Trim();
+                            var sentenceTokens = EstimateTokenCount(sentenceText);
+                            if (tempTokens + sentenceTokens > maxTokens && tempSb.Length > 0)
+                            {
+                                chunks.Add((tempSb.ToString().Trim(), sourceFile));
+                                tempSb.Clear();
+                                tempTokens = 0;
+                            }
+
+                            tempSb.AppendLine(sentenceText);
+                            tempTokens += sentenceTokens;
+                        }
+
+                        if (tempSb.Length > 0)
+                        {
+                            chunks.Add((tempSb.ToString().Trim(), sourceFile));
+                        }
+                    }
+                    else
+                    {
+                        sb.AppendLine(paragraph);
+                        tokenCount += paragraphTokenCount;
+                    }
+                }
             }
 
             if (sb.Length > 0)
@@ -1239,8 +1291,9 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 chunks.Add((sb.ToString().Trim(), sourceFile));
             }
 
-            return chunks.Where(c => !string.IsNullOrWhiteSpace(c.Item1)).ToList();
+            return chunks;
         }
+
         private string CleanText(string text)
         {
             text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
@@ -2474,7 +2527,9 @@ These abbreviations are standard across all MEAI HR policies and should be inter
         }
 
         private readonly ConcurrentDictionary<string, List<float>> _embeddingCache = new();
-        private readonly SemaphoreSlim _embeddingSemaphore = new(1, 1); // Limit concurrent embedding requests
+        private readonly SemaphoreSlim _embeddingSemaphore = new(1, 1);
+
+
 
         private async Task<List<float>> GetEmbeddingAsync(string text, ModelConfiguration model)
         {
@@ -2823,13 +2878,13 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 var chunks = await SearchChromaDBAsync(query, embeddingModel, maxResults, plant);
 
                 // 🆕 POLICY COVERAGE CHECK
-                if (!chunks.Any() || chunks.All(c => c.Similarity < 0.3))
+                if (!chunks.Any() || chunks.All(c => c.Similarity < 0.5))
                 {
                     _logger.LogWarning($"⚠️ Low policy coverage for plant {plant} and query: {query}");
                     // This will be handled in answer generation
                 }
 
-                return chunks;
+                return chunks.Where(x=>x.Similarity > 0.5).ToList();
             }
             catch (Exception ex)
             {
@@ -3090,7 +3145,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     query_embeddings = new List<List<float>> { queryEmbedding },
                     n_results = Math.Min(maxResults * 3, 100),
                     include = new[] { "documents", "metadatas", "distances" },
-                    //where = whereFilter
+                    where = whereFilter
                 };
 
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -3419,6 +3474,70 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             return "General Policy";
         }
 
+        private async Task<List<RelevantChunk>> GetRelevantChunksWithExpansionAsync(
+        string query,
+        ModelConfiguration embeddingModel,
+        int maxResults,
+        bool meaiInfo,
+        ConversationContext context,
+        bool useReRanking,
+        ModelConfiguration generationModel,
+        string plant)
+        {
+            if (!meaiInfo) return new List<RelevantChunk>();
+
+            try
+            {
+                var allChunks = new List<RelevantChunk>();
+
+                // 1. Original query search
+                var originalChunks = await SearchChromaDBAsync(query, embeddingModel, maxResults, plant);
+                allChunks.AddRange(originalChunks);
+
+                // 2. Expanded query search
+                var expandedQuery = _abbreviationService.ExpandQuery(query);
+                if (expandedQuery != query)
+                {
+                    var expandedChunks = await SearchChromaDBAsync(expandedQuery, embeddingModel, maxResults, plant);
+                    allChunks.AddRange(expandedChunks);
+                }
+
+                // 3. Individual term searches for key abbreviations
+                var queryWords = query.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                foreach (var word in queryWords)
+                {
+                    var variations = _abbreviationService.GetAllVariations(word);
+                    if (variations.Count > 1) // Has variations
+                    {
+                        foreach (var variation in variations.Take(2)) // Limit to avoid too many queries
+                        {
+                            if (!variation.Equals(word, StringComparison.OrdinalIgnoreCase))
+                            {
+                                var variationChunks = await SearchChromaDBAsync(variation, embeddingModel, 5, plant);
+                                allChunks.AddRange(variationChunks);
+                            }
+                        }
+                    }
+                }
+
+                // 4. Deduplicate and rank by similarity
+                var uniqueChunks = allChunks
+                    .GroupBy(c => c.Text)
+                    .Select(g => g.OrderByDescending(c => c.Similarity).First())
+                    .OrderByDescending(c => c.Similarity)
+                    .Take(maxResults)
+                    .ToList();
+
+                _logger.LogInformation($"🔍 Multi-query search: {originalChunks.Count} original + {allChunks.Count - originalChunks.Count} expanded = {uniqueChunks.Count} final chunks");
+
+                return uniqueChunks;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get relevant chunks with expansion");
+                return await SearchChromaDBAsync(query, embeddingModel, maxResults, plant); // Fallback
+            }
+        }
         public async Task DeleteModelDataFromChroma(string modelName)
         {
             await _collectionManager.DeleteModelCollectionAsync(modelName);

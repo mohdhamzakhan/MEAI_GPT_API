@@ -1,10 +1,133 @@
-HR Policy Abbreviations:
+// Enhanced HR Policy Abbreviations for MEAI
+// Format: ABBREVIATION = Full Form
+// Multiple full forms can be separated by semicolons
+
+// === LEAVE TYPES ===
 CL = Casual Leave
 SL = Sick Leave
 COFF = Compensatory Off
 EL = Earned Leave
-PL = Privilege Leave
+PL = Privilege Leave; Paternity Leave
 ML = Maternity Leave
-PL = Paternity Leave
+LWP = Leave Without Pay
+OD = Official Duty
+FL = Festival Leave
+BL = Bereavement Leave
+AL = Annual Leave
+VL = Vacation Leave
 
-These abbreviations are standard across all MEAI HR policies and should be interpreted consistently.
+// === HR TERMS ===
+HR = Human Resources
+PF = Provident Fund
+ESI = Employee State Insurance
+TDS = Tax Deducted at Source
+PAN = Permanent Account Number
+UAN = Universal Account Number
+KYC = Know Your Customer
+CTC = Cost to Company
+LTA = Leave Travel Allowance
+HRA = House Rent Allowance
+DA = Dearness Allowance
+TA = Travel Allowance
+MA = Medical Allowance
+
+// === PERFORMANCE & APPRAISAL ===
+KPI = Key Performance Indicator
+KRA = Key Result Area
+PMS = Performance Management System
+360 = 360 Degree Feedback
+PIP = Performance Improvement Plan
+IDP = Individual Development Plan
+OKR = Objectives and Key Results
+
+// === ORGANIZATIONAL ===
+CEO = Chief Executive Officer
+CTO = Chief Technology Officer
+CFO = Chief Financial Officer
+CHRO = Chief Human Resources Officer
+VP = Vice President
+GM = General Manager
+AGM = Assistant General Manager
+DGM = Deputy General Manager
+HOD = Head of Department
+TL = Team Leader
+PM = Project Manager
+AM = Assistant Manager
+DM = Deputy Manager
+SM = Senior Manager
+
+// === EMPLOYMENT TERMS ===
+DOJ = Date of Joining
+DOB = Date of Birth
+NOC = No Objection Certificate
+FNF = Full and Final Settlement
+BGV = Background Verification
+NDA = Non Disclosure Agreement
+NC = Non Compete
+IP = Intellectual Property
+SOW = Statement of Work
+MSA = Master Service Agreement
+
+// === TRAINING & DEVELOPMENT ===
+L&D = Learning and Development
+ILT = Instructor Led Training
+WBT = Web Based Training
+OJT = On Job Training
+CBT = Computer Based Training
+LMS = Learning Management System
+COE = Center of Excellence
+SME = Subject Matter Expert
+
+// === ATTENDANCE & TIME ===
+WFH = Work From Home
+WFO = Work From Office
+OT = Overtime
+FT = Full Time
+PT = Part Time
+GT = Grace Time
+LOP = Loss of Pay
+RH = Restricted Holiday
+NH = National Holiday
+WO = Week Off
+
+// === COMPLIANCE & LEGAL ===
+PF = Provident Fund
+ESIC = Employee State Insurance Corporation
+PT = Professional Tax
+LWF = Labour Welfare Fund
+CLRA = Contract Labour Regulation Act
+FSSA = Food Safety and Standards Authority
+ISO = International Organization for Standardization
+SOX = Sarbanes-Oxley Act
+GDPR = General Data Protection Regulation
+
+// === PLANT SPECIFIC ===
+MEAI = Mitsubishi Electric Automotive India
+HMSI = Honda Motorcycle and Scooter India
+MSIL = Maruti Suzuki India Limited
+
+// === LOCATIONS ===
+MAN = Manesar
+SAN = Sanand
+GUR = Gurgaon
+
+
+// === DEPARTMENTS ===
+IT = Information Technology
+QA = Quality Assurance
+QC = Quality Control
+R&D = Research and Development
+P&A = People and Administration
+F&A = Finance and Accounts
+SCM = Supply Chain Management
+MIS = Management Information System
+EHS = Environment Health and Safety
+IR = Industrial Relations
+
+// === COMMON QUESTIONS MAPPING ===
+// These help with query understanding
+leave policy = CL policy; SL policy; leave rules; leave entitlement
+salary = pay; compensation; CTC; remuneration
+benefits = perks; allowances; reimbursements
+working hours = office timing; shift timing; attendance policy
+holiday = leave; off day; festival leave; RH; NH

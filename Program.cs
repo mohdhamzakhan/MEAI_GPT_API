@@ -1,5 +1,7 @@
-﻿using MEAI_GPT_API.Data;
+﻿using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
+using MEAI_GPT_API.Data;
 using MEAI_GPT_API.Models;
+using MEAI_GPT_API.Service;
 using MEAI_GPT_API.Service.Interface;
 using MEAI_GPT_API.Services;
 using Microsoft.EntityFrameworkCore;
@@ -108,6 +110,14 @@ builder.Services.AddScoped<IConversationStorageService, ConversationStorageServi
 builder.Services.AddHostedService<RagInitializationService>();
 
 builder.Services.AddSingleton<Conversation>();
+
+// Register the service
+builder.Services.AddSingleton<AbbreviationExpansionService>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<AbbreviationExpansionService>>();
+    var abbreviationPath = Path.Combine("context", "abbreviations.txt");
+    return new AbbreviationExpansionService(logger, abbreviationPath);
+});
 builder.Services.Configure<PlantSettings>(options =>
 {
     options.Plants = builder.Configuration.GetSection("Plant").Get<Dictionary<string, string>>()!;
