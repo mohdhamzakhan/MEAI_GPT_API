@@ -27,68 +27,113 @@ namespace MEAI_GPT_API.Services
 
         public async Task<List<ModelConfiguration>> DiscoverAvailableModelsAsync()
         {
-            await _discoveryLock.WaitAsync();
             try
             {
-                // Cache discovery results for 10 minutes
-                if (DateTime.Now - _lastDiscovery < _discoveryInterval && _availableModels.Any())
-                {
-                    return _availableModels.Values.ToList();
-                }
-
-                _logger.LogInformation("🔍 Discovering available models...");
-                var models = new List<ModelConfiguration>();
-
                 var response = await _httpClient.GetAsync("/api/tags");
+
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning("Failed to fetch available models from Ollama");
-                    return models;
+                    _logger.LogError($"Failed to discover models: {response.StatusCode}");
+                    return GetHardcodedModels(); // Fallback
                 }
 
                 var json = await response.Content.ReadAsStringAsync();
+                _logger.LogInformation($"Ollama models response: {json}");
+
                 using var doc = JsonDocument.Parse(json);
+                var models = new List<ModelConfiguration>();
 
                 if (doc.RootElement.TryGetProperty("models", out var modelsArray))
                 {
-                    var tasks = modelsArray.EnumerateArray()
-                        .Select(async model =>
+                    foreach (var modelElement in modelsArray.EnumerateArray())
+                    {
+                        if (modelElement.TryGetProperty("name", out var nameProperty))
                         {
-                            if (model.TryGetProperty("name", out var nameProperty))
+                            var modelName = nameProperty.GetString();
+                            if (string.IsNullOrEmpty(modelName)) continue;
+
+                            var config = new ModelConfiguration
                             {
-                                var modelName = nameProperty.GetString();
-                                if (!string.IsNullOrEmpty(modelName))
-                                {
-                                    var config = await DetectModelCapabilitiesAsync(modelName);
-                                    if (config != null)
-                                    {
-                                        return config;
-                                    }
-                                }
-                            }
-                            return null;
-                        })
-                        .Where(t => t != null);
+                                Name = modelName,
+                                Type = DetermineModelType(modelName),
+                                MaxContextLength = GetMaxContextLength(modelName),
+                                EmbeddingDimension = GetEmbeddingDimension(modelName),
+                                ModelOptions = new Dictionary<string, object>
+                        {
+                            { "num_ctx", 2048 },
+                            { "temperature", 0.1 }
+                        }
+                            };
 
-                    var results = await Task.WhenAll(tasks);
-                    models = results.Where(m => m != null).Cast<ModelConfiguration>().ToList();
+                            models.Add(config);
+                            _logger.LogInformation($"Discovered model: {modelName} (Type: {config.Type})");
+                        }
+                    }
                 }
 
-                // Update cache
-                _availableModels.Clear();
-                foreach (var model in models)
+                if (!models.Any())
                 {
-                    _availableModels[model.Name] = model;
+                    _logger.LogWarning("No models discovered from Ollama, using hardcoded models");
+                    return GetHardcodedModels();
                 }
 
-                _lastDiscovery = DateTime.Now;
-                _logger.LogInformation($"✅ Discovered {models.Count} available models");
                 return models;
             }
-            finally
+            catch (Exception ex)
             {
-                _discoveryLock.Release();
+                _logger.LogError(ex, "Failed to discover available models");
+                return GetHardcodedModels();
             }
+        }
+        private List<ModelConfiguration> GetHardcodedModels()
+        {
+            return new List<ModelConfiguration>
+    {
+        new ModelConfiguration
+        {
+            Name = "nomic-embed-text:v1.5",
+            Type = "embedding",
+            MaxContextLength = 2048,
+            EmbeddingDimension = 768, // Nomic embedding dimension
+            ModelOptions = new Dictionary<string, object>
+            {
+                { "num_ctx", 2048 }
+            }
+        },
+        new ModelConfiguration
+        {
+            Name = "mistral:latest",
+            Type = "generation",
+            MaxContextLength = 4096,
+            EmbeddingDimension = 0,
+            ModelOptions = new Dictionary<string, object>
+            {
+                { "num_ctx", 4096 },
+                { "temperature", 0.7 }
+            }
+        }
+    };
+        }
+
+        private string DetermineModelType(string modelName)
+        {
+            if (modelName.Contains("embed") || modelName.Contains("nomic"))
+                return "embedding";
+            if (modelName.Contains("mistral") || modelName.Contains("llama") || modelName.Contains("qwen"))
+                return "generation";
+            return "generation"; // Default
+        }
+        private int GetMaxContextLength(string modelName)
+        {
+            if (modelName.Contains("nomic")) return 2048;
+            if (modelName.Contains("mistral")) return 4096;
+            return 2048; // Default
+        }
+
+        private int GetEmbeddingDimension(string modelName)
+        {
+            if (modelName.Contains("nomic-embed-text")) return 768;
+            return 0; // Not an embedding model
         }
 
         private async Task<ModelConfiguration?> DetectModelCapabilitiesAsync(string modelName)
@@ -241,7 +286,7 @@ namespace MEAI_GPT_API.Services
         public Task<ModelConfiguration?> GetModelAsync(string modelName)
         {
             // First, check in static config with exact model name
-            if (_config.ModelConfigurations.TryGetValue(modelName.Replace(':','_'), out var config))
+            if (_config.ModelConfigurations!.TryGetValue(modelName.Replace(':','_'), out var config))
             {
                 _logger.LogInformation($"✅ Loaded model config from appsettings: {modelName}");
 

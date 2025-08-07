@@ -6,5 +6,6 @@
         public string Source { get; set; } = "";
         public double Similarity { get; set; }
         public string PolicyType { get; set; } = "";
+        public List<float>? Embedding { get; set; } // NEW
     }
 }

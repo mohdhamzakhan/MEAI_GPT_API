@@ -48,6 +48,11 @@ namespace MEAI_GPT_API.Services
         private readonly PlantSettings _plants;
         private readonly IConversationStorageService _conversationStorage;
         private readonly AbbreviationExpansionService _abbreviationService;
+       // NEW: Single embedding cache with better management
+        private readonly ConcurrentDictionary<string, (List<float> Embedding, DateTime Cached)> _optimizedEmbeddingCache = new();
+        private readonly SemaphoreSlim _globalEmbeddingSemaphore = new(3, 3); // Allow 3 concurrent embedding requests
+
+
         public DynamicRagService(
             IModelManager modelManager,
             DynamicCollectionManager collectionManager,
@@ -482,7 +487,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
                 // Rank chunks by similarity to answer
                 var scoredChunks = new List<(RelevantChunk Chunk, double Similarity)>();
-                foreach (var chunk in relevantChunks.Take(10))
+                foreach (var chunk in relevantChunks.Where(x=>x.Similarity > 0.5))
                 {
                     var chunkEmbedding = await GetEmbeddingAsync(chunk.Text, embModel);
                     var similarity = CosineSimilarity(answerEmbedding, chunkEmbedding);
@@ -796,6 +801,11 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             try
             {
                 var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
+                if (embeddingModel == null)
+                {
+                    _logger.LogError($"❌ Embedding model '{_config.DefaultEmbeddingModel}' not found!");
+                    return;
+                }
                 var correctedEntries = await _conversationStorage.GetCorrectedConversationsAsync();
 
                 lock (_lockObject)
@@ -841,7 +851,8 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             {
                 Text = d.Text,
                 Source = d.SourceFile,
-                Similarity = d.Similarity // if available in EmbeddingData
+                Similarity = d.Similarity, // if available in EmbeddingData
+                Embedding = d.Vector // if available in EmbeddingData
             }).ToList();
         }
         private double CosineSimilarity(List<float> a, List<float> b)
@@ -860,127 +871,66 @@ These abbreviations are standard across all MEAI HR policies and should be inter
         }
 
         private async Task<string> GenerateChatResponseAsync(
-     string question,
-     ModelConfiguration generationModel,
-     List<ConversationTurn> history,
-     List<RelevantChunk> chunks,
-     ConversationContext context,
-     bool ismeai = true,
-     string plant = "")
+    string question,
+    ModelConfiguration generationModel,
+    List<ConversationTurn> history,
+    List<RelevantChunk> chunks,
+    ConversationContext context,
+    bool ismeai = true,
+    string plant = "")
         {
-             var messages = new List<object>();
+            var messages = new List<object>();
 
-            // Check policy coverage first
+            // OPTIMIZED: Quick coverage check first
             var hasSufficientCoverage = CheckPolicyCoverage(chunks, question);
 
-            // IF INSUFFICIENT COVERAGE, RETURN FALLBACK MESSAGE IMMEDIATELY
+            // Early return for insufficient coverage
             if (ismeai && !hasSufficientCoverage)
             {
                 _logger.LogWarning($"⚠️ Insufficient policy coverage for {plant}, returning fallback message");
                 return $"I don't have sufficient policy information to answer this question for {plant}. Please contact your supervisor or HR department for clarification on this matter.";
             }
 
-            // ENHANCED SYSTEM PROMPT
+            // OPTIMIZED: Simplified system prompt
             messages.Add(new
             {
                 role = "system",
                 content = ismeai ?
-            $@"🧠 You are MEAI HR Policy Assistant for {plant} — an expert advisor with deep knowledge of MEAI company HR policies.
-
-🔑 DEFINITIONS — NEVER REINTERPRET:
-• CL = Casual Leave (**never** 'Continuous Learning')
-• SL = Sick Leave  
-• COFF = Compensatory Off
-• EL = Earned Leave
-• PL = Privilege Leave
-• ML = Maternity Leave
-
-🏭 PLANT-SPECIFIC GUIDANCE:
-• You are answering for: **{plant}**
-• Policies may be plant-specific or centralized
-• If plant-specific policy exists, prioritize it
-• If only centralized policy exists, mention it applies across all plants
-
-📋 RESPONSE REQUIREMENTS:
-1. Provide a COMPLETE, DETAILED answer
-2. Use **all** relevant information from the provided policy excerpts
-3. Organize with clear headings, bullet points, and procedures
-4. Cite sources clearly: `[DocumentName]`
-5. If information is partial, state what's available from policies
-6. NEVER truncate your response - provide the full answer
-
-🎯 IMPORTANT: Base answers ONLY on provided official policy content. Provide complete, comprehensive responses."
-
-            :
-            @"You are an intelligent assistant designed to provide accurate, complete, and helpful responses.
-
-📌 INSTRUCTIONS:
-1. Use only the context provided — do not assume or guess beyond it
-2. Focus on clarity and relevance in your answers  
-3. If context is insufficient, clearly state limitations
-4. Structure responses with headings and bullet points where appropriate
-5. Maintain a professional, informative tone
-6. Provide COMPLETE responses - never truncate
-
-⚠️ IMPORTANT: Do not introduce external information or opinions. Always provide full, complete answers."
+                    BuildMeaiSystemPrompt(plant) :
+                    BuildGeneralSystemPrompt()
             });
 
-            // Add conversation history
-            foreach (var turn in history.TakeLast(6)) // Reduced from 8 to save tokens
+            // OPTIMIZED: Limited conversation history (reduce token usage)
+            foreach (var turn in history.TakeLast(4)) // Reduced from 6
             {
-                messages.Add(new { role = "user", content = turn.Question });
-                messages.Add(new { role = "assistant", content = turn.Answer });
+                messages.Add(new { role = "user", content = TruncateText(turn.Question, 200) });
+                messages.Add(new { role = "assistant", content = TruncateText(turn.Answer, 300) });
             }
 
-            // BUILD CONTEXT ONLY FOR SUFFICIENT COVERAGE
+            // OPTIMIZED: Build context only when needed and more efficiently
             if (chunks.Any() && ismeai && hasSufficientCoverage)
             {
-                var contextBuilder = new StringBuilder();
-                contextBuilder.AppendLine($"=== OFFICIAL POLICY INFORMATION FOR {plant.ToUpper()} ===");
-                contextBuilder.AppendLine();
-
-                var highQualityChunks = chunks.Where(c => c.Similarity >= 0.25).ToList(); // Lowered threshold
-                var groupedChunks = highQualityChunks
-                    .GroupBy(c => c.Source)
-                    .OrderByDescending(g => g.Max(c => c.Similarity))
-                    .Take(5); // Reduced to save tokens
-
-                foreach (var group in groupedChunks)
-                {
-                    var policyType = group.Key.ToLowerInvariant().Contains("centralized") ||
-                                   group.Key.ToLowerInvariant().Contains("general")
-                                   ? "Centralized Policy" : $"{plant} Specific Policy";
-
-                    contextBuilder.AppendLine($"📄 {group.Key} ({policyType}):");
-
-                    foreach (var chunk in group.OrderByDescending(c => c.Similarity).Take(6)) // Reduced from 8
-                    {
-                        contextBuilder.AppendLine($"• {chunk.Text.Trim()}");
-                        contextBuilder.AppendLine();
-                    }
-                }
-
-                messages.Add(new { role = "system", content = contextBuilder.ToString() });
+                var contextContent = BuildOptimizedContext(chunks, plant);
+                messages.Add(new { role = "system", content = contextContent });
             }
 
-            // Resolve pronouns and add current question
+            // Add current question
             question = ResolvePronouns(question, context);
             messages.Add(new { role = "user", content = question });
 
-            // FIXED: Generate response with proper error handling and token management
+            // OPTIMIZED: Request configuration
             var requestData = new
             {
                 model = generationModel.Name,
                 messages,
-                temperature = Math.Min(generationModel.Temperature, 0.3), // Lower temperature for more consistent responses
-                stream = false, // IMPORTANT: Disable streaming for now
+                temperature = 0.2, // Fixed temperature for consistency
+                stream = false,
                 options = new Dictionary<string, object>
         {
-            { "num_ctx", Math.Min(8192, generationModel.MaxContextLength) }, // Ensure sufficient context
-            { "num_predict", 2048 }, // Allow longer responses
+            { "num_ctx", Math.Min(4096, generationModel.MaxContextLength) }, // Reduced context
+            { "num_predict", 1500 }, // Reduced max tokens
             { "top_p", 0.9 },
-            { "repeat_penalty", 1.1 },
-            { "stop", new[] { "[STOP]", "[END]" } } // Add stop tokens
+            { "repeat_penalty", 1.1 }
         }
             };
 
@@ -988,76 +938,249 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             {
                 _logger.LogInformation($"🤖 Generating response with model: {generationModel.Name}");
 
-                // Increase timeout for complex responses
-                using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(4));
-
+                // OPTIMIZED: Reduced timeout
+                using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
                 var response = await _httpClient.PostAsJsonAsync("/api/chat", requestData, cts.Token);
 
                 if (!response.IsSuccessStatusCode)
                 {
                     var errorContent = await response.Content.ReadAsStringAsync();
                     _logger.LogError($"❌ Chat generation failed: {response.StatusCode} - {errorContent}");
-
-                    return ismeai
-                        ? $"I apologize, but I'm having trouble generating a response right now. Please contact your supervisor or HR department for assistance regarding {plant} policies."
-                        : "I apologize, but I'm having trouble generating a response right now. Please try again.";
+                    return GetFallbackMessage(ismeai, plant);
                 }
 
                 var json = await response.Content.ReadAsStringAsync();
 
-                // Log response for debugging
-                _logger.LogDebug($"🔍 Raw LLM response: {json.Substring(0, Math.Min(200, json.Length))}...");
-
-                // Handle potential streaming format in non-streaming response
-                if (json.Contains("}\n{") || json.Contains("data: "))
-                {
-                    _logger.LogWarning("⚠️ Received streaming format in non-streaming response, attempting to parse");
-                    return await HandleStreamingResponse(json);
-                }
-
-                using var doc = JsonDocument.Parse(json);
-
-                if (!doc.RootElement.TryGetProperty("message", out var messageElement) ||
-                    !messageElement.TryGetProperty("content", out var contentElement))
-                {
-                    _logger.LogError("❌ Unexpected response format from LLM");
-                    return "I apologize, but I received an unexpected response format. Please try again.";
-                }
-
-                var content = contentElement.GetString() ?? "";
-
-                if (string.IsNullOrWhiteSpace(content))
-                {
-                    _logger.LogError("❌ Empty content received from LLM");
-                    return "I apologize, but I received an empty response. Please try again.";
-                }
-
-                var cleanedResponse = CleanAndEnhanceResponse(content);
-
-                _logger.LogInformation($"✅ Generated response length: {cleanedResponse.Length} characters");
-
-                return cleanedResponse;
+                // OPTIMIZED: Simplified response parsing
+                return await ParseLLMResponse(json, ismeai, plant);
             }
             catch (OperationCanceledException)
             {
                 _logger.LogError("❌ Response generation timed out");
-                return ismeai
-                    ? $"The response generation timed out. Please contact your supervisor or HR department for assistance regarding {plant} policies."
-                    : "The response generation timed out. Please try a simpler question.";
-            }
-            catch (JsonException ex)
-            {
-                _logger.LogError(ex, "❌ JSON parsing failed in response generation");
-                return "I apologize, but I received a malformed response. Please try again.";
+                return GetTimeoutMessage(ismeai, plant);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "❌ Chat generation failed");
-                return ismeai
-                    ? $"I apologize, but I'm having trouble generating a response right now. Please contact your supervisor or HR department for assistance regarding {plant} policies."
-                    : "I apologize, but I'm having trouble generating a response right now. Please try again.";
+                return GetErrorMessage(ismeai, plant);
             }
         }
+
+        // OPTIMIZED: Separate method for building MEAI system prompt
+        private string BuildMeaiSystemPrompt(string plant)
+        {
+            return $@"You are MEAI HR Policy Assistant for {plant}.
+
+KEY DEFINITIONS:
+• CL = Casual Leave (never 'Continuous Learning')
+• SL = Sick Leave
+• COFF = Compensatory Off
+• EL = Earned Leave
+• PL = Privilege Leave
+• ML = Maternity Leave
+
+INSTRUCTIONS:
+1. Provide complete, detailed answers using policy information
+2. Organize with clear headings and bullet points
+3. Cite sources as [DocumentName]
+4. If information is partial, state what's available
+5. Focus on {plant} specific policies when available
+
+Base answers ONLY on provided policy content.";
+        }
+
+        // OPTIMIZED: Separate method for general system prompt
+        private string BuildGeneralSystemPrompt()
+        {
+            return @"You are a helpful AI assistant.
+
+INSTRUCTIONS:
+1. Provide accurate, complete responses
+2. Be conversational and natural
+3. Structure responses clearly
+4. If you don't know something, say so
+5. Use only provided context when available
+
+Be helpful, friendly, and informative.";
+        }
+
+        // OPTIMIZED: Efficient context building
+        private string BuildOptimizedContext(List<RelevantChunk> chunks, string plant)
+        {
+            var contextBuilder = new StringBuilder();
+            contextBuilder.AppendLine($"=== POLICY INFORMATION FOR {plant.ToUpper()} ===");
+
+            // OPTIMIZED: Only use high-quality chunks
+            var topChunks = chunks
+                .Where(c => c.Similarity >= 0.3)
+                .OrderByDescending(c => c.Similarity)
+                .Take(3) // Reduced from 5
+                .GroupBy(c => c.Source)
+                .Take(2); // Max 2 different sources
+
+            foreach (var group in topChunks)
+            {
+                var policyType = DeterminePolicyTypeSimple(group.Key, plant);
+                contextBuilder.AppendLine($"\n📄 {group.Key} ({policyType}):");
+
+                foreach (var chunk in group.Take(3)) // Max 3 chunks per source
+                {
+                    var text = TruncateText(chunk.Text.Trim(), 400); // Limit chunk size
+                    contextBuilder.AppendLine($"• {text}");
+                }
+            }
+
+            return contextBuilder.ToString();
+        }
+
+        // OPTIMIZED: Simple policy type determination
+        private string DeterminePolicyTypeSimple(string source, string plant)
+        {
+            var lowerSource = source.ToLowerInvariant();
+
+            if (lowerSource.Contains("context") || lowerSource.Contains("abbreviation"))
+                return "Context Information";
+
+            if (lowerSource.Contains("centralized") || lowerSource.Contains("general"))
+                return "Centralized Policy";
+
+            if (lowerSource.Contains(plant.ToLowerInvariant()))
+                return $"{plant} Specific Policy";
+
+            return "General Policy";
+        }
+
+        // OPTIMIZED: Text truncation helper
+        private string TruncateText(string text, int maxLength)
+        {
+            if (string.IsNullOrEmpty(text) || text.Length <= maxLength)
+                return text;
+
+            return text.Substring(0, maxLength).TrimEnd() + "...";
+        }
+
+        // OPTIMIZED: Simplified response parsing
+        private async Task<string> ParseLLMResponse(string json, bool ismeai, string plant)
+        {
+            try
+            {
+                // Handle streaming format if present
+                if (json.Contains("}\n{") || json.Contains("data:"))
+                {
+                    return ExtractContentFromStreaming(json);
+                }
+
+                // Parse normal JSON response
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("message", out var messageElement) &&
+                    messageElement.TryGetProperty("content", out var contentElement))
+                {
+                    var content = contentElement.GetString() ?? "";
+                    if (string.IsNullOrWhiteSpace(content))
+                    {
+                        _logger.LogError("❌ Empty content received from LLM");
+                        return GetFallbackMessage(ismeai, plant);
+                    }
+
+                    return CleanResponse(content);
+                }
+
+                _logger.LogError("❌ Unexpected response format from LLM");
+                return GetFallbackMessage(ismeai, plant);
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "❌ JSON parsing failed");
+                return GetFallbackMessage(ismeai, plant);
+            }
+        }
+
+        // OPTIMIZED: Simplified streaming content extraction
+        private string ExtractContentFromStreaming(string rawResponse)
+        {
+            var contentBuilder = new StringBuilder();
+            var lines = rawResponse.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var line in lines)
+            {
+                var trimmedLine = line.Trim();
+
+                // Skip empty lines and data prefixes
+                if (string.IsNullOrEmpty(trimmedLine) || trimmedLine == "[DONE]")
+                    continue;
+
+                if (trimmedLine.StartsWith("data:"))
+                    trimmedLine = trimmedLine.Substring(5).Trim();
+
+                if (!trimmedLine.StartsWith("{") || !trimmedLine.EndsWith("}"))
+                    continue;
+
+                try
+                {
+                    using var doc = JsonDocument.Parse(trimmedLine);
+                    if (doc.RootElement.TryGetProperty("message", out var msgElem) &&
+                        msgElem.TryGetProperty("content", out var contentElem))
+                    {
+                        var content = contentElem.GetString();
+                        if (!string.IsNullOrEmpty(content))
+                        {
+                            contentBuilder.Append(content);
+                        }
+                    }
+                }
+                catch (JsonException)
+                {
+                    // Skip malformed JSON lines
+                    continue;
+                }
+            }
+
+            var result = contentBuilder.ToString();
+            return string.IsNullOrWhiteSpace(result) ?
+                "I apologize, but I couldn't process the response properly. Please try again." :
+                result;
+        }
+
+        // OPTIMIZED: Response cleaning
+        private string CleanResponse(string response)
+        {
+            if (string.IsNullOrWhiteSpace(response))
+                return "I apologize, but I couldn't generate a proper response. Please try again.";
+
+            // Remove HTML/XML tags
+            var cleaned = System.Text.RegularExpressions.Regex.Replace(
+                response, @"<[^>]*>", "",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            // Clean excessive whitespace
+            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"\n\s*\n\s*\n", "\n\n");
+            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @" {2,}", " ");
+
+            return cleaned.Trim();
+        }
+
+        // Helper methods for error messages
+        private string GetFallbackMessage(bool ismeai, string plant)
+        {
+            return ismeai
+                ? $"I apologize, but I'm having trouble generating a response right now. Please contact your supervisor or HR department for assistance regarding {plant} policies."
+                : "I apologize, but I'm having trouble generating a response right now. Please try again.";
+        }
+
+        private string GetTimeoutMessage(bool ismeai, string plant)
+        {
+            return ismeai
+                ? $"The response generation timed out. Please contact your supervisor or HR department for assistance regarding {plant} policies."
+                : "The response generation timed out. Please try a simpler question.";
+        }
+
+        private string GetErrorMessage(bool ismeai, string plant)
+        {
+            return ismeai
+                ? $"I apologize, but I'm having trouble generating a response right now. Please contact your supervisor or HR department for assistance regarding {plant} policies."
+                : "I apologize, but I'm having trouble generating a response right now. Please try again.";
+        }
+
 
         private async Task<string> HandleStreamingResponse(string rawResponse)
         {
@@ -2530,53 +2653,50 @@ These abbreviations are standard across all MEAI HR policies and should be inter
         private readonly SemaphoreSlim _embeddingSemaphore = new(1, 1);
 
 
-
         private async Task<List<float>> GetEmbeddingAsync(string text, ModelConfiguration model)
         {
             if (string.IsNullOrWhiteSpace(text))
+            {
+                _logger.LogWarning("Empty text provided for embedding");
                 return new List<float>();
+            }
 
-            // Generate cache key
+            _logger.LogInformation($"Generating embedding with model: {model.Name} for text: {text.Substring(0, Math.Min(50, text.Length))}...");
+
             var cacheKey = $"{model.Name}:{text.GetHashCode():X}";
 
-            // Check cache first
             if (_embeddingCache.TryGetValue(cacheKey, out var cachedEmbedding))
             {
+                _logger.LogDebug("Using cached embedding");
                 return cachedEmbedding;
             }
 
             await _embeddingSemaphore.WaitAsync();
             try
             {
-                // Double-check cache after acquiring semaphore
-                if (_embeddingCache.TryGetValue(cacheKey, out cachedEmbedding))
-                {
-                    return cachedEmbedding;
-                }
-
-                // Optimize text length based on model
-                var maxLength = model.MaxContextLength * 3;
-                if (text.Length > maxLength)
-                    text = text.Substring(0, maxLength);
-
                 var request = new
                 {
                     model = model.Name,
-                    prompt = text,
-                    options = CreateOptimizedModelOptions(model)
+                    prompt = text.Substring(0, Math.Min(1000, text.Length)) // Limit text length
                 };
 
-                // Use optimized HTTP client settings
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                _logger.LogInformation($"Sending embedding request: {JsonSerializer.Serialize(request)}");
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60)); // Longer timeout
                 var response = await _httpClient.PostAsJsonAsync("/api/embeddings", request, cts.Token);
+
+                _logger.LogInformation($"Embedding response status: {response.StatusCode}");
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning($"Embedding request failed: {response.StatusCode}");
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    _logger.LogError($"Embedding request failed: {response.StatusCode} - {errorContent}");
                     return new List<float>();
                 }
 
                 var json = await response.Content.ReadAsStringAsync();
+                _logger.LogDebug($"Embedding response: {json.Substring(0, Math.Min(200, json.Length))}...");
+
                 using var doc = JsonDocument.Parse(json);
 
                 if (doc.RootElement.TryGetProperty("embedding", out var embeddingProperty))
@@ -2585,20 +2705,24 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                         .Select(x => x.GetSingle())
                         .ToList();
 
-                    // Cache the result (with size limit)
-                    if (_embeddingCache.Count < 10000) // Prevent memory bloat
+                    _logger.LogInformation($"Generated embedding with {embedding.Count} dimensions");
+
+                    if (_embeddingCache.Count < 1000)
                     {
                         _embeddingCache.TryAdd(cacheKey, embedding);
                     }
 
                     return embedding;
                 }
-
-                return new List<float>();
+                else
+                {
+                    _logger.LogError("No 'embedding' property found in response");
+                    return new List<float>();
+                }
             }
             catch (OperationCanceledException)
             {
-                _logger.LogWarning($"Embedding request timed out for model {model.Name}");
+                _logger.LogError($"Embedding request timed out for model {model.Name}");
                 return new List<float>();
             }
             catch (Exception ex)
@@ -2611,6 +2735,86 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 _embeddingSemaphore.Release();
             }
         }
+        //private async Task<List<float>> GetEmbeddingAsync(string text, ModelConfiguration model)
+        //{
+        //    if (string.IsNullOrWhiteSpace(text))
+        //        return new List<float>();
+
+        //    // Generate cache key
+        //    var cacheKey = $"{model.Name}:{text.GetHashCode():X}";
+
+        //    // Check cache first
+        //    if (_embeddingCache.TryGetValue(cacheKey, out var cachedEmbedding))
+        //    {
+        //        return cachedEmbedding;
+        //    }
+
+        //    await _embeddingSemaphore.WaitAsync();
+        //    try
+        //    {
+        //        // Double-check cache after acquiring semaphore
+        //        if (_embeddingCache.TryGetValue(cacheKey, out cachedEmbedding))
+        //        {
+        //            return cachedEmbedding;
+        //        }
+
+        //        // Optimize text length based on model
+        //        var maxLength = model.MaxContextLength * 3;
+        //        if (text.Length > maxLength)
+        //            text = text.Substring(0, maxLength);
+
+        //        var request = new
+        //        {
+        //            model = model.Name,
+        //            prompt = text,
+        //            options = CreateOptimizedModelOptions(model)
+        //        };
+
+        //        // Use optimized HTTP client settings
+        //        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        //        var response = await _httpClient.PostAsJsonAsync("/api/embeddings", request, cts.Token);
+
+        //        if (!response.IsSuccessStatusCode)
+        //        {
+        //            _logger.LogWarning($"Embedding request failed: {response.StatusCode}");
+        //            return new List<float>();
+        //        }
+
+        //        var json = await response.Content.ReadAsStringAsync();
+        //        using var doc = JsonDocument.Parse(json);
+
+        //        if (doc.RootElement.TryGetProperty("embedding", out var embeddingProperty))
+        //        {
+        //            var embedding = embeddingProperty.EnumerateArray()
+        //                .Select(x => x.GetSingle())
+        //                .ToList();
+
+        //            // Cache the result (with size limit)
+        //            if (_embeddingCache.Count < 10000) // Prevent memory bloat
+        //            {
+        //                _embeddingCache.TryAdd(cacheKey, embedding);
+        //            }
+
+        //            return embedding;
+        //        }
+
+        //        return new List<float>();
+        //    }
+        //    catch (OperationCanceledException)
+        //    {
+        //        _logger.LogWarning($"Embedding request timed out for model {model.Name}");
+        //        return new List<float>();
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        _logger.LogError(ex, $"Embedding generation failed for model {model.Name}");
+        //        return new List<float>();
+        //    }
+        //    finally
+        //    {
+        //        _embeddingSemaphore.Release();
+        //    }
+        //}
 
         private Dictionary<string, object> CreateOptimizedModelOptions(ModelConfiguration model)
         {
@@ -2823,75 +3027,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 _logger.LogError(ex, "Embedding warm-up failed");
             }
         }
-
-        private Dictionary<string, object> CreatePlantFilter(string plant)
-        {
-            // Handle multiple plants and centralized policies
-            var plants = plant.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                             .Select(p => p.Trim().ToLowerInvariant())
-                             .ToList();
-
-            // Always include centralized policies
-            if (!plants.Contains("centralized"))
-            {
-                plants.Add("centralized");
-            }
-
-            _logger.LogInformation($"🏭 Filtering for plants: {string.Join(", ", plants)}");
-
-            // ChromaDB filter for multiple plants using $in operator
-            return new Dictionary<string, object>
-            {
-                ["plant"] = new Dictionary<string, object>
-                {
-                    ["$in"] = plants
-                }
-            };
-        }
-
-        private async Task<List<RelevantChunk>> GetRelevantChunksAsync(
-     string query,
-     ModelConfiguration embeddingModel,
-     int maxResults,
-     bool meaiInfo,
-     ConversationContext context,
-     bool useReRanking,
-     ModelConfiguration generationModel,
-     string plant) // 🆕 Added plant parameter
-        {
-
-            _logger.LogWarning($"🔍 Retrieving relevant chunks for query: {query} (plant: {plant})");
-            if (!meaiInfo)
-            {
-                _logger.LogInformation("🚫 Skipping relevant chunks retrieval (meaiInfo = false)");
-                return new List<RelevantChunk>();
-            }
-
-            try
-            {
-                // Check corrections first
-                var correction = await CheckCorrectionsAsync(query);
-                if (correction != null)
-                    return new List<RelevantChunk>();
-
-                // Perform plant-specific ChromaDB search
-                var chunks = await SearchChromaDBAsync(query, embeddingModel, maxResults, plant);
-
-                // 🆕 POLICY COVERAGE CHECK
-                if (!chunks.Any() || chunks.All(c => c.Similarity < 0.5))
-                {
-                    _logger.LogWarning($"⚠️ Low policy coverage for plant {plant} and query: {query}");
-                    // This will be handled in answer generation
-                }
-
-                return chunks.Where(x=>x.Similarity > 0.5).ToList();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to get relevant chunks");
-                return new List<RelevantChunk>();
-            }
-        }
         public async Task<QueryResponse> ProcessQueryWithCoverageCheck(string question, string plant)
         {
             var response = await ProcessQueryAsync(
@@ -2941,6 +3076,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 (mediumQualityChunks.Count >= 2 && hasHrPolicyContent) || // Multiple medium matches with HR content
                 (anyRelevantChunks.Count >= 3 && hasHrPolicyContent);      // Many low matches with HR content
 
+            
             if (!hasSufficientCoverage)
             {
                 _logger.LogWarning($"⚠️ Insufficient policy coverage for question: {question}. " +
@@ -3014,7 +3150,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                         Text = documentText,
                         Source = sourceFile,
                         Similarity = similarity,
-                        PolicyType = policyType // ✅ NEW: Add policy type to chunk
+                        PolicyType = policyType, // ✅ NEW: Add policy type to chunk
                     });
                 }
             }
@@ -3034,8 +3170,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
             return results;
         }
-
-        // 3. ADD: Diagnostic method to debug search issues
         public async Task<DiagnosticInfo> DiagnoseSearchIssueAsync(string question, string plant)
         {
             var diagnostic = new DiagnosticInfo
@@ -3538,6 +3672,8 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 return await SearchChromaDBAsync(query, embeddingModel, maxResults, plant); // Fallback
             }
         }
+
+
         public async Task DeleteModelDataFromChroma(string modelName)
         {
             await _collectionManager.DeleteModelCollectionAsync(modelName);

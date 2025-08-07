@@ -569,7 +569,8 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 {
                     Text = e.Text,
                     Source = e.SourceFile,
-                    Similarity = e.Similarity
+                    Similarity = e.Similarity,
+                    
                 }).ToList();
             }
 
