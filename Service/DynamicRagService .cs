@@ -6,7 +6,6 @@ using MEAI_GPT_API.Service.Interface;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualBasic;
-using StackExchange.Redis;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.Http;
@@ -45,10 +44,15 @@ namespace MEAI_GPT_API.Services
         private readonly string _currentUser = "system";
         public bool _isInitialized = false;
         private readonly object _lock = new();
-        private static readonly ConcurrentBag<(string Question, string Answer, List<RelevantChunk> Chunks, string Plant)> _appreciatedTurns = new();
+        private static readonly ConcurrentBag<(string Question, string Answer, List<RelevantChunk> Chunks)> _appreciatedTurns = new();
         private readonly PlantSettings _plants;
         private readonly IConversationStorageService _conversationStorage;
         private readonly AbbreviationExpansionService _abbreviationService;
+       // NEW: Single embedding cache with better management
+        private readonly ConcurrentDictionary<string, (List<float> Embedding, DateTime Cached)> _optimizedEmbeddingCache = new();
+        private readonly SemaphoreSlim _globalEmbeddingSemaphore = new(3, 3); // Allow 3 concurrent embedding requests
+
+
         public DynamicRagService(
             IModelManager modelManager,
             DynamicCollectionManager collectionManager,
@@ -373,7 +377,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 }
 
                 // Check corrections (existing logic) - ONLY for MEAI queries
-                var correction = await CheckCorrectionsAsync(question, plant);
+                var correction = await CheckCorrectionsAsync(question);
                 if (correction != null)
                 {
                     _logger.LogInformation($"🎯 Using correction for question: {question}");
@@ -414,7 +418,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 }
 
                 // Check appreciated answers - ONLY for MEAI queries
-                var appreciated = await CheckAppreciatedAnswerAsync(question, plant);
+                var appreciated = await CheckAppreciatedAnswerAsync(question);
                 if (appreciated != null)
                 {
                     _logger.LogInformation("✨ Using appreciated answer match for question.");
@@ -483,22 +487,25 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
                 // Rank chunks by similarity to answer
                 var scoredChunks = new List<(RelevantChunk Chunk, double Similarity)>();
-
-                foreach (var chunk in relevantChunks)
+                foreach (var chunk in relevantChunks.Where(x=>x.Similarity > 0.5))
                 {
                     var chunkEmbedding = await GetEmbeddingAsync(chunk.Text, embModel);
                     var similarity = CosineSimilarity(answerEmbedding, chunkEmbedding);
-                    chunk.Similarity = similarity; // update for display/logging
+                    chunk.Similarity = similarity;
                     scoredChunks.Add((chunk, similarity));
                 }
 
+                // Sort by similarity
                 var topChunks = scoredChunks
-                    .Where(x => x.Similarity >= 0.5)
-                    .OrderByDescending(x => x.Similarity)
+                    .Where(c => c.Similarity >= 0.5)
+                    .OrderByDescending(c => c.Similarity)
                     .Take(5)
-                    .Select(x => x.Chunk)
+                    .Select(c =>
+                    {
+                        c.Chunk.Similarity = c.Similarity;
+                        return c.Chunk;
+                    })
                     .ToList();
-
 
                 // Compute confidence
                 var confidence = topChunks.FirstOrDefault()?.Similarity ?? 0;
@@ -525,8 +532,8 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 {
                     Answer = answer,
                     IsFromCorrection = false,
-                    Sources = topChunks.Select(c => c.Source).Distinct().ToList(),
-                    Confidence = topChunks.FirstOrDefault()?.Similarity ?? 0,
+                    Sources = relevantChunks.Select(c => c.Source).Distinct().ToList(),
+                    Confidence = confidence,
                     ProcessingTimeMs = stopwatch.ElapsedMilliseconds,
                     RelevantChunks = topChunks,
                     SessionId = dbSession.SessionId,
@@ -564,7 +571,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 model = modelName,
                 messages = messages,
                 stream = true, // Enable streaming
-                temperature = 0.6
+                temperature = 0.2
             };
 
             var request = new HttpRequestMessage(HttpMethod.Post, "/api/chat") // Adjust path as needed
@@ -703,7 +710,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             var lowerQuestion = question.ToLowerInvariant();
             return followUpIndicators.Any(indicator => lowerQuestion.Contains(indicator));
         }
-        public async Task MarkAppreciatedAsync(string sessionId, string question, string plant)
+        public async Task MarkAppreciatedAsync(string sessionId, string question)
         {
             try
             {
@@ -726,7 +733,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     if (turn != null)
                     {
                         var chunks = ConvertToRelevantChunks(context.RelevantChunks ?? new List<EmbeddingData>());
-                        _appreciatedTurns.Add((turn.Question, turn.Answer, new List<RelevantChunk>(chunks), plant));
+                        _appreciatedTurns.Add((turn.Question, turn.Answer, new List<RelevantChunk>(chunks)));
                     }
                 }
             }
@@ -779,7 +786,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 foreach (var answer in appreciatedAnswers)
                 {
                     var chunks = new List<RelevantChunk>(); // You might want to reconstruct these
-                    _appreciatedTurns.Add((answer.Question, answer.Answer, chunks, answer.Plant));
+                    _appreciatedTurns.Add((answer.Question, answer.Answer, chunks));
                 }
 
                 _logger.LogInformation($"📚 Loaded {appreciatedAnswers.Count} historical appreciated answers");
@@ -814,8 +821,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                             Answer = c.CorrectedAnswer!,
                             Embedding = c.QuestionEmbedding,
                             Model = c.GenerationModel,
-                            Date = c.CreatedAt,
-                            Plant = c.Plant!
+                            Date = c.CreatedAt
                         }))
                     {
                         newBag.Add(entry);
@@ -904,7 +910,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             // OPTIMIZED: Build context only when needed and more efficiently
             if (chunks.Any() && ismeai && hasSufficientCoverage)
             {
-                var contextContent = BuildOptimizedContext(chunks, plant, question);
+                var contextContent = BuildOptimizedContext(chunks, plant);
                 messages.Add(new { role = "system", content = contextContent });
             }
 
@@ -912,19 +918,17 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             question = ResolvePronouns(question, context);
             messages.Add(new { role = "user", content = question });
 
-            float temperature = ismeai ? 0.2f : 0.5f;
-            int numPredict = ismeai ? 1500 : 800;
             // OPTIMIZED: Request configuration
             var requestData = new
             {
                 model = generationModel.Name,
                 messages,
-                temperature = temperature,
+                temperature = 0.2, // Fixed temperature for consistency
                 stream = false,
                 options = new Dictionary<string, object>
         {
             { "num_ctx", Math.Min(4096, generationModel.MaxContextLength) }, // Reduced context
-            { "num_predict", numPredict },
+            { "num_predict", 1500 }, // Reduced max tokens
             { "top_p", 0.9 },
             { "repeat_penalty", 1.1 }
         }
@@ -1001,57 +1005,33 @@ Be helpful, friendly, and informative.";
         }
 
         // OPTIMIZED: Efficient context building
-        private string BuildOptimizedContext(List<RelevantChunk> chunks, string plant, string question)
+        private string BuildOptimizedContext(List<RelevantChunk> chunks, string plant)
         {
             var contextBuilder = new StringBuilder();
             contextBuilder.AppendLine($"=== POLICY INFORMATION FOR {plant.ToUpper()} ===");
 
-            // Group chunks by policy type and relevance
-            var groupedChunks = chunks
-                .Where(c => c.Similarity >= 0.4) // Higher threshold
-                .GroupBy(c => c.PolicyType)
-                .OrderByDescending(g => g.Max(c => c.Similarity))
-                .Take(3);
+            // OPTIMIZED: Only use high-quality chunks
+            var topChunks = chunks
+                .Where(c => c.Similarity >= 0.3)
+                .OrderByDescending(c => c.Similarity)
+                .Take(3) // Reduced from 5
+                .GroupBy(c => c.Source)
+                .Take(2); // Max 2 different sources
 
-            foreach (var group in groupedChunks)
+            foreach (var group in topChunks)
             {
-                contextBuilder.AppendLine($"\n📋 {group.Key}:");
+                var policyType = DeterminePolicyTypeSimple(group.Key, plant);
+                contextBuilder.AppendLine($"\n📄 {group.Key} ({policyType}):");
 
-                var topChunks = group
-                    .OrderByDescending(c => c.Similarity)
-                    .Take(2) // Limit chunks per policy type
-                    .ToList();
-
-                foreach (var chunk in topChunks)
+                foreach (var chunk in group.Take(3)) // Max 3 chunks per source
                 {
-                    // Extract most relevant sentences
-                    var relevantSentences = ExtractRelevantSentences(chunk.Text, question);
-                    contextBuilder.AppendLine($"• {relevantSentences} [Source: {chunk.Source}]");
+                    var text = TruncateText(chunk.Text.Trim(), 400); // Limit chunk size
+                    contextBuilder.AppendLine($"• {text}");
                 }
             }
 
             return contextBuilder.ToString();
         }
-
-        private string ExtractRelevantSentences(string text, string question)
-        {
-            var sentences = text.Split('.', StringSplitOptions.RemoveEmptyEntries);
-            var questionWords = question.ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
-            var scoredSentences = sentences
-                .Select(s => new
-                {
-                    Sentence = s.Trim(),
-                    Score = questionWords.Count(word => s.ToLowerInvariant().Contains(word))
-                })
-                .Where(s => s.Score > 0 && s.Sentence.Length > 20)
-                .OrderByDescending(s => s.Score)
-                .Take(2)
-                .Select(s => s.Sentence);
-
-            return string.Join(". ", scoredSentences);
-        }
-
 
         // OPTIMIZED: Simple policy type determination
         private string DeterminePolicyTypeSimple(string source, string plant)
@@ -1763,7 +1743,7 @@ Be helpful, friendly, and informative.";
                 _logger.LogError(ex, "Failed to update conversation history");
             }
         }
-        private async Task<(string Answer, List<RelevantChunk> Chunks)?> CheckAppreciatedAnswerAsync(string question, string plant)
+        private async Task<(string Answer, List<RelevantChunk> Chunks)?> CheckAppreciatedAnswerAsync(string question)
         {
             try
             {
@@ -1773,19 +1753,15 @@ Be helpful, friendly, and informative.";
                     return null;
 
                 var matches = _appreciatedTurns
-                    .Where(entry =>
-                        (!string.IsNullOrEmpty(plant) && !plant.Equals("General", StringComparison.OrdinalIgnoreCase)
-                            ? entry.Plant.Equals(plant, StringComparison.OrdinalIgnoreCase)
-                            : string.IsNullOrEmpty(entry.Plant) || entry.Plant.Equals("General", StringComparison.OrdinalIgnoreCase)))
                     .Select(entry => new
                     {
                         entry.Answer,
                         entry.Chunks,
                         Similarity = CosineSimilarity(inputEmbedding, GetEmbeddingAsync(entry.Question, embeddingModel).Result)
                     })
-                    .Where(x => x.Similarity >= 0.8)
+                    .Where(x => x.Similarity >= 0.8) // Threshold can be tuned
+                    .OrderByDescending(x => x.Similarity)
                     .ToList();
-
 
                 if (matches.Any())
                 {
@@ -2183,7 +2159,7 @@ Be helpful, friendly, and informative.";
                 }
 
                 // 🆕 CHECK FOR CORRECTIONS (even in non-MEAI mode)
-                var correction = await CheckCorrectionsAsync(question, "");
+                var correction = await CheckCorrectionsAsync(question);
                 if (correction != null)
                 {
                     _logger.LogInformation($"🎯 Using correction for NON-MEAI question: {question}");
@@ -2309,7 +2285,7 @@ Be helpful, friendly, and informative.";
 
 ✨ Be helpful, friendly, and informative!"
             });
-           
+
             // Add recent conversation history (limited for speed)
             foreach (var turn in history.TakeLast(6))
             {
@@ -2512,7 +2488,7 @@ Be helpful, friendly, and informative.";
             }
         }
         // UPDATE CheckCorrectionsAsync to work with both MEAI and non-MEAI queries
-        private async Task<CorrectionEntry?> CheckCorrectionsAsync(string question, string plant)
+     private async Task<CorrectionEntry?> CheckCorrectionsAsync(string question)
         {
             try
             {
@@ -2532,7 +2508,7 @@ Be helpful, friendly, and informative.";
                     _logger.LogWarning(ex, "Could not generate embedding for correction check, falling back to text matching");
                 }
 
-                List<(CorrectionEntry Entry, double Similarity, string Plant)> matches = new List<(CorrectionEntry, double, string)>();
+                List<(CorrectionEntry Entry, double Similarity)> matches = new List<(CorrectionEntry, double)>();
 
                 lock (_lockObject)
                 {
@@ -2558,20 +2534,14 @@ Be helpful, friendly, and informative.";
 
                         if (similarity >= threshold)
                         {
-                            matches.Add((correction, similarity, correction.Plant));
+                            matches.Add((correction, similarity));
                         }
                     }
                 }
 
                 if (matches.Any())
                 {
-
-                    var bestMatch = matches
-                       .Where(c =>
-                            (!string.IsNullOrEmpty(plant) && !plant.Equals("General", StringComparison.OrdinalIgnoreCase)
-                                ? c.Plant.Equals(plant, StringComparison.OrdinalIgnoreCase)
-                                : string.IsNullOrEmpty(c.Plant) || c.Plant.Equals("General", StringComparison.OrdinalIgnoreCase)))
-                        .OrderByDescending(x => x.Similarity).First();
+                    var bestMatch = matches.OrderByDescending(x => x.Similarity).First();
                     _logger.LogInformation($"✅ Correction match found: \"{bestMatch.Entry.Question}\" with similarity {bestMatch.Similarity:F2}");
                     return bestMatch.Entry;
                 }
@@ -2683,88 +2653,88 @@ Be helpful, friendly, and informative.";
         private readonly SemaphoreSlim _embeddingSemaphore = new(1, 1);
 
 
-        //private async Task<List<float>> GetEmbeddingAsync(string text, ModelConfiguration model)
-        //{
-        //    if (string.IsNullOrWhiteSpace(text))
-        //    {
-        //        _logger.LogWarning("Empty text provided for embedding");
-        //        return new List<float>();
-        //    }
+        private async Task<List<float>> GetEmbeddingAsync(string text, ModelConfiguration model)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                _logger.LogWarning("Empty text provided for embedding");
+                return new List<float>();
+            }
 
-        //    _logger.LogInformation($"Generating embedding with model: {model.Name} for text: {text.Substring(0, Math.Min(50, text.Length))}...");
+            _logger.LogInformation($"Generating embedding with model: {model.Name} for text: {text.Substring(0, Math.Min(50, text.Length))}...");
 
-        //    var cacheKey = $"{model.Name}:{text.GetHashCode():X}";
+            var cacheKey = $"{model.Name}:{text.GetHashCode():X}";
 
-        //    if (_embeddingCache.TryGetValue(cacheKey, out var cachedEmbedding))
-        //    {
-        //        _logger.LogDebug("Using cached embedding");
-        //        return cachedEmbedding;
-        //    }
+            if (_embeddingCache.TryGetValue(cacheKey, out var cachedEmbedding))
+            {
+                _logger.LogDebug("Using cached embedding");
+                return cachedEmbedding;
+            }
 
-        //    await _embeddingSemaphore.WaitAsync();
-        //    try
-        //    {
-        //        var request = new
-        //        {
-        //            model = model.Name,
-        //            prompt = text.Substring(0, Math.Min(1000, text.Length)) // Limit text length
-        //        };
+            await _embeddingSemaphore.WaitAsync();
+            try
+            {
+                var request = new
+                {
+                    model = model.Name,
+                    prompt = text.Substring(0, Math.Min(1000, text.Length)) // Limit text length
+                };
 
-        //        _logger.LogInformation($"Sending embedding request: {JsonSerializer.Serialize(request)}");
+                _logger.LogInformation($"Sending embedding request: {JsonSerializer.Serialize(request)}");
 
-        //        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60)); // Longer timeout
-        //        var response = await _httpClient.PostAsJsonAsync("/api/embeddings", request, cts.Token);
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60)); // Longer timeout
+                var response = await _httpClient.PostAsJsonAsync("/api/embeddings", request, cts.Token);
 
-        //        _logger.LogInformation($"Embedding response status: {response.StatusCode}");
+                _logger.LogInformation($"Embedding response status: {response.StatusCode}");
 
-        //        if (!response.IsSuccessStatusCode)
-        //        {
-        //            var errorContent = await response.Content.ReadAsStringAsync();
-        //            _logger.LogError($"Embedding request failed: {response.StatusCode} - {errorContent}");
-        //            return new List<float>();
-        //        }
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    _logger.LogError($"Embedding request failed: {response.StatusCode} - {errorContent}");
+                    return new List<float>();
+                }
 
-        //        var json = await response.Content.ReadAsStringAsync();
-        //        _logger.LogDebug($"Embedding response: {json.Substring(0, Math.Min(200, json.Length))}...");
+                var json = await response.Content.ReadAsStringAsync();
+                _logger.LogDebug($"Embedding response: {json.Substring(0, Math.Min(200, json.Length))}...");
 
-        //        using var doc = JsonDocument.Parse(json);
+                using var doc = JsonDocument.Parse(json);
 
-        //        if (doc.RootElement.TryGetProperty("embedding", out var embeddingProperty))
-        //        {
-        //            var embedding = embeddingProperty.EnumerateArray()
-        //                .Select(x => x.GetSingle())
-        //                .ToList();
+                if (doc.RootElement.TryGetProperty("embedding", out var embeddingProperty))
+                {
+                    var embedding = embeddingProperty.EnumerateArray()
+                        .Select(x => x.GetSingle())
+                        .ToList();
 
-        //            _logger.LogInformation($"Generated embedding with {embedding.Count} dimensions");
+                    _logger.LogInformation($"Generated embedding with {embedding.Count} dimensions");
 
-        //            if (_embeddingCache.Count < 1000)
-        //            {
-        //                _embeddingCache.TryAdd(cacheKey, embedding);
-        //            }
+                    if (_embeddingCache.Count < 1000)
+                    {
+                        _embeddingCache.TryAdd(cacheKey, embedding);
+                    }
 
-        //            return embedding;
-        //        }
-        //        else
-        //        {
-        //            _logger.LogError("No 'embedding' property found in response");
-        //            return new List<float>();
-        //        }
-        //    }
-        //    catch (OperationCanceledException)
-        //    {
-        //        _logger.LogError($"Embedding request timed out for model {model.Name}");
-        //        return new List<float>();
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        _logger.LogError(ex, $"Embedding generation failed for model {model.Name}");
-        //        return new List<float>();
-        //    }
-        //    finally
-        //    {
-        //        _embeddingSemaphore.Release();
-        //    }
-        //}
+                    return embedding;
+                }
+                else
+                {
+                    _logger.LogError("No 'embedding' property found in response");
+                    return new List<float>();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogError($"Embedding request timed out for model {model.Name}");
+                return new List<float>();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Embedding generation failed for model {model.Name}");
+                return new List<float>();
+            }
+            finally
+            {
+                _embeddingSemaphore.Release();
+            }
+        }
         //private async Task<List<float>> GetEmbeddingAsync(string text, ModelConfiguration model)
         //{
         //    if (string.IsNullOrWhiteSpace(text))
@@ -3078,57 +3048,57 @@ Be helpful, friendly, and informative.";
             return response;
         }
         // 1. UPDATE: More lenient policy coverage check
-        //private bool CheckPolicyCoverage(List<RelevantChunk> chunks, string question)
-        //{
-        //    if (!chunks.Any())
-        //    {
-        //        _logger.LogWarning($"⚠️ No relevant chunks found for question: {question}");
-        //        return false;
-        //    }
+        private bool CheckPolicyCoverage(List<RelevantChunk> chunks, string question)
+        {
+            if (!chunks.Any())
+            {
+                _logger.LogWarning($"⚠️ No relevant chunks found for question: {question}");
+                return false;
+            }
 
-        //    // More flexible coverage criteria for HR policies
-        //    var veryHighQuality = chunks.Where(c => c.Similarity >= 0.7).ToList();
-        //    var highQualityChunks = chunks.Where(c => c.Similarity >= 0.4).ToList(); // Lowered from 0.5
-        //    var mediumQualityChunks = chunks.Where(c => c.Similarity >= 0.25).ToList(); // Lowered from 0.3
-        //    var anyRelevantChunks = chunks.Where(c => c.Similarity >= 0.15).ToList(); // Very permissive
+            // More flexible coverage criteria for HR policies
+            var veryHighQuality = chunks.Where(c => c.Similarity >= 0.7).ToList();
+            var highQualityChunks = chunks.Where(c => c.Similarity >= 0.4).ToList(); // Lowered from 0.5
+            var mediumQualityChunks = chunks.Where(c => c.Similarity >= 0.25).ToList(); // Lowered from 0.3
+            var anyRelevantChunks = chunks.Where(c => c.Similarity >= 0.15).ToList(); // Very permissive
 
-        //    // Check for HR policy keywords in the chunks
-        //    var hrPolicyKeywords = new[] { "leave", "cl", "casual", "sick", "policy", "employee", "hr", "rule", "regulation", "procedure" };
-        //    var hasHrPolicyContent = chunks.Any(c =>
-        //        hrPolicyKeywords.Any(keyword => c.Text.ToLowerInvariant().Contains(keyword)) ||
-        //        c.Source.ToLowerInvariant().Contains("policy") ||
-        //        c.Source.ToLowerInvariant().Contains("hr"));
+            // Check for HR policy keywords in the chunks
+            var hrPolicyKeywords = new[] { "leave", "cl", "casual", "sick", "policy", "employee", "hr", "rule", "regulation", "procedure" };
+            var hasHrPolicyContent = chunks.Any(c =>
+                hrPolicyKeywords.Any(keyword => c.Text.ToLowerInvariant().Contains(keyword)) ||
+                c.Source.ToLowerInvariant().Contains("policy") ||
+                c.Source.ToLowerInvariant().Contains("hr"));
 
-        //    // Enhanced coverage criteria:
-        //    var hasSufficientCoverage =
-        //        veryHighQuality.Any() ||                           // At least one very high match
-        //        highQualityChunks.Count >= 1 ||                    // At least one good match  
-        //        (mediumQualityChunks.Count >= 2 && hasHrPolicyContent) || // Multiple medium matches with HR content
-        //        (anyRelevantChunks.Count >= 3 && hasHrPolicyContent);      // Many low matches with HR content
+            // Enhanced coverage criteria:
+            var hasSufficientCoverage =
+                veryHighQuality.Any() ||                           // At least one very high match
+                highQualityChunks.Count >= 1 ||                    // At least one good match  
+                (mediumQualityChunks.Count >= 2 && hasHrPolicyContent) || // Multiple medium matches with HR content
+                (anyRelevantChunks.Count >= 3 && hasHrPolicyContent);      // Many low matches with HR content
 
             
-        //    if (!hasSufficientCoverage)
-        //    {
-        //        _logger.LogWarning($"⚠️ Insufficient policy coverage for question: {question}. " +
-        //                          $"Very High: {veryHighQuality.Count}, High: {highQualityChunks.Count}, " +
-        //                          $"Medium: {mediumQualityChunks.Count}, Any: {anyRelevantChunks.Count}, " +
-        //                          $"HR Content: {hasHrPolicyContent}");
+            if (!hasSufficientCoverage)
+            {
+                _logger.LogWarning($"⚠️ Insufficient policy coverage for question: {question}. " +
+                                  $"Very High: {veryHighQuality.Count}, High: {highQualityChunks.Count}, " +
+                                  $"Medium: {mediumQualityChunks.Count}, Any: {anyRelevantChunks.Count}, " +
+                                  $"HR Content: {hasHrPolicyContent}");
 
-        //        // Log chunk details for debugging
-        //        foreach (var chunk in chunks.Take(3))
-        //        {
-        //            _logger.LogInformation($"📄 Chunk: {chunk.Source} | Similarity: {chunk.Similarity:F3} | Text: {chunk.Text.Substring(0, Math.Min(100, chunk.Text.Length))}...");
-        //        }
-        //    }
-        //    else
-        //    {
-        //        _logger.LogInformation($"✅ Sufficient policy coverage found. " +
-        //                              $"Very High: {veryHighQuality.Count}, High: {highQualityChunks.Count}, " +
-        //                              $"Medium: {mediumQualityChunks.Count}");
-        //    }
+                // Log chunk details for debugging
+                foreach (var chunk in chunks.Take(3))
+                {
+                    _logger.LogInformation($"📄 Chunk: {chunk.Source} | Similarity: {chunk.Similarity:F3} | Text: {chunk.Text.Substring(0, Math.Min(100, chunk.Text.Length))}...");
+                }
+            }
+            else
+            {
+                _logger.LogInformation($"✅ Sufficient policy coverage found. " +
+                                      $"Very High: {veryHighQuality.Count}, High: {highQualityChunks.Count}, " +
+                                      $"Medium: {mediumQualityChunks.Count}");
+            }
 
-        //    return hasSufficientCoverage;
-        //}
+            return hasSufficientCoverage;
+        }
 
         // 2. UPDATE: More lenient similarity thresholds in search parsing
         private List<RelevantChunk> ParseSearchResults(JsonElement root, int maxResults, string currentPlant)
@@ -3707,731 +3677,6 @@ Be helpful, friendly, and informative.";
         public async Task DeleteModelDataFromChroma(string modelName)
         {
             await _collectionManager.DeleteModelCollectionAsync(modelName);
-        }
-
-        private async Task<List<RelevantChunk>> GetRelevantChunksOptimized(
-    string query,
-    ModelConfiguration embeddingModel,
-    int maxResults,
-    string plant)
-        {
-            var strategies = new List<SearchStrategy>
-    {
-        // Strategy 1: Exact semantic search
-        new() { Query = query, Weight = 1.0, MinSimilarity = 0.6 },
-        
-        // Strategy 2: Expanded abbreviations
-        new() { Query = _abbreviationService.ExpandQuery(query), Weight = 0.9, MinSimilarity = 0.5 },
-        
-        // Strategy 3: Key term extraction
-        new() { Query = ExtractKeyTerms(query), Weight = 0.8, MinSimilarity = 0.4 }
-    };
-
-            var allChunks = new List<RelevantChunk>();
-
-            foreach (var strategy in strategies)
-            {
-                var chunks = await SearchChromaDBAsync(strategy.Query, embeddingModel, maxResults, plant);
-
-                // Apply strategy weighting
-                foreach (var chunk in chunks.Where(c => c.Similarity >= strategy.MinSimilarity))
-                {
-                    chunk.Similarity *= strategy.Weight;
-                    allChunks.Add(chunk);
-                }
-            }
-
-            // Advanced deduplication and ranking
-            return RankAndDeduplicateChunks(allChunks, query, maxResults);
-        }
-
-        private bool CheckPolicyCoverage(List<RelevantChunk> chunks, string question)
-        {
-            if (!chunks.Any()) return false;
-
-            // More stringent thresholds
-            var excellentChunks = chunks.Where(c => c.Similarity >= 0.8).ToList();
-            var goodChunks = chunks.Where(c => c.Similarity >= 0.6).ToList();
-            var acceptableChunks = chunks.Where(c => c.Similarity >= 0.4).ToList();
-
-            // Check for policy-specific content
-            var hasPolicyContent = chunks.Any(c =>
-                ContainsPolicyKeywords(c.Text) ||
-                c.Source.ToLowerInvariant().Contains("policy"));
-
-            // Improved coverage criteria
-            return (excellentChunks.Count >= 1) ||
-                   (goodChunks.Count >= 2 && hasPolicyContent) ||
-                   (acceptableChunks.Count >= 3 && hasPolicyContent &&
-                    acceptableChunks.Sum(c => c.Similarity) >= 1.8);
-        }
-
-        private bool ContainsPolicyKeywords(string text)
-        {
-            var policyKeywords = new[]
-            {
-        "leave", "policy", "procedure", "rule", "regulation",
-        "entitled", "eligible", "approval", "hr", "employee",
-        "cl", "sl", "pl", "ml", "coff", "casual", "sick"
-    };
-
-            var lowerText = text.ToLowerInvariant();
-            return policyKeywords.Count(keyword => lowerText.Contains(keyword)) >= 2;
-        }
-
-        private List<RelevantChunk> RankAndDeduplicateChunks(
-    List<RelevantChunk> chunks,
-    string originalQuery,
-    int maxResults)
-        {
-            // Deduplicate by content similarity
-            var uniqueChunks = new List<RelevantChunk>();
-
-            foreach (var chunk in chunks.OrderByDescending(c => c.Similarity))
-            {
-                bool isDuplicate = uniqueChunks.Any(existing =>
-                    CalculateTextSimilarity(chunk.Text, existing.Text) > 0.8);
-
-                if (!isDuplicate)
-                {
-                    // Re-score based on multiple factors
-                    chunk.Similarity = CalculateCompositeScore(chunk, originalQuery);
-                    uniqueChunks.Add(chunk);
-                }
-            }
-
-            return uniqueChunks
-                .OrderByDescending(c => c.Similarity)
-                .Take(maxResults)
-                .ToList();
-        }
-
-        private double CalculateCompositeScore(RelevantChunk chunk, string query)
-        {
-            var baseScore = chunk.Similarity;
-
-            // Boost for policy documents
-            if (chunk.Source.ToLowerInvariant().Contains("policy"))
-                baseScore += 0.1;
-
-            // Boost for exact keyword matches
-            var queryWords = query.ToLowerInvariant().Split(' ');
-            var exactMatches = queryWords.Count(word =>
-                chunk.Text.ToLowerInvariant().Contains(word));
-            baseScore += (exactMatches * 0.05);
-
-            // Boost for structured policy content
-            if (ContainsPolicyStructure(chunk.Text))
-                baseScore += 0.15;
-
-            return Math.Min(1.0, baseScore);
-        }
-
-        private bool ContainsPolicyStructure(string text)
-        {
-            var structureIndicators = new[]
-            {
-        "shall be", "is entitled", "may apply", "subject to",
-        "provided that", "in case of", "as per", "according to"
-    };
-
-            return structureIndicators.Any(indicator =>
-                text.ToLowerInvariant().Contains(indicator));
-        }
-
-        private string EnhanceQuery(string originalQuery, ConversationContext context)
-        {
-            var enhancedQuery = originalQuery;
-
-            // Add context from conversation history
-            if (context.History.Any())
-            {
-                var lastTurn = context.History.Last();
-                var contextKeywords = ExtractKeywords(lastTurn.Question + " " + lastTurn.Answer);
-                enhancedQuery += " " + string.Join(" ", contextKeywords.Take(3));
-            }
-
-            // Expand abbreviations
-            enhancedQuery = _abbreviationService.ExpandQuery(enhancedQuery);
-
-            // Add policy-specific terms
-            if (ContainsLeaveQuery(originalQuery))
-            {
-                enhancedQuery += " policy procedure eligibility approval";
-            }
-
-            return enhancedQuery;
-        }
-
-        private bool ContainsLeaveQuery(string query)
-        {
-            var leaveTerms = new[] { "leave", "cl", "sl", "pl", "ml", "coff", "vacation", "absent" };
-            return leaveTerms.Any(term => query.ToLowerInvariant().Contains(term));
-        }
-
-        private async Task<List<RelevantChunk>> SearchWithDiagnostics(
-    string query,
-    ModelConfiguration embeddingModel,
-    int maxResults,
-    string plant)
-        {
-            var stopwatch = Stopwatch.StartNew();
-
-            _logger.LogInformation($"🔍 Starting search for plant '{plant}' with query: '{query}'");
-
-            var results = await SearchChromaDBAsync(query, embeddingModel, maxResults, plant);
-
-            stopwatch.Stop();
-
-            // Log detailed diagnostics
-            _logger.LogInformation($"📊 Search completed in {stopwatch.ElapsedMilliseconds}ms:");
-            _logger.LogInformation($"   - Total chunks found: {results.Count}");
-            _logger.LogInformation($"   - High quality (>0.6): {results.Count(r => r.Similarity > 0.6)}");
-            _logger.LogInformation($"   - Medium quality (0.4-0.6): {results.Count(r => r.Similarity >= 0.4 && r.Similarity <= 0.6)}");
-            _logger.LogInformation($"   - Low quality (<0.4): {results.Count(r => r.Similarity < 0.4)}");
-
-            // Log top results
-            foreach (var result in results.Take(3))
-            {
-                _logger.LogInformation($"   📄 {result.Source}: {result.Similarity:F3} - {result.Text.Substring(0, Math.Min(100, result.Text.Length))}...");
-            }
-
-            return results;
-        }
-
-        private string ExtractKeyTerms(string query)
-        {
-            var keyTerms = new List<string>();
-            var lowerQuery = query.ToLowerInvariant();
-
-            // 1. Extract HR policy-specific terms
-            var hrTerms = new Dictionary<string, string[]>
-            {
-                ["leave"] = new[] { "absence", "time-off", "vacation", "holiday" },
-                ["cl"] = new[] { "casual leave", "casual", "personal leave" },
-                ["sl"] = new[] { "sick leave", "medical leave", "illness" },
-                ["ml"] = new[] { "maternity leave", "maternal", "pregnancy" },
-                ["pl"] = new[] { "privilege leave", "earned leave", "annual leave" },
-                ["coff"] = new[] { "compensatory off", "comp off", "overtime" },
-                ["policy"] = new[] { "rule", "regulation", "procedure", "guideline" },
-                ["eligibility"] = new[] { "entitled", "qualified", "eligible" },
-                ["approval"] = new[] { "permission", "authorization", "sanction" }
-            };
-
-            // Extract matching HR terms and their synonyms
-            foreach (var term in hrTerms)
-            {
-                if (lowerQuery.Contains(term.Key))
-                {
-                    keyTerms.Add(term.Key);
-                    keyTerms.AddRange(term.Value.Take(2)); // Add top 2 synonyms
-                }
-            }
-
-            // 2. Extract meaningful words (nouns, verbs, adjectives)
-            var words = query.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            var meaningfulWords = words
-                .Where(w => w.Length > 3 && !IsStopWord(w))
-                .Take(5); // Limit to prevent query explosion
-
-            keyTerms.AddRange(meaningfulWords);
-
-            // 3. Add plant-specific context if mentioned
-            var plants = new[] { "manesar", "sanand" };
-            var mentionedPlant = plants.FirstOrDefault(p =>
-                lowerQuery.Contains(p));
-            if (!string.IsNullOrEmpty(mentionedPlant))
-            {
-                keyTerms.Add(mentionedPlant);
-            }
-
-            return string.Join(" ", keyTerms.Distinct());
-        }
-        public class SearchStrategy
-        {
-            public string Query { get; set; } = string.Empty;
-            public double Weight { get; set; } = 1.0;
-            public double MinSimilarity { get; set; } = 0.4;
-            public string Type { get; set; } = "semantic"; // semantic, keyword, expanded
-            public Dictionary<string, object> Options { get; set; } = new();
-
-            public SearchStrategy() { }
-
-            public SearchStrategy(string query, double weight = 1.0, double minSimilarity = 0.4, string type = "semantic")
-            {
-                Query = query;
-                Weight = weight;
-                MinSimilarity = minSimilarity;
-                Type = type;
-            }
-        }
-
-        private List<string> ExtractKeywords(string text)
-        {
-            if (string.IsNullOrWhiteSpace(text))
-                return new List<string>();
-
-            var keywords = new HashSet<string>();
-            var lowerText = text.ToLowerInvariant();
-
-            // 1. Extract HR-specific keywords
-            var hrKeywords = new Dictionary<string, string[]>
-            {
-                ["leave"] = new[] { "absence", "time-off", "vacation" },
-                ["cl"] = new[] { "casual leave", "casual", "personal" },
-                ["sl"] = new[] { "sick leave", "medical", "illness" },
-                ["ml"] = new[] { "maternity leave", "maternal" },
-                ["pl"] = new[] { "privilege leave", "earned leave" },
-                ["coff"] = new[] { "compensatory off", "comp off" },
-                ["policy"] = new[] { "rule", "regulation", "procedure" },
-                ["approval"] = new[] { "permission", "authorization" },
-                ["eligibility"] = new[] { "entitled", "qualified" }
-            };
-
-            // Add HR keywords found in text
-            foreach (var kvp in hrKeywords)
-            {
-                if (lowerText.Contains(kvp.Key))
-                {
-                    keywords.Add(kvp.Key);
-                    // Add most relevant synonyms
-                    keywords.UnionWith(kvp.Value.Take(2));
-                }
-            }
-
-            // 2. Extract meaningful words (remove stop words)
-            var words = text.Split(new[] { ' ', '\t', '\n', '\r', '.', ',', ';', ':', '!', '?' },
-                StringSplitOptions.RemoveEmptyEntries);
-
-            var meaningfulWords = words
-                .Where(w => w.Length > 3)
-                .Where(w => !IsStopWord(w))
-                .Where(w => !IsNumeric(w))
-                .Select(w => w.ToLowerInvariant().Trim())
-                .Distinct();
-
-            keywords.UnionWith(meaningfulWords.Take(8)); // Limit to prevent keyword explosion
-
-            // 3. Extract named entities if they exist in context
-            var entityPatterns = new[]
-            {
-        @"\b[A-Z][a-z]+\s+[A-Z][a-z]+\b", // Person names
-        @"\b[A-Z]{2,}\b" // Abbreviations/acronyms
-    };
-
-            foreach (var pattern in entityPatterns)
-            {
-                var matches = System.Text.RegularExpressions.Regex.Matches(text, pattern);
-                foreach (System.Text.RegularExpressions.Match match in matches)
-                {
-                    var entity = match.Value.ToLowerInvariant();
-                    if (entity.Length > 2 && !IsStopWord(entity))
-                    {
-                        keywords.Add(entity);
-                    }
-                }
-            }
-
-            return keywords.Take(10).ToList(); // Return top 10 keywords
-        }
-
-        private bool IsNumeric(string word)
-        {
-            return word.All(char.IsDigit);
-        }
-
-        // This IsStopWord method is already in your code, but here's an enhanced version
-        private bool IsStopWord(string word)
-        {
-            var stopWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        // Common English stop words
-        "the", "is", "at", "which", "on", "and", "or", "but", "in", "with",
-        "a", "an", "as", "are", "was", "were", "been", "be", "have", "has",
-        "had", "do", "does", "did", "will", "would", "could", "should",
-        "may", "might", "can", "shall", "to", "of", "for", "by", "from",
-        "what", "when", "where", "why", "how", "who", "whom", "whose",
-        "about", "after", "again", "before", "being", "below", "between",
-        "during", "further", "having", "other", "since", "through", "under",
-        "until", "while", "above", "against", "because", "down", "into", "off",
-        "once", "only", "same", "there", "these", "those", "where", "which",
-        "more", "most", "each", "few", "its", "no", "not", "now",
-        "old", "see", "two", "way", "boy", "did", "let", "put",
-        "too", "use", "get", "got", "make", "made", "take", "took",
-        "come", "came", "give", "gave", "go", "went", "know", "knew",
-        
-        // Common Hindi/Hinglish words (if applicable)
-        "kya", "hai", "ka", "ki", "ko", "me", "se", "aur", "ye", "wo",
-        
-        // Question words
-        "tell", "give", "show", "suggest", "recommend", "explain"
-    };
-
-            return stopWords.Contains(word);
-        }
-
-
-        // Factory class for creating search strategies
-        public static class SearchStrategyFactory
-        {
-            public static List<SearchStrategy> CreateStrategies(string originalQuery, string plant)
-            {
-                var strategies = new List<SearchStrategy>();
-
-                // Strategy 1: Original semantic search
-                strategies.Add(new SearchStrategy(
-                    query: originalQuery,
-                    weight: 1.0,
-                    minSimilarity: 0.6,
-                    type: "semantic"
-                ));
-
-                // Strategy 2: Expanded abbreviations
-                var expandedQuery = ExpandAbbreviations(originalQuery);
-                if (expandedQuery != originalQuery)
-                {
-                    strategies.Add(new SearchStrategy(
-                        query: expandedQuery,
-                        weight: 0.9,
-                        minSimilarity: 0.5,
-                        type: "expanded"
-                    ));
-                }
-
-                // Strategy 3: Key term extraction
-                var keyTerms = ExtractKeyTermsForStrategy(originalQuery);
-                if (!string.IsNullOrEmpty(keyTerms))
-                {
-                    strategies.Add(new SearchStrategy(
-                        query: keyTerms,
-                        weight: 0.8,
-                        minSimilarity: 0.4,
-                        type: "keywords"
-                    ));
-                }
-
-                // Strategy 4: Plant-specific boost
-                if (!string.IsNullOrEmpty(plant) && !originalQuery.ToLowerInvariant().Contains(plant.ToLowerInvariant()))
-                {
-                    strategies.Add(new SearchStrategy(
-                        query: $"{originalQuery} {plant}",
-                        weight: 0.7,
-                        minSimilarity: 0.3,
-                        type: "plant-specific"
-                    ));
-                }
-
-                return strategies;
-            }
-
-            private static string ExpandAbbreviations(string query)
-            {
-                var expansions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["cl"] = "casual leave",
-                    ["sl"] = "sick leave",
-                    ["ml"] = "maternity leave",
-                    ["pl"] = "privilege leave",
-                    ["coff"] = "compensatory off",
-                    ["el"] = "earned leave",
-                    ["hr"] = "human resources"
-                };
-
-                var result = query;
-                foreach (var expansion in expansions)
-                {
-                    result = System.Text.RegularExpressions.Regex.Replace(
-                        result,
-                        $@"\b{expansion.Key}\b",
-                        expansion.Value,
-                        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                }
-
-                return result;
-            }
-
-            private static string ExtractKeyTermsForStrategy(string query)
-            {
-                var words = query.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                var keyWords = words
-                    .Where(w => w.Length > 3)
-                    .Where(w => !IsCommonWord(w))
-                    .Take(4);
-
-                return string.Join(" ", keyWords);
-            }
-
-            private static bool IsCommonWord(string word)
-            {
-                var common = new[] { "what", "when", "where", "how", "can", "will", "would", "could", "should" };
-                return common.Contains(word.ToLowerInvariant());
-            }
-        }
-
-        private async Task<List<float>> GetEmbeddingAsync(string text, ModelConfiguration model)
-        {
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                _logger.LogWarning("Empty text provided for embedding");
-                return new List<float>();
-            }
-
-            // Calculate cache key before any modifications
-            var cacheKey = $"{model.Name}:{text.GetHashCode():X}";
-            if (_embeddingCache.TryGetValue(cacheKey, out var cachedEmbedding))
-            {
-                _logger.LogDebug("Using cached embedding");
-                return cachedEmbedding;
-            }
-
-            await _embeddingSemaphore.WaitAsync();
-            try
-            {
-                // 🆕 IMPROVED: Smart text processing instead of truncation
-                string processedText = PrepareTextForEmbedding(text, model);
-
-                var request = new
-                {
-                    model = model.Name,
-                    prompt = processedText // Using processed text instead of truncated
-                };
-
-                _logger.LogInformation($"Sending embedding request for {processedText.Length} chars with model: {model.Name}");
-
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-                var response = await _httpClient.PostAsJsonAsync("/api/embeddings", request, cts.Token);
-
-                _logger.LogInformation($"Embedding response status: {response.StatusCode}");
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    var errorContent = await response.Content.ReadAsStringAsync();
-                    _logger.LogError($"Embedding request failed: {response.StatusCode} - {errorContent}");
-                    return new List<float>();
-                }
-
-                var json = await response.Content.ReadAsStringAsync();
-                using var doc = JsonDocument.Parse(json);
-
-                if (doc.RootElement.TryGetProperty("embedding", out var embeddingProperty))
-                {
-                    var embedding = embeddingProperty.EnumerateArray()
-                        .Select(x => x.GetSingle())
-                        .ToList();
-
-                    _logger.LogInformation($"Generated embedding with {embedding.Count} dimensions");
-
-                    if (_embeddingCache.Count < 1000)
-                    {
-                        _embeddingCache.TryAdd(cacheKey, embedding);
-                    }
-
-                    return embedding;
-                }
-                else
-                {
-                    _logger.LogError("No 'embedding' property found in response");
-                    return new List<float>();
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                _logger.LogError($"Embedding request timed out for model {model.Name}");
-                return new List<float>();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Embedding generation failed for model {model.Name}");
-                return new List<float>();
-            }
-            finally
-            {
-                _embeddingSemaphore.Release();
-            }
-        }
-
-        // 🆕 NEW METHOD: Smart text preparation for embeddings
-        private string PrepareTextForEmbedding(string text, ModelConfiguration model)
-        {
-            if (string.IsNullOrWhiteSpace(text))
-                return text;
-
-            // Determine the optimal length based on model context
-            int maxLength = DetermineOptimalLength(model);
-
-            // If text is within limits, return as-is
-            if (text.Length <= maxLength)
-            {
-                return CleanTextForEmbedding(text);
-            }
-
-            // Strategy 1: Try to extract key content first
-            string keyContent = ExtractKeyContentForEmbedding(text, maxLength);
-            if (!string.IsNullOrEmpty(keyContent) && keyContent.Length <= maxLength)
-            {
-                _logger.LogInformation($"Using key content extraction: {keyContent.Length} chars from {text.Length} chars");
-                return keyContent;
-            }
-
-            // Strategy 2: Smart sentence-boundary truncation
-            string smartTruncated = SmartTruncateAtSentence(text, maxLength);
-            if (!string.IsNullOrEmpty(smartTruncated))
-            {
-                _logger.LogInformation($"Using smart truncation: {smartTruncated.Length} chars from {text.Length} chars");
-                return smartTruncated;
-            }
-
-            // Strategy 3: Fallback to word-boundary truncation
-            _logger.LogWarning($"Falling back to word-boundary truncation for {text.Length} chars");
-            return TruncateAtWordBoundary(text, maxLength);
-        }
-
-        // Determine optimal embedding length based on model
-        private int DetermineOptimalLength(ModelConfiguration model)
-        {
-            // Conservative approach - use smaller chunks for better quality
-            int baseLength = model.MaxContextLength > 0 ? model.MaxContextLength / 4 : 1000;
-
-            // Cap at reasonable limits for embeddings
-            return Math.Min(Math.Max(baseLength, 500), 2000);
-        }
-
-        private string ExtractKeyContentForEmbedding(string text, int maxLength)
-        {
-            try
-            {
-                var sentences = text.Split(new[] { '.', '!', '?' }, StringSplitOptions.RemoveEmptyEntries)
-                    .Select(s => s.Trim())
-                    .Where(s => s.Length > 10)
-                    .ToList();
-
-                if (!sentences.Any())
-                    return SmartTruncateAtSentence(text, maxLength);
-
-                // Extract keywords and find most relevant sentences
-                var keywords = ExtractKeywords(text);
-                var scoredSentences = sentences.Select(sentence => new
-                {
-                    Sentence = sentence,
-                    Score = CalculateSentenceRelevance(sentence, keywords),
-                    Length = sentence.Length
-                })
-                .Where(s => s.Score > 0)
-                .OrderByDescending(s => s.Score)
-                .ThenByDescending(s => s.Length)
-                .ToList();
-
-                // Build content from highest scoring sentences
-                var result = new StringBuilder();
-                int currentLength = 0;
-
-                foreach (var item in scoredSentences)
-                {
-                    if (currentLength + item.Length + 2 > maxLength)
-                        break;
-
-                    if (result.Length > 0)
-                        result.Append(". ");
-
-                    result.Append(item.Sentence);
-                    currentLength = result.Length;
-                }
-
-                return result.Length > 0 ? result.ToString() : "";
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Key content extraction failed, falling back");
-                return "";
-            }
-        }
-        private double CalculateSentenceRelevance(string sentence, List<string> keywords)
-        {
-            if (!keywords.Any())
-                return 1.0; // If no keywords, all sentences are equally relevant
-
-            var sentenceWords = sentence.ToLowerInvariant()
-                .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                .ToHashSet();
-
-            var keywordMatches = keywords.Count(keyword =>
-                sentenceWords.Contains(keyword.ToLowerInvariant()));
-
-            // Boost for HR-specific terms
-            var hrBoost = 0.0;
-            var hrTerms = new[] { "leave", "policy", "cl", "sl", "employee", "hr", "rule", "regulation" };
-            if (hrTerms.Any(term => sentence.ToLowerInvariant().Contains(term)))
-                hrBoost = 0.5;
-
-            return (double)keywordMatches / keywords.Count + hrBoost;
-        }
-        private string SmartTruncateAtSentence(string text, int maxLength)
-        {
-            if (text.Length <= maxLength)
-                return text;
-
-            // Find the last complete sentence within the limit
-            var sentences = text.Split(new[] { '.', '!', '?' }, StringSplitOptions.RemoveEmptyEntries);
-            var result = new StringBuilder();
-
-            foreach (var sentence in sentences)
-            {
-                var trimmedSentence = sentence.Trim();
-                if (string.IsNullOrEmpty(trimmedSentence))
-                    continue;
-
-                // Check if adding this sentence would exceed the limit
-                var potentialLength = result.Length + trimmedSentence.Length + 2; // +2 for ". "
-
-                if (potentialLength > maxLength)
-                    break;
-
-                if (result.Length > 0)
-                    result.Append(". ");
-
-                result.Append(trimmedSentence);
-            }
-
-            // If we couldn't fit any complete sentences, fall back to word boundary
-            if (result.Length == 0)
-                return TruncateAtWordBoundary(text, maxLength);
-
-            return result.ToString();
-        }
-
-        // Fallback: truncate at word boundary
-        private string TruncateAtWordBoundary(string text, int maxLength)
-        {
-            if (text.Length <= maxLength)
-                return text;
-
-            // Find the last space before the max length
-            int lastSpace = text.LastIndexOf(' ', maxLength);
-
-            if (lastSpace > maxLength / 2) // Make sure we don't lose too much content
-            {
-                return text.Substring(0, lastSpace).Trim();
-            }
-
-            // If no good word boundary found, just truncate with warning
-            _logger.LogWarning($"Had to truncate mid-word at {maxLength} characters");
-            return text.Substring(0, maxLength).Trim();
-        }
-
-        // Clean text for better embedding quality
-        private string CleanTextForEmbedding(string text)
-        {
-            // Remove excessive whitespace
-            text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
-
-            // Remove special characters that might interfere with embeddings
-            text = System.Text.RegularExpressions.Regex.Replace(text, @"[^\w\s.,!?;:()\-""']", " ");
-
-            // Clean up multiple periods/punctuation
-            text = System.Text.RegularExpressions.Regex.Replace(text, @"\.{2,}", ".");
-            text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
-
-            return text.Trim();
         }
 
     }

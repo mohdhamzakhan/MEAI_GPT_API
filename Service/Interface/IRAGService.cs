@@ -14,7 +14,7 @@ public interface IRAGService
     Task InitializeAsync();
     Task<bool> IsHealthy();
     Task LoadHistoricalAppreciatedAnswersAsync();
-    Task MarkAppreciatedAsync(string sessionId, string question, string plant);
+    Task MarkAppreciatedAsync(string sessionId, string question);
     Task<QueryResponse> ProcessQueryAsync(string question, string plant, string? generationModel = null, string? embeddingModel = null, int maxResults = 15, bool meaiInfo = true, string? sessionId = null, bool useReRanking = true);
     Task ProcessUploadedPolicyAsync(Stream fileStream, string fileName, string model);
     Task RefreshEmbeddingsAsync(string model = "mistral:latest");
