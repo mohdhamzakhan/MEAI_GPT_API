@@ -148,7 +148,7 @@ namespace MEAI_GPT_API.Controller
         [HttpPost("feedback/like")]
         public async Task<IActionResult> Like([FromBody] FeedbackRequest feedback)
         {
-            await _ragService.MarkAppreciatedAsync(feedback.sessionId, feedback.Question);
+            await _ragService.MarkAppreciatedAsync(feedback.sessionId, feedback.Question, feedback.Plant);
             return Ok();
         }
 

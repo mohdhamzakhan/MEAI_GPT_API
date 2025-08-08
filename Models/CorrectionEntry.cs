@@ -8,5 +8,6 @@
         public List<float> Embedding { get; set; }
         public DateTime Date { get; set; } = DateTime.Now;
         public string Model { get; set; }
+        public string Plant { get; set; }
     }
 }

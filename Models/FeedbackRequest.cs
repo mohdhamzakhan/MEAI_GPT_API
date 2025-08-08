@@ -6,5 +6,6 @@
         public string CorrectAnswer { get; set; } = "";
         public string model { get; set; }
         public string sessionId { get; set; }
+        public string Plant { get; set; }
     }
 }
