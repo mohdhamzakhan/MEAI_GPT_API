@@ -32,8 +32,6 @@ namespace MEAI_GPT_API.Services
             var collectionId = await CreateCollectionAsync(collectionName, model);
 
             _modelCollections[cacheKey] = collectionId;
-            _modelCollections["llama3.1:8b"] = "2c2b61c5-d891-4ee0-a4ec-3752ca2855bc";
-            _modelCollections["linux6200/bge-reranker-v2-m3:latest"] = "38292f1c-f329-427a-b349-c462b04b1c40";
             return collectionId;
         }
 

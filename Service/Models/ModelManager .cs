@@ -111,6 +111,18 @@ namespace MEAI_GPT_API.Services
                 { "num_ctx", 4096 },
                 { "temperature", 0.7 }
             }
+        },
+        new ModelConfiguration
+        {
+            Name = "llama3.1:8b",
+            Type = "generation",
+            MaxContextLength = 4096,
+            EmbeddingDimension = 0,
+            ModelOptions = new Dictionary<string, object>
+            {
+                { "num_ctx", 4096 },
+                { "temperature", 0.7 }
+            }
         }
     };
         }

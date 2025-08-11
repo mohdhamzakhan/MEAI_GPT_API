@@ -51,7 +51,24 @@ public class DocumentProcessor : IDocumentProcessor
         {
             using var document = WordprocessingDocument.Open(filePath, false);
             var mainPart = document.MainDocumentPart;
-            return mainPart?.Document.Body?.InnerText ?? string.Empty;
+
+            if (mainPart?.Document.Body == null)
+                return string.Empty;
+
+            var text = new StringBuilder();
+
+            // Extract with better paragraph separation
+            foreach (var paragraph in mainPart.Document.Body.Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>())
+            {
+                var paragraphText = paragraph.InnerText.Trim();
+                if (!string.IsNullOrEmpty(paragraphText))
+                {
+                    text.AppendLine(paragraphText);
+                    text.AppendLine(); // Add extra line break for paragraph separation
+                }
+            }
+
+            return text.ToString();
         }
         catch (Exception ex)
         {
