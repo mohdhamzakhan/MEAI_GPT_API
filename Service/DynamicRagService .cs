@@ -343,7 +343,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             string plant,
             string? generationModel = null,
             string? embeddingModel = null,
-            int maxResults = 15,
+            int maxResults = 10,
             bool meaiInfo = true,
             string? sessionId = null,
             bool useReRanking = true)
@@ -719,6 +719,48 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 throw new RAGServiceException($"Failed to process query for plant {plant}", ex);
             }
         }
+
+        // Add this to your class
+        private readonly ConcurrentDictionary<string, (List<float> Embedding, DateTime Cached)> _sessionEmbeddingCache = new();
+
+        private async Task<List<float>> GetOptimizedEmbeddingAsync(string text, ModelConfiguration model, string sessionId = "")
+        {
+            if (string.IsNullOrWhiteSpace(text)) return new List<float>();
+
+            var cacheKey = $"{model.Name}:{text.GetHashCode():X}";
+
+            // Check session cache first (faster)
+            if (!string.IsNullOrEmpty(sessionId))
+            {
+                var sessionKey = $"{sessionId}:{cacheKey}";
+                if (_sessionEmbeddingCache.TryGetValue(sessionKey, out var sessionCached))
+                {
+                    if (DateTime.Now - sessionCached.Cached < TimeSpan.FromMinutes(30))
+                        return sessionCached.Embedding;
+                }
+            }
+
+            // Check global cache
+            if (_optimizedEmbeddingCache.TryGetValue(cacheKey, out var cached))
+            {
+                if (DateTime.Now - cached.Cached < TimeSpan.FromHours(2))
+                    return cached.Embedding;
+            }
+
+            // Generate new embedding
+            var embedding = await GetEmbeddingAsync(text, model);
+
+            // Cache in both places
+            if (!string.IsNullOrEmpty(sessionId))
+            {
+                var sessionKey = $"{sessionId}:{cacheKey}";
+                _sessionEmbeddingCache.TryAdd(sessionKey, (embedding, DateTime.UtcNow));
+            }
+
+            _optimizedEmbeddingCache.TryAdd(cacheKey, (embedding, DateTime.UtcNow, 1));
+            return embedding;
+        }
+
         private async Task<string> RephraseWithLLMAsync(string originalAnswer, string modelName)
         {
             var systemPrompt = "You are a professional assistant. Rephrase the following content to make it sound polished, concise, and formal.";
