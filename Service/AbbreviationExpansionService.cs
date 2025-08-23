@@ -62,44 +62,79 @@ namespace MEAI_GPT_API.Service
         }
 
         // Expand query to include both abbreviations and full forms
+
         public string ExpandQuery(string query)
         {
-            var expandedTerms = new List<string> { query };
+            var expandedQueries = new List<string> { query }; // always keep original
             var words = query.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
             foreach (var word in words)
             {
                 var cleanWord = word.Trim('.', ',', '?', '!', ';', ':');
 
-                // Check if word is an abbreviation
-                if (_abbreviationMap.ContainsKey(cleanWord))
+                if (_abbreviationMap.TryGetValue(cleanWord, out var fullForms))
                 {
-                    foreach (var fullForm in _abbreviationMap[cleanWord])
-                    {
-                        var expandedQuery = query.Replace(word, fullForm, StringComparison.OrdinalIgnoreCase);
-                        expandedTerms.Add(expandedQuery);
-                    }
+                    expandedQueries.Add(query.Replace(word, fullForms.First(), StringComparison.OrdinalIgnoreCase));
                 }
-
-                // Check if word is a full form
-                if (_reverseMap.ContainsKey(cleanWord))
+                else if (_reverseMap.TryGetValue(cleanWord, out var abbrevs))
                 {
-                    foreach (var abbrev in _reverseMap[cleanWord])
-                    {
-                        var expandedQuery = query.Replace(word, abbrev, StringComparison.OrdinalIgnoreCase);
-                        expandedTerms.Add(expandedQuery);
-                    }
+                    expandedQueries.Add(query.Replace(word, abbrevs.First(), StringComparison.OrdinalIgnoreCase));
                 }
             }
 
-            var result = string.Join(" | ", expandedTerms.Distinct());
-            if (expandedTerms.Count > 1)
+            var result = string.Join(" || ", expandedQueries.Distinct());
+            if (expandedQueries.Count > 1)
             {
                 _logger.LogInformation($"Expanded query: '{query}' -> '{result}'");
             }
 
             return result;
         }
+        public List<string> ExpandQueryList(string query)
+        {
+            var expanded = new List<string> { query };
+            var words = query.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var word in words)
+            {
+                var cleanWord = word.Trim('.', ',', '?', '!', ';', ':');
+
+                if (_abbreviationMap.TryGetValue(cleanWord, out var fullForms))
+                    expanded.Add(query.Replace(word, fullForms.First(), StringComparison.OrdinalIgnoreCase));
+
+                if (_reverseMap.TryGetValue(cleanWord, out var abbrevs))
+                    expanded.Add(query.Replace(word, abbrevs.First(), StringComparison.OrdinalIgnoreCase));
+            }
+
+            return expanded.Distinct().ToList();
+        }
+
+
+        private void BuildCombinations(
+            List<List<string>> perTokenVariants,
+            int index,
+            List<string> current,
+            List<string> results,
+            int maxCombinations)
+        {
+            if (results.Count >= maxCombinations) return;
+
+            if (index == perTokenVariants.Count)
+            {
+                results.Add(string.Concat(current)); // we preserved whitespace tokens, so just concat
+                return;
+            }
+
+            foreach (var option in perTokenVariants[index])
+            {
+                if (results.Count >= maxCombinations) break;
+                current.Add(option);
+                BuildCombinations(perTokenVariants, index + 1, current, results, maxCombinations);
+                current.RemoveAt(current.Count - 1);
+            }
+        }
+
+
 
         // Get all variations of a term
         public List<string> GetAllVariations(string term)

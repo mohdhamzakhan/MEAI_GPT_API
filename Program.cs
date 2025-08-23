@@ -3,6 +3,7 @@ using MEAI_GPT_API.Data;
 using MEAI_GPT_API.Models;
 using MEAI_GPT_API.Service;
 using MEAI_GPT_API.Service.Interface;
+using MEAI_GPT_API.Service.Models;
 using MEAI_GPT_API.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.StackExchangeRedis;
@@ -108,6 +109,18 @@ builder.Services.AddScoped<IConversationStorageService, ConversationStorageServi
 
 // FIXED: Modified hosted service to use IServiceScopeFactory
 builder.Services.AddHostedService<RagInitializationService>();
+builder.Services.AddScoped<CodingDetectionResult>();
+builder.Services.AddScoped<DynamicCodingAssistanceService>();
+builder.Services.AddSingleton<CodingDetectionService>();
+
+//New Code Updated by Hamza
+builder.Services.AddScoped<StringProcessingService>();
+builder.Services.AddScoped<PolicyAnalysisService>();
+builder.Services.AddScoped<TextChunkingService>();
+builder.Services.AddScoped<ConversationAnalysisService>();
+builder.Services.AddScoped<EntityExtractionService>();
+builder.Services.AddScoped<SystemPromptBuilder>();
+
 
 builder.Services.AddSingleton<Conversation>();
 
@@ -162,16 +175,6 @@ using (var scope = app.Services.CreateScope())
     var context = scope.ServiceProvider.GetRequiredService<ConversationDbContext>();
     context.Database.EnsureCreated();
 }
-
-// FIXED: This manual initialization is now handled by the hosted service
-// Remove this manual initialization since RagInitializationService will handle it
-// using (var scope = app.Services.CreateScope())
-// {
-//     var ragService = scope.ServiceProvider.GetRequiredService<IRAGService>();
-//     await ragService.InitializeAsync();
-// }
-
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
 {
     app.UseSwagger();
@@ -184,5 +187,7 @@ app.UseCors("AllowAll");
 app.UseRouting();
 app.MapControllers();
 app.UseMetrics();
+
+app.UseDeveloperExceptionPage();
 
 app.Run();

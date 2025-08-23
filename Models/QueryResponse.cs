@@ -14,5 +14,7 @@
         public Dictionary<string, string> ModelsUsed { get; set; } = new();
         public string Plant { get; set; }
         public bool HasSufficientPolicyCoverage { get; set; } = true;
+        public Dictionary<string, object> Metadata { get; set; } = new();
+        public Boolean IsFromCache { get; set; }
     }
 }

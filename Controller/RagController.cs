@@ -1,4 +1,5 @@
 ﻿using MEAI_GPT_API.Models;
+using MEAI_GPT_API.Service;
 using MEAI_GPT_API.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -11,14 +12,54 @@ namespace MEAI_GPT_API.Controller
     {
         private readonly IRAGService _ragService;
         private readonly ILogger<RagController> _logger;
+        private readonly DynamicCodingAssistanceService _codingService; // Add this
+        private readonly CodingDetectionService _codingDetection;
 
-        public RagController(IRAGService ragService, ILogger<RagController> logger)
+
+        [ActivatorUtilitiesConstructor]
+        public RagController(
+        IRAGService ragService,
+        DynamicCodingAssistanceService codingService, // Inject coding service
+        CodingDetectionService codingDetection,
+        ILogger<RagController> logger)
         {
             _ragService = ragService;
+            _codingService = codingService;
             _logger = logger;
+            _codingDetection = codingDetection;
         }
 
 
+
+        //[HttpPost("query")]
+        //public async Task<ActionResult<QueryResponse>> Query([FromBody] QueryRequest request)
+        //{
+        //    if (string.IsNullOrWhiteSpace(request.Question))
+        //        return BadRequest("Question cannot be empty");
+
+        //    try
+        //    {
+        //        // ✅ FIXED: Updated call to match DynamicRagService signature
+        //        var response = await _ragService.ProcessQueryAsync(
+        //            question: request.Question,
+        //            request.Plant,
+        //            generationModel: request.GenerationModel, // New parameter
+        //            embeddingModel: request.EmbeddingModel,   // New parameter
+        //            maxResults: request.MaxResults,
+        //            meaiInfo: request.meai_info,
+        //            sessionId: request.sessionId,
+        //            useReRanking: true
+
+        //        );
+
+        //        return Ok(response);
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        _logger.LogError(ex, "Query processing failed for question: {Question}", request.Question);
+        //        return StatusCode(500, new { error = ex.Message, details = ex.StackTrace });
+        //    }
+        //}
 
         [HttpPost("query")]
         public async Task<ActionResult<QueryResponse>> Query([FromBody] QueryRequest request)
@@ -28,17 +69,56 @@ namespace MEAI_GPT_API.Controller
 
             try
             {
-                // ✅ FIXED: Updated call to match DynamicRagService signature
+                // 🔍 DETECT IF IT'S A CODING QUERY
+                var codingDetection = _codingDetection.DetectCodingQuery(request.Question);
+
+                if (codingDetection.IsCodingRelated && codingDetection.Confidence > 0.5)
+                {
+                    _logger.LogInformation($"🖥️ Detected coding query with {codingDetection.Confidence:P0} confidence. Language: {codingDetection.DetectedLanguage}");
+
+                    // Route to coding assistance service
+                    var codingResponse = await _codingService.ProcessCodingQueryAsync(
+                        codingQuestion: request.Question,
+                        codeContext: null, // You can extract this from the request if needed
+                        language: codingDetection.DetectedLanguage != "general" ? codingDetection.DetectedLanguage : null,
+                        sessionId: request.sessionId,
+                        includeExamples: true,
+                        difficulty: "intermediate" // You can make this configurable
+                    );
+
+                    // Convert coding response to standard query response format
+                    return Ok(new QueryResponse
+                    {
+                        Answer = codingResponse.Solution,
+                        Sources = new List<string> { $"{codingResponse.Language} Coding Assistant" },
+                        SessionId = codingResponse.SessionId,
+                        ProcessingTimeMs = codingResponse.ProcessingTimeMs,
+                        IsFromCache = codingResponse.IsFromCache,
+                        Confidence = codingResponse.Confidence,
+                        Metadata = new Dictionary<string, object>
+                        {
+                            ["IsCodingResponse"] = true,
+                            ["Language"] = codingResponse.Language,
+                            ["TechnicalLevel"] = codingResponse.TechnicalLevel,
+                            ["SolutionComplexity"] = codingResponse.SolutionComplexity,
+                            ["CodeExamples"] = codingResponse.CodeExamples,
+                            ["RecommendedNextSteps"] = codingResponse.RecommendedNextSteps,
+                            ["RelatedTopics"] = codingResponse.RelatedTopics
+                        }
+                    });
+                }
+
+                // 📚 ROUTE TO REGULAR RAG SERVICE
+                _logger.LogInformation("📚 Processing as regular RAG query");
                 var response = await _ragService.ProcessQueryAsync(
                     question: request.Question,
                     request.Plant,
-                    generationModel: request.GenerationModel, // New parameter
-                    embeddingModel: request.EmbeddingModel,   // New parameter
+                    generationModel: request.GenerationModel,
+                    embeddingModel: request.EmbeddingModel,
                     maxResults: request.MaxResults,
                     meaiInfo: request.meai_info,
                     sessionId: request.sessionId,
                     useReRanking: true
-
                 );
 
                 return Ok(response);
@@ -47,6 +127,33 @@ namespace MEAI_GPT_API.Controller
             {
                 _logger.LogError(ex, "Query processing failed for question: {Question}", request.Question);
                 return StatusCode(500, new { error = ex.Message, details = ex.StackTrace });
+            }
+        }
+
+        // Add a dedicated coding endpoint for explicit coding queries
+        [HttpPost("coding-query")]
+        public async Task<ActionResult<CodingAssistanceResponse>> CodingQuery([FromBody] CodingQueryRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.Question))
+                return BadRequest("Question cannot be empty");
+
+            try
+            {
+                var response = await _codingService.ProcessCodingQueryAsync(
+                    codingQuestion: request.Question,
+                    codeContext: request.CodeContext,
+                    language: request.Language,
+                    sessionId: request.SessionId,
+                    includeExamples: request.IncludeExamples,
+                    difficulty: request.Difficulty ?? "intermediate"
+                );
+
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Coding query processing failed: {Question}", request.Question);
+                return StatusCode(500, new { error = ex.Message });
             }
         }
 
@@ -186,4 +293,13 @@ namespace MEAI_GPT_API.Controller
             return Ok(new { message = $"Model {model} data deleted from ChromaDB" });
         }
     }
+}
+public class CodingQueryRequest
+{
+    public string Question { get; set; } = string.Empty;
+    public string? CodeContext { get; set; }
+    public string? Language { get; set; }
+    public string? SessionId { get; set; }
+    public bool IncludeExamples { get; set; } = true;
+    public string? Difficulty { get; set; } = "intermediate";
 }
