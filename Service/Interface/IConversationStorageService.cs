@@ -22,5 +22,6 @@ namespace MEAI_GPT_API.Service.Interface
         Task AssignTopicTagAsync(int conversationId, string topicTag);
         Task<Dictionary<string, List<ConversationEntry>>> GroupConversationsByTopicAsync(string sessionId);
         Task<ConversationEntry?> TryGetAppreciatedMatchAsync(List<float> inputEmbedding);
+        double CosineSimilarity(List<float> a, List<float> b);
     }
 }

@@ -1,8 +1,11 @@
 ﻿using MEAI_GPT_API.Models;
 using MEAI_GPT_API.Service;
+using MEAI_GPT_API.Service.Interface;
 using MEAI_GPT_API.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using System.Collections.Concurrent;
+using System.Threading.Channels;
 
 namespace MEAI_GPT_API.Controller
 {
@@ -28,107 +31,84 @@ namespace MEAI_GPT_API.Controller
             _logger = logger;
             _codingDetection = codingDetection;
         }
-
-
-
-        //[HttpPost("query")]
-        //public async Task<ActionResult<QueryResponse>> Query([FromBody] QueryRequest request)
-        //{
-        //    if (string.IsNullOrWhiteSpace(request.Question))
-        //        return BadRequest("Question cannot be empty");
-
-        //    try
-        //    {
-        //        // ✅ FIXED: Updated call to match DynamicRagService signature
-        //        var response = await _ragService.ProcessQueryAsync(
-        //            question: request.Question,
-        //            request.Plant,
-        //            generationModel: request.GenerationModel, // New parameter
-        //            embeddingModel: request.EmbeddingModel,   // New parameter
-        //            maxResults: request.MaxResults,
-        //            meaiInfo: request.meai_info,
-        //            sessionId: request.sessionId,
-        //            useReRanking: true
-
-        //        );
-
-        //        return Ok(response);
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        _logger.LogError(ex, "Query processing failed for question: {Question}", request.Question);
-        //        return StatusCode(500, new { error = ex.Message, details = ex.StackTrace });
-        //    }
-        //}
-
         [HttpPost("query")]
-        public async Task<ActionResult<QueryResponse>> Query([FromBody] QueryRequest request)
+        public async Task<IActionResult> Query([FromBody] QueryRequest request, [FromServices] IBackgroundTaskQueue taskQueue)
         {
             if (string.IsNullOrWhiteSpace(request.Question))
                 return BadRequest("Question cannot be empty");
 
-            try
-            {
-                // 🔍 DETECT IF IT'S A CODING QUERY
-                var codingDetection = _codingDetection.DetectCodingQuery(request.Question);
+            var tcs = new TaskCompletionSource<QueryResponse>();
 
-                if (codingDetection.IsCodingRelated && codingDetection.Confidence > 0.5)
+            await taskQueue.QueueBackgroundWorkItemAsync(async token =>
+            {
+                try
                 {
-                    _logger.LogInformation($"🖥️ Detected coding query with {codingDetection.Confidence:P0} confidence. Language: {codingDetection.DetectedLanguage}");
+                    // 🔍 DETECT IF IT'S A CODING QUERY
+                    var codingDetection = _codingDetection.DetectCodingQuery(request.Question);
 
-                    // Route to coding assistance service
-                    var codingResponse = await _codingService.ProcessCodingQueryAsync(
-                        codingQuestion: request.Question,
-                        codeContext: null, // You can extract this from the request if needed
-                        language: codingDetection.DetectedLanguage != "general" ? codingDetection.DetectedLanguage : null,
-                        sessionId: request.sessionId,
-                        includeExamples: true,
-                        difficulty: "intermediate" // You can make this configurable
-                    );
+                    QueryResponse finalResponse;
 
-                    // Convert coding response to standard query response format
-                    return Ok(new QueryResponse
+                    if (codingDetection.IsCodingRelated && codingDetection.Confidence > 0.5)
                     {
-                        Answer = codingResponse.Solution,
-                        Sources = new List<string> { $"{codingResponse.Language} Coding Assistant" },
-                        SessionId = codingResponse.SessionId,
-                        ProcessingTimeMs = codingResponse.ProcessingTimeMs,
-                        IsFromCache = codingResponse.IsFromCache,
-                        Confidence = codingResponse.Confidence,
-                        Metadata = new Dictionary<string, object>
+                        var codingResponse = await _codingService.ProcessCodingQueryAsync(
+                            request.Question,
+                            null,
+                            codingDetection.DetectedLanguage != "general" ? codingDetection.DetectedLanguage : null,
+                            request.sessionId,
+                            includeExamples: true,
+                            difficulty: "intermediate"
+                        );
+
+                        finalResponse = new QueryResponse
                         {
-                            ["IsCodingResponse"] = true,
-                            ["Language"] = codingResponse.Language,
-                            ["TechnicalLevel"] = codingResponse.TechnicalLevel,
-                            ["SolutionComplexity"] = codingResponse.SolutionComplexity,
-                            ["CodeExamples"] = codingResponse.CodeExamples,
-                            ["RecommendedNextSteps"] = codingResponse.RecommendedNextSteps,
-                            ["RelatedTopics"] = codingResponse.RelatedTopics
-                        }
-                    });
+                            Answer = codingResponse.Solution,
+                            Sources = new List<string> { $"{codingResponse.Language} Coding Assistant" },
+                            SessionId = codingResponse.SessionId,
+                            ProcessingTimeMs = codingResponse.ProcessingTimeMs,
+                            IsFromCache = codingResponse.IsFromCache,
+                            Confidence = codingResponse.Confidence,
+                            Metadata = new Dictionary<string, object>
+                            {
+                                ["IsCodingResponse"] = true,
+                                ["Language"] = codingResponse.Language,
+                                ["TechnicalLevel"] = codingResponse.TechnicalLevel,
+                                ["SolutionComplexity"] = codingResponse.SolutionComplexity,
+                                ["CodeExamples"] = codingResponse.CodeExamples,
+                                ["RecommendedNextSteps"] = codingResponse.RecommendedNextSteps,
+                                ["RelatedTopics"] = codingResponse.RelatedTopics
+                            }
+                        };
+                    }
+                    else
+                    {
+                        finalResponse = await _ragService.ProcessQueryAsync(
+                            request.Question,
+                            request.Plant,
+                            request.GenerationModel,
+                            request.EmbeddingModel,
+                            request.MaxResults,
+                            request.meai_info,
+                            request.sessionId,
+                            useReRanking: true
+                        );
+                    }
+
+                    tcs.SetResult(finalResponse);
                 }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Query processing failed.");
+                    tcs.SetException(ex);
+                }
+            });
 
-                // 📚 ROUTE TO REGULAR RAG SERVICE
-                _logger.LogInformation("📚 Processing as regular RAG query");
-                var response = await _ragService.ProcessQueryAsync(
-                    question: request.Question,
-                    request.Plant,
-                    generationModel: request.GenerationModel,
-                    embeddingModel: request.EmbeddingModel,
-                    maxResults: request.MaxResults,
-                    meaiInfo: request.meai_info,
-                    sessionId: request.sessionId,
-                    useReRanking: true
-                );
-
-                return Ok(response);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Query processing failed for question: {Question}", request.Question);
-                return StatusCode(500, new { error = ex.Message, details = ex.StackTrace });
-            }
+            // Wait until background worker finishes processing this job
+            var result = await tcs.Task;
+            return Ok(result);
         }
+
+
+
 
         // Add a dedicated coding endpoint for explicit coding queries
         [HttpPost("coding-query")]
@@ -303,3 +283,5 @@ public class CodingQueryRequest
     public bool IncludeExamples { get; set; } = true;
     public string? Difficulty { get; set; } = "intermediate";
 }
+
+

@@ -1,4 +1,5 @@
 ﻿using MEAI_GPT_API.Models;
+using MEAI_GPT_API.Service;
 using MEAI_GPT_API.Service.Interface;
 using Microsoft.Extensions.Options;
 using System.Diagnostics;
@@ -315,6 +316,7 @@ public partial class DynamicCodingAssistanceService
     private readonly DynamicRAGConfiguration _config;
     private readonly Conversation _conversation;
     private readonly string _currentUser;
+    private readonly OllamaQueueService _ollama;
     private readonly LanguageDetectionService _languageDetection;
 
     public DynamicCodingAssistanceService(
@@ -323,6 +325,7 @@ public partial class DynamicCodingAssistanceService
     IConversationStorageService conversationStorage,
     IModelManager modelManager,
     IOptions<DynamicRAGConfiguration> config,
+    OllamaQueueService ollama,
     Conversation conversation)
     {
         _logger = logger;
@@ -333,6 +336,7 @@ public partial class DynamicCodingAssistanceService
         _conversation = conversation;
         _currentUser = "system"; // Set a default value
         _languageDetection = new LanguageDetectionService();
+        _ollama = ollama;
     }
 
 
@@ -374,7 +378,7 @@ public partial class DynamicCodingAssistanceService
             var context = _conversation.GetOrCreateConversationContext(dbSession.SessionId);
 
             // Get required models
-            var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultGenerationModel);
+            var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel);
             var generationModel = await _modelManager.GetModelAsync(_config.DefaultGenerationModel!);
 
             if (embeddingModel == null || generationModel == null)
@@ -416,8 +420,13 @@ public partial class DynamicCodingAssistanceService
                 codingQuestion, codeContext, difficulty, includeExamples, context, languageConfig);
 
             // Generate coding assistance response
-            var solution = await GenerateCodingResponseAsync(
-                codingPrompt, generationModel, context.History, languageConfig);
+            //var solution = await GenerateCodingResponseAsync(
+            //    codingPrompt, generationModel, context.History, languageConfig);
+
+            var solution = await _ollama.EnqueueAsync(
+    codingPrompt,
+    _config.DefaultGenerationModel! // or get from config
+);
 
             // Extract code examples from the response
             var codeExamples = ExtractCodeExamplesFromAnswer(solution, languageConfig);
@@ -437,13 +446,36 @@ public partial class DynamicCodingAssistanceService
 
             stopwatch.Stop();
             _logger.LogInformation($"✅ {languageConfig.Name} coding assistance completed in {stopwatch.ElapsedMilliseconds}ms");
+            double confidence;
+
+            if (similarCodingSolutions.Any())
+            {
+                var bestMatch = similarCodingSolutions.First();
+                if (bestMatch.Entry.WasAppreciated)
+                {
+                    confidence = bestMatch.Similarity; // dynamic confidence from embeddings
+                    return new CodingAssistanceResponse
+                    {
+                        Solution = bestMatch.Entry.Answer,
+                        Language = detectedLanguage,
+                        IsFromCache = true,
+                        Confidence = confidence,
+                        ProcessingTimeMs = stopwatch.ElapsedMilliseconds,
+                        SessionId = dbSession.SessionId,
+                        CodeExamples = ExtractCodeExamplesFromAnswer(bestMatch.Entry.Answer, languageConfig),
+                        TechnicalLevel = difficulty
+                    };
+                }
+            }
+            var solutionEmbedding = await GetEmbeddingAsync(solution, embeddingModel);
+            confidence = _conversationStorage.CosineSimilarity(questionEmbedding, solutionEmbedding);
 
             return new CodingAssistanceResponse
             {
                 Solution = solution,
                 Language = detectedLanguage,
                 IsFromCache = false,
-                Confidence = 0.9,
+                Confidence = confidence,
                 ProcessingTimeMs = stopwatch.ElapsedMilliseconds,
                 SessionId = dbSession.SessionId,
                 CodeExamples = codeExamples,

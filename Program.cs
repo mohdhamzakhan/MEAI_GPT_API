@@ -107,6 +107,9 @@ builder.Services.Configure<DynamicRAGConfiguration>(
     builder.Configuration.GetSection("DynamicRAG"));
 builder.Services.AddScoped<IConversationStorageService, ConversationStorageService>();
 
+builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
+builder.Services.AddHostedService<QueuedHostedService>();
+
 // FIXED: Modified hosted service to use IServiceScopeFactory
 builder.Services.AddHostedService<RagInitializationService>();
 builder.Services.AddScoped<CodingDetectionResult>();
@@ -120,6 +123,13 @@ builder.Services.AddScoped<TextChunkingService>();
 builder.Services.AddScoped<ConversationAnalysisService>();
 builder.Services.AddScoped<EntityExtractionService>();
 builder.Services.AddScoped<SystemPromptBuilder>();
+
+builder.Services.AddSingleton<OllamaQueueService>();
+
+builder.Configuration
+    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+    .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true);
+
 
 
 builder.Services.AddSingleton<Conversation>();

@@ -107,8 +107,8 @@ namespace MEAI_GPT_API.Services
                 session = new ConversationSession
                 {
                     SessionId = sessionId,
-                    CreatedAt = DateTime.UtcNow,
-                    LastAccessedAt = DateTime.UtcNow,
+                    CreatedAt = DateTime.Now,
+                    LastAccessedAt = DateTime.Now,
                     UserId = userId,
                     UserPlant = plant
                 };
@@ -351,7 +351,7 @@ namespace MEAI_GPT_API.Services
         }
 
 
-        private double CosineSimilarity(List<float> a, List<float> b)
+        public double CosineSimilarity(List<float> a, List<float> b)
         {
             if (a.Count != b.Count) return 0;
 
