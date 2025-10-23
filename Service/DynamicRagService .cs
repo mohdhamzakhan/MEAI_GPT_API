@@ -1,13 +1,12 @@
 ﻿// Services/DynamicRagService.cs
-using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 using MEAI_GPT_API.Models;
 using MEAI_GPT_API.Service;
 using MEAI_GPT_API.Service.Interface;
 using MEAI_GPT_API.Service.Models;
 using Microsoft.Extensions.Options;
-using OpenTelemetry;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -48,6 +47,7 @@ namespace MEAI_GPT_API.Services
         private readonly PlantSettings _plants;
         private readonly IConversationStorageService _conversationStorage;
         private readonly AbbreviationExpansionService _abbreviationService;
+        private readonly HelperMethods _helperMethods;
 
         //new code by Hamza
         private readonly StringProcessingService _stringProcessor;
@@ -90,7 +90,8 @@ namespace MEAI_GPT_API.Services
             TextChunkingService textChunking,
             ConversationAnalysisService conversationAnalysis,
             EntityExtractionService entityExtraction,
-            SystemPromptBuilder systemPromptBuilder)
+            SystemPromptBuilder systemPromptBuilder,
+            HelperMethods helperMethods)
         {
             _modelManager = modelManager;
             _collectionManager = collectionManager;
@@ -117,6 +118,7 @@ namespace MEAI_GPT_API.Services
             _systemPromptBuilder = systemPromptBuilder;
 
             InitializeSessionCleanup();
+            _helperMethods = helperMethods;
         }
         private void EnsureDirectoriesExist()
         {
@@ -342,7 +344,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 if (correction != null)
                 {
                     _logger.LogInformation("⚡ Early return: Using correction");
-                    var rephrasedAnswer = await RephraseWithLLMAsync(correction.Answer, generationModel);
+                    var rephrasedAnswer = await _helperMethods.RephraseWithLLMAsync(correction.Answer, generationModel);
                     return CreateSuccessResponse(rephrasedAnswer, "User Correction",
                         stopwatch.ElapsedMilliseconds, 1.0, isFromCorrection: true);
                 }
@@ -447,7 +449,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     string finalAnswer = correction.Answer;
                     try
                     {
-                        finalAnswer = await RephraseWithLLMAsync(correction.Answer, generationModel);
+                        finalAnswer = await _helperMethods.RephraseWithLLMAsync(correction.Answer, generationModel);
                     }
                     catch (Exception ex)
                     {
@@ -486,7 +488,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     string finalAnswer = appreciated.Value.Answer;
                     try
                     {
-                        finalAnswer = await RephraseWithLLMAsync(appreciated.Value.Answer, generationModel);
+                        finalAnswer = await _helperMethods.RephraseWithLLMAsync(appreciated.Value.Answer, generationModel);
                     }
                     catch (Exception ex)
                     {
@@ -654,63 +656,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
         // Add this to your class
         private readonly ConcurrentDictionary<string, (List<float> Embedding, DateTime Cached)> _sessionEmbeddingCache = new();
-
-
-        private async Task<string> RephraseWithLLMAsync(string originalAnswer, string modelName)
-        {
-            var systemPrompt = "You are a professional assistant. Rephrase the following content to make it sound polished, concise, and formal.";
-            var userMessage = $"Rephrase this:\n\n\"{originalAnswer}\"";
-
-            var messages = new[]
-            {
-        new { role = "system", content = systemPrompt },
-        new { role = "user", content = userMessage }
-    };
-
-            var payload = new
-            {
-                model = modelName,
-                messages = messages,
-                stream = true, // Enable streaming
-                temperature = 0.2
-            };
-
-            var request = new HttpRequestMessage(HttpMethod.Post, "/api/chat") // Adjust path as needed
-            {
-                Content = JsonContent.Create(payload)
-            };
-
-            var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-
-            response.EnsureSuccessStatusCode();
-
-            var stream = await response.Content.ReadAsStreamAsync();
-            using var reader = new StreamReader(stream);
-
-            var finalContent = new StringBuilder();
-
-            while (!reader.EndOfStream)
-            {
-                var line = await reader.ReadLineAsync();
-                if (string.IsNullOrWhiteSpace(line)) continue;
-
-                try
-                {
-                    var json = JsonDocument.Parse(line);
-                    if (json.RootElement.TryGetProperty("message", out var msgElem) &&
-                        msgElem.TryGetProperty("content", out var contentElem))
-                    {
-                        finalContent.Append(contentElem.GetString());
-                    }
-                }
-                catch
-                {
-                    // ignore bad JSON or keep logging
-                }
-            }
-
-            return finalContent.ToString();
-        }
         private async Task<int> SaveConversationToDatabase(
     string sessionId,
     string question,
@@ -1595,7 +1540,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     string finalAnswer = correction.Answer;
                     try
                     {
-                        finalAnswer = await RephraseWithLLMAsync(correction.Answer, generationModel ?? _config.DefaultGenerationModel);
+                        finalAnswer = await _helperMethods.RephraseWithLLMAsync(correction.Answer, generationModel ?? _config.DefaultGenerationModel);
                     }
                     catch (Exception ex)
                     {
@@ -1756,10 +1701,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
         }
         
         // 6. ADD THIS METHOD - Lightweight conversation update
-        private async Task UpdateConversationHistoryLightweight(
-            ConversationContext context,
-            string question,
-            string answer)
+        private async Task UpdateConversationHistoryLightweight(ConversationContext context,string question, string answer)
         {
             try
             {
@@ -1785,15 +1727,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 _logger.LogError(ex, "Failed to update conversation history (lightweight)");
             }
         }
-        private async Task<int> SaveNonMeaiConversationToDatabase(
-    string sessionId,
-    string question,
-    string answer,
-    ModelConfiguration generationModel,
-    double confidence,
-    long processingTimeMs,
-    bool isFromCorrection,
-    string plant)
+        private async Task<int> SaveNonMeaiConversationToDatabase(string sessionId,string question,string answer,ModelConfiguration generationModel,double confidence,long processingTimeMs,bool isFromCorrection,string plant)
         {
             try
             {
@@ -1959,7 +1893,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 return null;
             }
         }
-        // OPTIONAL: Add method to get non-MEAI conversation stats
         public async Task<NonMeaiConversationStats> GetNonMeaiConversationStatsAsync()
         {
             try
@@ -1991,51 +1924,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 return new NonMeaiConversationStats();
             }
         }
-        // ADD THIS CLASS for non-MEAI stats
-        public class NonMeaiConversationStats
-        {
-            public int TotalNonMeaiConversations { get; set; }
-            public int NonMeaiCorrections { get; set; }
-            public int NonMeaiAppreciated { get; set; }
-            public double AverageProcessingTime { get; set; }
-            public Dictionary<string, int> TopGeneralTopics { get; set; } = new();
-        }
-        private async Task<List<List<float>>> ProcessEmbeddingBatchAsync(
-    List<string> texts,
-    ModelConfiguration model)
-        {
-            var embeddings = new List<List<float>>();
-
-            // Use semaphore to limit concurrent requests
-            using var semaphore = new SemaphoreSlim(1, 1); // Max 3 concurrent requests
-
-            var tasks = texts.Select(async text =>
-            {
-                await semaphore.WaitAsync();
-                try
-                {
-                    return await GetEmbeddingAsync(text, model);
-                }
-                finally
-                {
-                    semaphore.Release();
-                }
-            });
-
-            var results = await Task.WhenAll(tasks);
-            return results.ToList();
-        }
-
-        private readonly ConcurrentDictionary<string, List<float>> _embeddingCache = new();
-        private readonly SemaphoreSlim _embeddingSemaphore = new(1, 1);
-        
-        
-        private async Task ProcessChunkBatchForModelAsync(
-    List<(string Text, string SourceFile, string SectionId, string Title)> chunks,
-    ModelConfiguration model,
-    string collectionId,
-    DateTime lastModified,
-    string plant)
+        private async Task ProcessChunkBatchForModelAsync(List<(string Text, string SourceFile, string SectionId, string Title)> chunks,ModelConfiguration model,string collectionId,DateTime lastModified,string plant)
         {
             try
             {
@@ -2367,11 +2256,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 return diagnostic;
             }
         }
-        private async Task<List<RelevantChunk>> SearchChromaDBAsync(
-    string query,
-    ModelConfiguration embeddingModel,
-    int maxResults,
-    string plant)
+        private async Task<List<RelevantChunk>> SearchChromaDBAsync(string query,ModelConfiguration embeddingModel,int maxResults,string plant)
         {
             var normalizedPlant = plant.Trim().ToLowerInvariant();
 
@@ -2398,48 +2283,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 _logger.LogError(ex, $"Enhanced search failed for: {query}");
                 return new List<RelevantChunk>();
             }
-        }
-        
-        private async Task RefreshDynamicMappings()
-        {
-            if (!await _mappingRefreshSemaphore.WaitAsync(TimeSpan.FromSeconds(5)))
-                return; // Skip if another refresh is in progress
-
-            try
-            {
-                _logger.LogInformation("🔄 Refreshing dynamic section mappings...");
-
-                var discoveredMappings = await DiscoverPolicySectionsFromDocuments();
-
-                // Clear and update cache
-                _dynamicSectionMappings.Clear();
-                foreach (var mapping in discoveredMappings)
-                {
-                    _dynamicSectionMappings.TryAdd(mapping.Key, mapping.Value);
-                }
-
-                _lastMappingRefresh = DateTime.UtcNow;
-                _logger.LogInformation($"✅ Refreshed mappings for {_dynamicSectionMappings.Count} policy types");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to refresh dynamic mappings");
-            }
-            finally
-            {
-                _mappingRefreshSemaphore.Release();
-            }
-        }
-        private async Task<Dictionary<string, Dictionary<string, string>>> GetDynamicSectionMappings()
-        {
-            // Refresh mappings every 6 hours or if empty
-            if (DateTime.Now - _lastMappingRefresh > TimeSpan.FromHours(6) || !_dynamicSectionMappings.Any())
-            {
-                await RefreshDynamicMappings();
-            }
-
-            return _dynamicSectionMappings.ToDictionary(k => k.Key, v => v.Value);
-        }
+        }        
         public async Task LearnFromSuccessfulQuery(string query, string sectionNumber, string documentType, List<RelevantChunk> chunks)
         {
             try
@@ -2470,8 +2314,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 _logger.LogError(ex, "Failed to learn from successful query");
             }
         }
-       
-
         private async Task<Dictionary<string, Dictionary<string, string>>> DiscoverPolicySectionsFromDocuments()
         {
             var dynamicMappings = new Dictionary<string, Dictionary<string, string>>();
@@ -2562,7 +2404,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                                 }
 
                                 // Extract keywords from section content
-                                var keywords = ExtractKeywordsFromSectionContent(document, sectionTitle);
+                                var keywords = _textChunking.ExtractKeywordsFromSectionContent(document, sectionTitle);
                                 sectionMappings[docType][sectionId] = string.Join(", ", keywords);
                             }
                         }
@@ -2576,7 +2418,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
             return sectionMappings;
         }
-
         private Dictionary<string, Dictionary<string, string>> GetFallbackMappings()
         {
             // Minimal fallback mappings for when discovery fails
@@ -2592,73 +2433,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 }
             };
         }
-        private List<string> ExtractKeywordsFromSectionContent(string content, string sectionTitle)
-        {
-            var keywords = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            // Add title words
-            if (!string.IsNullOrEmpty(sectionTitle))
-            {
-                var titleWords = sectionTitle.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                    .Where(w => w.Length > 2 && !TextUtils.IsCommonWord(w));
-                keywords.UnionWith(titleWords);
-            }
-
-            // Extract important nouns and phrases from content
-            var importantTerms = ExtractImportantTermsFromContent(content);
-            keywords.UnionWith(importantTerms);
-
-            return keywords.Take(10).ToList(); // Limit to most relevant keywords
-        }
-        private List<string> ExtractImportantTermsFromContent(string content)
-        {
-            var terms = new List<string>();
-            var lowerContent = content.ToLowerInvariant();
-
-            // Look for policy-specific patterns
-            var patterns = new[]
-            {
-        @"\b(\w+)\s+policy\b",           // "leave policy", "safety policy"
-        @"\b(\w+)\s+procedure\b",        // "hiring procedure", "audit procedure"
-        @"\b(\w+)\s+management\b",       // "risk management", "performance management"
-        @"\b(\w+)\s+requirements?\b",    // "training requirements", "compliance requirement"
-        @"\b(\w+)\s+process\b",          // "approval process", "review process"
-        @"\b(\w+)\s+guidelines?\b",      // "safety guidelines", "conduct guidelines"
-    };
-
-            foreach (var pattern in patterns)
-            {
-                var matches = Regex.Matches(lowerContent, pattern);
-                foreach (Match match in matches)
-                {
-                    var term = match.Groups[1].Value;
-                    if (term.Length > 2 && !TextUtils.IsCommonWord(term))
-                    {
-                        terms.Add(term);
-                    }
-                }
-            }
-
-            // Extract frequently mentioned nouns
-            var words = lowerContent.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                .Where(w => w.Length > 3 && !TextUtils.IsCommonWord(w))
-                .GroupBy(w => w)
-                .Where(g => g.Count() > 2) // Mentioned at least 3 times
-                .OrderByDescending(g => g.Count())
-                .Take(5)
-                .Select(g => g.Key);
-
-            terms.AddRange(words);
-
-            return terms.Distinct().Take(15).ToList();
-        }
-
-        private async Task<List<RelevantChunk>> SearchForSpecificSection(
-     SectionQuery sectionQuery,
-     ModelConfiguration embeddingModel,
-     int maxResults,
-     string plant,
-     string collectionId)
+        private async Task<List<RelevantChunk>> SearchForSpecificSection(SectionQuery sectionQuery,ModelConfiguration embeddingModel,int maxResults,string plant,string collectionId)
         {
             // Create a single comprehensive search query instead of multiple
             var combinedQuery = $"Section {sectionQuery.SectionNumber} {sectionQuery.DocumentType} " +
@@ -2761,43 +2536,8 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             return hasExpectedContent;
         }
         // Supporting class for section queries
-        public class SectionQuery
-        {
-            public string SectionNumber { get; set; } = "";
-            public string DocumentType { get; set; } = "";
-            public string OriginalQuery { get; set; } = "";
-        }
-        // Supporting classes for diagnostics
-        public class DiagnosticInfo
-        {
-            public string Question { get; set; } = "";
-            public string Plant { get; set; } = "";
-            public DateTime Timestamp { get; set; }
-            public int PolicyFilesFound { get; set; }
-            public List<string> PolicyFiles { get; set; } = new();
-            public string EmbeddingModel { get; set; } = "";
-            public string CollectionId { get; set; } = "";
-            public int TotalEmbeddings { get; set; }
-            public int ChunksFound { get; set; }
-            public List<ChunkDiagnostic> ChunkDetails { get; set; } = new();
-            public bool HasSufficientCoverage { get; set; }
-            public string? Error { get; set; }
-        }
-        public class ChunkDiagnostic
-        {
-            public string Source { get; set; } = "";
-            public double Similarity { get; set; }
-            public string TextPreview { get; set; } = "";
-        }
-        private Dictionary<string, object> CreateChunkMetadata(
-    string sourceFile,
-    DateTime lastModified,
-    string modelName,
-    string text,
-    string plant,
-    string sectionId = "",
-    string title = "",
-    string documentType = "")
+       
+        private Dictionary<string, object> CreateChunkMetadata(string sourceFile,DateTime lastModified,string modelName,string text,string plant,string sectionId = "",string title = "",string documentType = "")
         {
             var fileName = Path.GetFileName(sourceFile).ToLowerInvariant();
             var folderPath = Path.GetDirectoryName(sourceFile)?.ToLowerInvariant() ?? "";
@@ -2809,7 +2549,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
         { "last_modified", lastModified.ToString("O") },
         { "model", modelName },
         { "chunk_size", text.Length },
-        { "processed_at", DateTime.UtcNow.ToString("O") },
+        { "processed_at", DateTime.Now.ToString("O") },
         { "processed_by", _currentUser }
     };
 
@@ -2859,17 +2599,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             var match = Regex.Match(sectionId, @"(\d+(?:\.\d+)*)");
             return match.Success ? match.Groups[1].Value : "";
         }
-        
-
-        private async Task<List<RelevantChunk>> GetRelevantChunksWithExpansionAsync(
-        string query,
-        ModelConfiguration embeddingModel,
-        int maxResults,
-        bool meaiInfo,
-        ConversationContext context,
-        bool useReRanking,
-        ModelConfiguration generationModel,
-        string plant)
+        private async Task<List<RelevantChunk>> GetRelevantChunksWithExpansionAsync(string query,ModelConfiguration embeddingModel,int maxResults,bool meaiInfo,ConversationContext context,bool useReRanking,ModelConfiguration generationModel,string plant)
         {
             if (!meaiInfo) return new List<RelevantChunk>();
 
@@ -2907,12 +2637,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 return await SearchChromaDBAsync(query, embeddingModel, maxResults, plant); // Fallback
             }
         }
-        private async Task<List<RelevantChunk>> PerformChromaSearch(
-    string query,
-    ModelConfiguration embeddingModel,
-    int maxResults,
-    string plant,
-    string collectionId)
+        private async Task<List<RelevantChunk>> PerformChromaSearch(string query,ModelConfiguration embeddingModel,int maxResults,string plant,string collectionId)
         {
             try
             {
@@ -2966,12 +2691,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 return new List<RelevantChunk>();
             }
         }
-        private async Task<List<RelevantChunk>> SearchGeneral(
-    string query,
-    ModelConfiguration embeddingModel,
-    int maxResults,
-    string plant,
-    string collectionId)
+        private async Task<List<RelevantChunk>> SearchGeneral(string query,ModelConfiguration embeddingModel,int maxResults,string plant,string collectionId)
         {
             try
             {
@@ -3197,5 +2917,711 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             public void RecordFailure() { lock (_lock) { _failureCount++; _lastFailureTime = DateTime.Now; } }
         }
 
+        public async IAsyncEnumerable<StreamChunk> ProcessQueryStreamAsync(
+    string question,
+    string plant,
+    string? generationModel = null,
+    string? embeddingModel = null,
+    int maxResults = 10,
+    bool meaiInfo = true,
+    string? sessionId = null,
+    bool useReRanking = true,
+    [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var stopwatch = Stopwatch.StartNew();
+
+            // Early validation
+            if (string.IsNullOrWhiteSpace(question))
+            {
+                yield return new StreamChunk { Type = "error", Content = "Question cannot be empty" };
+                yield break;
+            }
+
+            if (cancellationToken.IsCancellationRequested)
+                yield break;
+
+            // Set defaults
+            generationModel ??= _config.DefaultGenerationModel;
+            embeddingModel ??= _config.DefaultEmbeddingModel;
+
+            yield return new StreamChunk { Type = "status", Content = "Initializing session..." };
+
+            // Get session - handle errors safely
+            var sessionResult = await SafeInitializeSession(sessionId);
+            if (sessionResult.HasError)
+            {
+                yield return new StreamChunk { Type = "error", Content = sessionResult.ErrorMessage };
+                yield break;
+            }
+
+            var dbSession = sessionResult.Session;
+            var context = sessionResult.Context;
+
+            if (cancellationToken.IsCancellationRequested) yield break;
+
+            // Check appreciated answers first (fastest path)
+            yield return new StreamChunk { Type = "status", Content = "Checking knowledge cache..." };
+
+            var appreciatedResult = await SafeCheckAppreciatedAnswer(question);
+            if (appreciatedResult.Answer.Any())
+            {
+                yield return new StreamChunk { Type = "status", Content = "Found cached answer!" };
+                await foreach (var chunk in StreamTextResponse(appreciatedResult.Answer, cancellationToken))
+                {
+                    if (cancellationToken.IsCancellationRequested) yield break;
+                    yield return chunk;
+                }
+                yield return new StreamChunk { Type = "complete", Content = "", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+                yield break;
+            }
+
+            // Check corrections
+            var correctionResult = await SafeCheckCorrections(question);
+            if (correctionResult.Answer.Any())
+            {
+                yield return new StreamChunk { Type = "status", Content = "Applying user correction..." };
+
+                var rephrasedAnswer = await SafeRephraseWithLLM(correctionResult.Answer, generationModel);
+                var finalAnswer = rephrasedAnswer ?? correctionResult.Answer;
+
+                await foreach (var chunk in StreamTextResponse(finalAnswer, cancellationToken))
+                {
+                    if (cancellationToken.IsCancellationRequested) yield break;
+                    yield return chunk;
+                }
+                yield return new StreamChunk { Type = "complete", Content = "", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+                yield break;
+            }
+
+            // Handle history clear
+            if (IsHistoryClearRequest(question))
+            {
+                yield return new StreamChunk { Type = "status", Content = "Clearing conversation history..." };
+                ClearContext(context);
+                yield return new StreamChunk { Type = "response", Content = "Conversation history cleared. How can I help you?" };
+                yield return new StreamChunk { Type = "complete", Content = "", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+                yield break;
+            }
+
+            // Fast path for non-MEAI queries
+            if (!meaiInfo)
+            {
+                yield return new StreamChunk { Type = "status", Content = "Processing general query..." };
+                await foreach (var chunk in ProcessNonMeaiQueryStream(question, sessionId, generationModel, cancellationToken))
+                {
+                    if (cancellationToken.IsCancellationRequested) yield break;
+                    yield return chunk;
+                }
+                yield return new StreamChunk { Type = "complete", Content = "", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+                yield break;
+            }
+
+            // Full MEAI processing
+            yield return new StreamChunk { Type = "status", Content = "Loading AI models..." };
+
+            // Validate models - handle safely
+            var modelResult = await SafeValidateModels(generationModel, embeddingModel);
+            if (modelResult.HasError)
+            {
+                yield return new StreamChunk { Type = "error", Content = "Required AI models are not available" };
+                yield break;
+            }
+
+            var genModel = modelResult.GenerationModel;
+            var embModel = modelResult.EmbeddingModel;
+
+            if (cancellationToken.IsCancellationRequested) yield break;
+
+            yield return new StreamChunk { Type = "status", Content = "Processing your question..." };
+
+            // Check for topic changes
+            if (_conversationAnalysis.IsTopicChanged(question, context))
+            {
+                yield return new StreamChunk { Type = "status", Content = "New topic detected, refreshing context..." };
+                ClearContext(context);
+            }
+
+            var contextualQuery = _conversationAnalysis.BuildContextualQuery(question, context.History);
+
+            if (cancellationToken.IsCancellationRequested) yield break;
+
+            // Search for relevant information
+            yield return new StreamChunk { Type = "status", Content = "Searching knowledge base..." };
+
+            var searchResult = await SafeSearchKnowledgeBase(contextualQuery, embModel, maxResults, plant, question);
+            if (searchResult.HasError)
+            {
+                yield return new StreamChunk { Type = "error", Content = "Failed to search knowledge base" };
+                yield break;
+            }
+
+            var relevantChunks = searchResult.Chunks;
+
+            if (cancellationToken.IsCancellationRequested) yield break;
+
+            // Show found sources - THIS MATCHES HTML EXPECTATIONS
+            if (relevantChunks.Any())
+            {
+                yield return new StreamChunk
+                {
+                    Type = "sources",
+                    Content = $"Found {relevantChunks.Count} relevant sources",
+                    Sources = relevantChunks.Select(c => c.Source).Distinct().ToList()
+                };
+
+                // Stream preview of top chunks - MATCHING HTML FORMAT
+                for (int i = 0; i < Math.Min(10, relevantChunks.Count); i++)
+                {
+                    var chunk = relevantChunks[i];
+                    var preview = chunk.Text;
+                    yield return new StreamChunk
+                    {
+                        Type = "chunk",
+                        Content = preview,
+                        Source = chunk.Source,
+                        Similarity = chunk.Similarity,
+                        TextPreview = preview  // HTML expects this property
+                    };
+                }
+            }
+
+            yield return new StreamChunk { Type = "status", Content = "Generating response..." };
+
+            // Generate the actual response with streaming
+            await foreach (var responseChunk in GenerateStreamingResponse(question, genModel!, context, relevantChunks, meaiInfo, plant, cancellationToken))
+            {
+                if (cancellationToken.IsCancellationRequested) yield break;
+                yield return responseChunk;
+            }
+
+            yield return new StreamChunk { Type = "complete", Content = "", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+        }
+
+        private async Task<SessionResult> SafeInitializeSession(string sessionId)
+        {
+            try
+            {
+                var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
+                    sessionId ?? Guid.NewGuid().ToString(), _currentUser);
+                var context = _conversation.GetOrCreateConversationContext(dbSession.SessionId);
+
+                return new SessionResult
+                {
+                    HasError = false,
+                    Session = dbSession,
+                    Context = context
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to initialize session {SessionId}", sessionId);
+                return new SessionResult
+                {
+                    HasError = true,
+                    ErrorMessage = "Failed to initialize session"
+                };
+            }
+        }
+
+        private async Task<AnswerResult> SafeCheckAppreciatedAnswer(string question)
+        {
+            try
+            {
+                var result = await CheckAppreciatedAnswerAsync(question);
+                return new AnswerResult
+                {
+                    HasAnswer = result.HasValue,
+                    Answer = result?.Answer ?? ""
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to check appreciated answers");
+                return new AnswerResult { HasAnswer = false };
+            }
+        }
+
+        private async Task<AnswerResult> SafeCheckCorrections(string question)
+        {
+            try
+            {
+                var result = await CheckCorrectionsAsync(question);
+                return new AnswerResult
+                {
+                    HasAnswer = result.Answer.Any(),
+                    Answer = result?.Answer ?? ""
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to check corrections");
+                return new AnswerResult { HasAnswer = false };
+            }
+        }
+
+        private async Task<string?> SafeRephraseWithLLM(string text, string model)
+        {
+            try
+            {
+                return await _helperMethods.RephraseWithLLMAsync(text, model);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to rephrase with LLM");
+                return null;
+            }
+        }
+
+        private async Task<ModelValidationResult> SafeValidateModels(string generationModel, string embeddingModel)
+        {
+            try
+            {
+                var genModel = await _modelManager.GetModelAsync(generationModel);
+                var embModel = await _modelManager.GetModelAsync(embeddingModel);
+
+                if (embModel?.EmbeddingDimension == 0)
+                    embModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
+
+                return new ModelValidationResult
+                {
+                    HasError = genModel == null || embModel == null,
+                    GenerationModel = genModel,
+                    EmbeddingModel = embModel
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to validate models");
+                return new ModelValidationResult { HasError = true };
+            }
+        }
+
+        private async Task<SearchResult> SafeSearchKnowledgeBase(string contextualQuery, ModelConfiguration embModel, int maxResults, string plant, string originalQuestion)
+        {
+            try
+            {
+                // Check for section queries first
+                var sectionQuery = await _policyAnalysis.DetectAndParseSection(originalQuestion);
+                List<RelevantChunk> relevantChunks;
+
+                if (sectionQuery != null)
+                {
+                    relevantChunks = await SearchForSpecificSection(sectionQuery, embModel, maxResults, plant,
+                        await _collectionManager.GetOrCreateCollectionAsync(embModel));
+                }
+                else
+                {
+                    relevantChunks = await GetRelevantChunksWithExpansionAsync(contextualQuery, embModel, maxResults,
+                        true, _conversation.GetOrCreateConversationContext("temp"), true,
+                        await _modelManager.GetModelAsync(_config.DefaultGenerationModel), plant);
+                }
+
+                return new SearchResult
+                {
+                    HasError = false,
+                    Chunks = relevantChunks
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to search knowledge base");
+                return new SearchResult
+                {
+                    HasError = true,
+                    ErrorMessage = "Failed to search knowledge base"
+                };
+            }
+        }
+
+        public class SessionResult
+        {
+            public bool HasError { get; set; }
+            public string ErrorMessage { get; set; } = "";
+            public ConversationSession? Session { get; set; }
+            public ConversationContext? Context { get; set; }
+        }
+
+        public class AnswerResult
+        {
+            public bool? HasAnswer { get; set; }
+            public string Answer { get; set; } = "";
+        }
+
+        public class ModelValidationResult
+        {
+            public bool HasError { get; set; }
+            public ModelConfiguration? GenerationModel { get; set; }
+            public ModelConfiguration? EmbeddingModel { get; set; }
+        }
+
+        public class SearchResult
+        {
+            public bool HasError { get; set; }
+            public string ErrorMessage { get; set; } = "";
+            public List<RelevantChunk> Chunks { get; set; } = new();
+        }
+
+        // UPDATED STREAM CHUNK CLASS - matches HTML expectations
+        public class StreamChunk
+        {
+            public string Type { get; set; } = "";
+            public string? Content { get; set; }
+            public string? Source { get; set; }
+            public double? Similarity { get; set; }
+            public List<string>? Sources { get; set; }
+            public long? ProcessingTimeMs { get; set; }
+            public string? TextPreview { get; set; }  // Added for HTML compatibility
+        }
+
+            public class ResponseGenerationResult
+        {
+            public bool HasError { get; set; }
+            public string ErrorMessage { get; set; } = "";
+            public IAsyncEnumerable<string>? TokenStream { get; set; }
+        }
+
+        public class SimpleResponseResult
+        {
+            public bool HasError { get; set; }
+            public string ErrorMessage { get; set; } = "";
+            public string Response { get; set; } = "";
+        }
+
+        private async IAsyncEnumerable<StreamChunk> StreamTextResponse(
+    string text,
+    [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(text)) yield break;
+
+            var sentences = text.Split(new[] { ". ", "! ", "? " }, StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var sentence in sentences)
+            {
+                if (cancellationToken.IsCancellationRequested) yield break;
+
+                var words = sentence.Split(' ');
+                var currentChunk = "";
+
+                for (int i = 0; i < words.Length; i++)
+                {
+                    currentChunk += words[i] + " ";
+
+                    // Send chunk every 6-8 words
+                    if ((i + 1) % 7 == 0 || i == words.Length - 1)
+                    {
+                        yield return new StreamChunk { Type = "response", Content = currentChunk };
+                        currentChunk = "";
+
+                        if (i < words.Length - 1)
+                            await Task.Delay(Random.Shared.Next(50, 100), cancellationToken);
+                    }
+                }
+
+                if (!sentence.EndsWith('.') && !sentence.EndsWith('!') && !sentence.EndsWith('?'))
+                {
+                    yield return new StreamChunk { Type = "response", Content = ". " };
+                }
+
+                await Task.Delay(Random.Shared.Next(80, 150), cancellationToken);
+            }
+        }
+
+        private async IAsyncEnumerable<StreamChunk> GenerateStreamingResponse(
+    string question,
+    ModelConfiguration genModel,
+    ConversationContext context,
+    List<RelevantChunk> relevantChunks,
+    bool ismeai,
+    string plant,
+    [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var prompt = BuildPrompt(question, context.History, relevantChunks, ismeai, plant);
+
+            var responseResult = await SafeGenerateResponse(prompt, genModel, cancellationToken);
+            if (responseResult.HasError)
+            {
+                yield return new StreamChunk { Type = "error", Content = responseResult.ErrorMessage };
+                yield break;
+            }
+
+            // Stream the response tokens
+            await foreach (var token in responseResult.TokenStream)
+            {
+                if (cancellationToken.IsCancellationRequested) yield break;
+                yield return new StreamChunk { Type = "response", Content = token };
+            }
+        }
+
+
+        private async Task<ResponseGenerationResult> SafeGenerateResponse(
+    string prompt,
+    ModelConfiguration genModel,
+    CancellationToken cancellationToken)
+        {
+            try
+            {
+                var tokenStream = StreamGenerateAsync(prompt, genModel, cancellationToken);
+                return new ResponseGenerationResult
+                {
+                    HasError = false,
+                    TokenStream = tokenStream
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to generate streaming response");
+                return new ResponseGenerationResult
+                {
+                    HasError = true,
+                    ErrorMessage = "Failed to generate response"
+                };
+            }
+        }
+
+        private async IAsyncEnumerable<StreamChunk> ProcessNonMeaiQueryStream(
+    string question,
+    string? sessionId,
+    string generationModel,
+    [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var responseResult = await SafeGenerateSimpleResponse(question, generationModel);
+            if (responseResult.HasError)
+            {
+                yield return new StreamChunk { Type = "error", Content = "Failed to process query" };
+                yield break;
+            }
+
+            await foreach (var chunk in StreamTextResponse(responseResult.Response, cancellationToken))
+            {
+                if (cancellationToken.IsCancellationRequested) yield break;
+                yield return chunk;
+            }
+        }
+
+        private async Task<SimpleResponseResult> SafeGenerateSimpleResponse(string question, string generationModel)
+        {
+            try
+            {
+                var response = await GenerateNonMeaiChatResponseAsync(question, generationModel,new List<ConversationTurn>());
+                return new SimpleResponseResult
+                {
+                    HasError = false,
+                    Response = response
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to process non-MEAI query");
+                return new SimpleResponseResult
+                {
+                    HasError = true,
+                    ErrorMessage = "Failed to process query"
+                };
+            }
+        }
+        private string BuildPrompt(string question, List<ConversationTurn> history, List<RelevantChunk> chunks, bool ismeai, string plant)
+        {
+            var prompt = new StringBuilder();
+
+            if (ismeai)
+            {
+                // Build MEAI-specific prompt with context
+                prompt.AppendLine($"You are MEAI Policy Assistant for {plant}.");
+                prompt.AppendLine();
+
+                if (chunks.Any())
+                {
+                    prompt.AppendLine("=== POLICY CONTEXT ===");
+                    foreach (var chunk in chunks.Take(5))
+                    {
+                        prompt.AppendLine($"Source: {chunk.Source}");
+                        prompt.AppendLine(chunk.Text);
+                        prompt.AppendLine("---");
+                    }
+                    prompt.AppendLine();
+                }
+
+                prompt.AppendLine("INSTRUCTIONS:");
+                prompt.AppendLine("1. Answer based ONLY on the provided policy context");
+                prompt.AppendLine("2. Be accurate and comprehensive");
+                prompt.AppendLine("3. Cite source documents");
+                prompt.AppendLine("4. If information is not in context, say so clearly");
+                prompt.AppendLine();
+            }
+            else
+            {
+                // General assistant prompt
+                prompt.AppendLine("You are a helpful AI assistant.");
+                prompt.AppendLine("Provide accurate, helpful responses on any topic.");
+                prompt.AppendLine();
+            }
+
+            // Add conversation history
+            if (history.Any())
+            {
+                prompt.AppendLine("=== CONVERSATION HISTORY ===");
+                foreach (var turn in history.TakeLast(4))
+                {
+                    prompt.AppendLine($"User: {turn.Question}");
+                    prompt.AppendLine($"Assistant: {turn.Answer}");
+                    prompt.AppendLine();
+                }
+            }
+
+            prompt.AppendLine($"Current Question: {question}");
+
+            return prompt.ToString();
+        }
+
+        private async IAsyncEnumerable<string> StreamGenerateAsync(
+    string prompt,
+    ModelConfiguration model,
+    [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            // Validate inputs first (outside of yield context)
+            if (string.IsNullOrWhiteSpace(prompt) || model == null)
+            {
+                yield return "Invalid input parameters.";
+                yield break;
+            }
+
+            // Create the request outside try-catch
+            var requestResult = await CreateStreamingRequest(prompt, model, cancellationToken);
+            if (!requestResult.Success)
+            {
+                yield return requestResult.ErrorMessage ?? "Failed to create request.";
+                yield break;
+            }
+
+            // Stream the response
+            await foreach (var token in ProcessStreamingResponse(requestResult.Response!, cancellationToken))
+            {
+                if (cancellationToken.IsCancellationRequested) yield break;
+                yield return token;
+            }
+        }
+
+        // Helper method to create the streaming request (handles exceptions)
+        private async Task<(bool Success, HttpResponseMessage? Response, string? ErrorMessage)> CreateStreamingRequest(
+            string prompt,
+            ModelConfiguration model,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var messages = new List<object>
+        {
+            new { role = "system", content = "You are a helpful AI assistant." },
+            new { role = "user", content = prompt }
+        };
+
+                var requestData = new
+                {
+                    model = model.Name,
+                    messages,
+                    stream = true,
+                    temperature = 0.1,
+                    options = new Dictionary<string, object>
+            {
+                { "num_ctx", 4000 },
+                { "num_predict", 2000 },
+                { "top_p", 0.9 }
+            }
+                };
+
+                using var request = new HttpRequestMessage(HttpMethod.Post, "/api/chat")
+                {
+                    Content = JsonContent.Create(requestData)
+                };
+
+                var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogError($"Streaming request failed: {response.StatusCode}");
+                    return (false, null, "Failed to connect to AI service.");
+                }
+
+                return (true, response, null);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create streaming request");
+                return (false, null, "Failed to create streaming request.");
+            }
+        }
+
+        // Helper method to process streaming response (no try-catch around yields)
+        private async IAsyncEnumerable<string> ProcessStreamingResponse(
+            HttpResponseMessage response,
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            using (response)
+            using (var stream = await response.Content.ReadAsStreamAsync(cancellationToken))
+            using (var reader = new StreamReader(stream))
+            {
+                var currentToken = new StringBuilder();
+
+                while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+                {
+                    var line = await reader.ReadLineAsync();
+                    if (string.IsNullOrEmpty(line)) continue;
+
+                    // Handle streaming format
+                    if (line.StartsWith("data: "))
+                    {
+                        var jsonData = line.Substring(6);
+                        if (jsonData == "[DONE]") break;
+
+                        var tokenResult = ParseStreamToken(jsonData);
+                        if (!string.IsNullOrEmpty(tokenResult))
+                        {
+                            currentToken.Append(tokenResult);
+
+                            // Check if we have complete words
+                            var currentText = currentToken.ToString();
+                            var lastSpaceIndex = currentText.LastIndexOf(' ');
+
+                            if (lastSpaceIndex > 0)
+                            {
+                                var wordsToYield = currentText.Substring(0, lastSpaceIndex);
+                                yield return wordsToYield;
+
+                                currentToken.Clear();
+                                currentToken.Append(currentText.Substring(lastSpaceIndex + 1));
+                            }
+                        }
+                    }
+                }
+
+                // Yield any remaining content
+                if (currentToken.Length > 0)
+                {
+                    yield return currentToken.ToString();
+                }
+            }
+        }
+
+        // Helper method to parse individual tokens (handles JSON parsing safely)
+        private string ParseStreamToken(string jsonData)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(jsonData);
+                if (doc.RootElement.TryGetProperty("message", out var message) &&
+                    message.TryGetProperty("content", out var content))
+                {
+                    return content.GetString() ?? "";
+                }
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse streaming JSON");
+            }
+
+            return "";
+        }
+
     }
+
 }

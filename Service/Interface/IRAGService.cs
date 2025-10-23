@@ -1,5 +1,7 @@
 ﻿using MEAI_GPT_API.Models;
 using MEAI_GPT_API.Services;
+using System.Runtime.CompilerServices;
+using static MEAI_GPT_API.Services.DynamicRagService;
 
 public interface IRAGService
 {
@@ -8,7 +10,6 @@ public interface IRAGService
     Task<List<ConversationEntry>> GetAppreciatedAnswersAsync(string? topicTag = null);
     Task<List<ModelConfiguration>> GetAvailableModelsAsync();
     Task<ConversationStats> GetConversationStatsAsync();
-    Task<DynamicRagService.NonMeaiConversationStats> GetNonMeaiConversationStatsAsync();
     Task<List<CorrectionEntry>> GetRecentCorrections(int limit = 50);
     Task<SystemStatus> GetSystemStatusAsync();
     Task InitializeAsync();
@@ -21,4 +22,6 @@ public interface IRAGService
     Task SaveCorrectionAsync(string question, string correctAnswer, string model);
     Task SaveCorrectionToDatabase(string sessionId, string question, string correctedAnswer);
     Task DeleteModelDataFromChroma(string modelName);
+    Task WarmUpEmbeddingsAsync();
+    IAsyncEnumerable<StreamChunk> ProcessQueryStreamAsync(string question, string plant, string? generationModel = null, string? embeddingModel = null, int maxResults = 10, bool meaiInfo = true, string? sessionId = null, bool useReRanking = true, CancellationToken cancellationToken = default);
 }

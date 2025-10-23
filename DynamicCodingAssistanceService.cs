@@ -378,7 +378,7 @@ public partial class DynamicCodingAssistanceService
             var context = _conversation.GetOrCreateConversationContext(dbSession.SessionId);
 
             // Get required models
-            var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel);
+            var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultGenerationModel);
             var generationModel = await _modelManager.GetModelAsync(_config.DefaultGenerationModel!);
 
             if (embeddingModel == null || generationModel == null)
@@ -446,36 +446,13 @@ public partial class DynamicCodingAssistanceService
 
             stopwatch.Stop();
             _logger.LogInformation($"✅ {languageConfig.Name} coding assistance completed in {stopwatch.ElapsedMilliseconds}ms");
-            double confidence;
-
-            if (similarCodingSolutions.Any())
-            {
-                var bestMatch = similarCodingSolutions.First();
-                if (bestMatch.Entry.WasAppreciated)
-                {
-                    confidence = bestMatch.Similarity; // dynamic confidence from embeddings
-                    return new CodingAssistanceResponse
-                    {
-                        Solution = bestMatch.Entry.Answer,
-                        Language = detectedLanguage,
-                        IsFromCache = true,
-                        Confidence = confidence,
-                        ProcessingTimeMs = stopwatch.ElapsedMilliseconds,
-                        SessionId = dbSession.SessionId,
-                        CodeExamples = ExtractCodeExamplesFromAnswer(bestMatch.Entry.Answer, languageConfig),
-                        TechnicalLevel = difficulty
-                    };
-                }
-            }
-            var solutionEmbedding = await GetEmbeddingAsync(solution, embeddingModel);
-            confidence = _conversationStorage.CosineSimilarity(questionEmbedding, solutionEmbedding);
 
             return new CodingAssistanceResponse
             {
                 Solution = solution,
                 Language = detectedLanguage,
                 IsFromCache = false,
-                Confidence = confidence,
+                Confidence = 0.9,
                 ProcessingTimeMs = stopwatch.ElapsedMilliseconds,
                 SessionId = dbSession.SessionId,
                 CodeExamples = codeExamples,

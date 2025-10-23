@@ -116,6 +116,8 @@ builder.Services.AddScoped<CodingDetectionResult>();
 builder.Services.AddScoped<DynamicCodingAssistanceService>();
 builder.Services.AddSingleton<CodingDetectionService>();
 
+builder.Services.AddScoped<DynamicRAGInitializationService>();
+
 //New Code Updated by Hamza
 builder.Services.AddScoped<StringProcessingService>();
 builder.Services.AddScoped<PolicyAnalysisService>();
@@ -123,6 +125,7 @@ builder.Services.AddScoped<TextChunkingService>();
 builder.Services.AddScoped<ConversationAnalysisService>();
 builder.Services.AddScoped<EntityExtractionService>();
 builder.Services.AddScoped<SystemPromptBuilder>();
+builder.Services.AddScoped<HelperMethods>();
 
 builder.Services.AddSingleton<OllamaQueueService>();
 
