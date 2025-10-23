@@ -123,48 +123,49 @@ namespace MEAI_GPT_API.Controller
                 return;
             }
 
-            // ✅ FIXED: Correct headers for Server-Sent Events
+            // Set correct headers
             Response.Headers["Content-Type"] = "text/event-stream; charset=utf-8";
             Response.Headers["Cache-Control"] = "no-cache";
             Response.Headers["Connection"] = "keep-alive";
-            Response.Headers["Access-Control-Allow-Origin"] = "*";
             Response.Headers["X-Accel-Buffering"] = "no";
 
             var ct = HttpContext.RequestAborted;
 
             try
             {
-                await SendSSEEvent("status", "Processing your query...", ct);
-
                 var codingDetection = _codingDetection.DetectCodingQuery(request.Question);
 
-                if (codingDetection.IsCodingRelated)
-                {
-                    await SendSSEEvent("status", $"Detected {codingDetection.DetectedLanguage} coding query", ct);
-                }
-
+                // Stream all chunks from the service
                 await foreach (var chunk in ProcessQueryStreamAsync(request, codingDetection).WithCancellation(ct))
                 {
                     if (ct.IsCancellationRequested) break;
-                    await SendSSEEvent("data", chunk, ct);
-                }
 
-                await SendSSEEvent("status", "Complete", ct);
+                    await Response.WriteAsync($"data: {chunk}\n\n", ct);
+                    await Response.Body.FlushAsync(ct);
+                }
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogError(ex, "HTTP error during streaming");
+                var errorJson = JsonSerializer.Serialize(new { Type = "error", Content = $"Connection error: {ex.Message}" });
+                await Response.WriteAsync($"data: {errorJson}\n\n", CancellationToken.None);
             }
             catch (OperationCanceledException)
             {
-                _logger.LogInformation("Client disconnected during streaming");
+                _logger.LogInformation("Client disconnected");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during streaming");
+                _logger.LogError(ex, "Error during streaming: {Message}\n{Stack}", ex.Message, ex.StackTrace);
                 try
                 {
-                    await SendSSEEvent("error", ex.Message, CancellationToken.None);
+                    var errorJson = JsonSerializer.Serialize(new { Type = "error", Content = $"Server error: {ex.Message}" });
+                    await Response.WriteAsync($"data: {errorJson}\n\n", CancellationToken.None);
                 }
                 catch { }
             }
         }
+
 
         // ✅ FIXED: Proper SSE format
         private async Task SendSSEEvent(string eventType, string data, CancellationToken ct)
@@ -180,6 +181,78 @@ namespace MEAI_GPT_API.Controller
             await Response.WriteAsync(sseData, ct);
             await Response.Body.FlushAsync(ct);
         }
+
+    //    private async IAsyncEnumerable<string> ProcessRAGQueryStreamAsync(
+    //QueryRequest request,
+    //[EnumeratorCancellation] CancellationToken ct = default)
+    //    {
+    //        await foreach (var streamChunk in _ragService.ProcessQueryStreamAsync(
+    //            request.Question,
+    //            request.Plant,
+    //            request.GenerationModel,
+    //            request.EmbeddingModel,
+    //            request.MaxResults,
+    //            request.meai_info,
+    //            request.sessionId,
+    //            useReRanking: true,
+    //            ct))
+    //        {
+    //            if (ct.IsCancellationRequested) yield break;
+
+    //            // Convert StreamChunk to JSON string based on type
+    //            var jsonPayload = streamChunk.Type?.ToLower() switch
+    //            {
+    //                "status" => JsonSerializer.Serialize(new
+    //                {
+    //                    Type = "status",
+    //                    Content = streamChunk.Content
+    //                }),
+
+    //                "chunk" => JsonSerializer.Serialize(new
+    //                {
+    //                    Type = "chunk",
+    //                    Content = streamChunk.Content,
+    //                    TextPreview = streamChunk.TextPreview,
+    //                    Source = streamChunk.Source,
+    //                    Similarity = streamChunk.Similarity
+    //                }),
+
+    //                "sources" => JsonSerializer.Serialize(new
+    //                {
+    //                    Type = "sources",
+    //                    Content = streamChunk.Content,
+    //                    Sources = streamChunk.Sources
+    //                }),
+
+    //                "response" => JsonSerializer.Serialize(new
+    //                {
+    //                    Type = "response",
+    //                    Content = streamChunk.Content
+    //                }),
+
+    //                "error" => JsonSerializer.Serialize(new
+    //                {
+    //                    Type = "error",
+    //                    Content = streamChunk.Content
+    //                }),
+
+    //                "complete" => JsonSerializer.Serialize(new
+    //                {
+    //                    Type = "complete",
+    //                    Content = streamChunk.Content,
+    //                    ProcessingTimeMs = streamChunk.ProcessingTimeMs
+    //                }),
+
+    //                _ => JsonSerializer.Serialize(new
+    //                {
+    //                    Type = streamChunk.Type,
+    //                    Content = streamChunk.Content
+    //                })
+    //            };
+
+    //            yield return jsonPayload;
+    //        }
+    //    }
 
         private async Task SendStreamEvent(object payload, CancellationToken ct)
         {
@@ -410,6 +483,8 @@ namespace MEAI_GPT_API.Controller
                 }
             }
         }
+
+
 
         private async IAsyncEnumerable<string> ProcessRAGQueryStreamAsync(
      QueryRequest request,

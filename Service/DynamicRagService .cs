@@ -9,6 +9,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using static MEAI_GPT_API.Models.Conversation;
 
@@ -307,30 +308,40 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
 
         public async Task<QueryResponse> ProcessQueryAsync(
-            string question,
-            string plant,
-            string? generationModel = null,
-            string? embeddingModel = null,
-            int maxResults = 10,
-            bool meaiInfo = true,
-            string? sessionId = null,
-            bool useReRanking = true)
+    string question,
+    string plant,
+    string? generationModel = null,
+    string? embeddingModel = null,
+    int maxResults = 10,
+    bool meaiInfo = true,
+    string? sessionId = null,
+    bool useReRanking = true)
         {
             var stopwatch = Stopwatch.StartNew();
-            // Early validation to avoid unnecessary processing
+
+            // Validate input
             if (string.IsNullOrWhiteSpace(question))
                 throw new ArgumentException("Question cannot be empty");
+
             try
             {
-                // Use provided models or defaults (ONLY when meaiInfo = true)
-                generationModel ??= _config.DefaultGenerationModel;
-                embeddingModel ??= _config.DefaultEmbeddingModel;
-                // Get or create session in database
+                // Select models (use defaults for MEAI queries)
+                if (string.IsNullOrEmpty(generationModel))
+                    generationModel = _config.DefaultGenerationModel
+                        ?? throw new InvalidOperationException("Default generation model not configured.");
+
+                if (string.IsNullOrEmpty(embeddingModel))
+                    embeddingModel = _config.DefaultEmbeddingModel
+                        ?? throw new InvalidOperationException("Default embedding model not configured.");
+
+                // Create or load conversation context
                 var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
                     sessionId ?? Guid.NewGuid().ToString(),
                     _currentUser);
+
                 var context = _conversation.GetOrCreateConversationContext(dbSession.SessionId);
 
+                // 1️⃣ Early return: appreciated or corrected answers
                 var appreciated = await CheckAppreciatedAnswerAsync(question);
                 if (appreciated != null)
                 {
@@ -339,49 +350,41 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                         stopwatch.ElapsedMilliseconds, 0.95);
                 }
 
-                // EARLY RETURN 2: Check corrections (second fastest)
                 var correction = await CheckCorrectionsAsync(question);
                 if (correction != null)
                 {
                     _logger.LogInformation("⚡ Early return: Using correction");
-                    var rephrasedAnswer = await _helperMethods.RephraseWithLLMAsync(correction.Answer, generationModel);
-                    return CreateSuccessResponse(rephrasedAnswer, "User Correction",
+                    var rephrased = await _helperMethods.RephraseWithLLMAsync(
+                        correction.Answer, generationModel);
+
+                    return CreateSuccessResponse(rephrased, "User Correction",
                         stopwatch.ElapsedMilliseconds, 1.0, isFromCorrection: true);
                 }
 
-                // EARLY RETURN 3: History clear request
+                // 2️⃣ Clear history if requested
                 if (IsHistoryClearRequest(question))
-                {
                     return await HandleHistoryClearRequest(context, sessionId);
-                }
 
-                // 🚀 FAST PATH: If meaiInfo is false, skip ALL embedding operations
+                // 3️⃣ Fast path: non-MEAI queries skip embeddings entirely
                 if (!meaiInfo)
-                {
                     return await ProcessNonMeaiQueryFast(question, sessionId, generationModel, stopwatch);
-                }
-                // Validate models are available
+
+                // Load models
                 var genModel = await _modelManager.GetModelAsync(generationModel!);
                 var embModel = await _modelManager.GetModelAsync(embeddingModel!);
-
-                if (genModel == null)
-                    throw new ArgumentException($"Generation model {generationModel} not available");
-                if (embModel == null)
-                    throw new ArgumentException($"Embedding model {embeddingModel} not available");
+                if (genModel == null) throw new ArgumentException($"Generation model {generationModel} not available");
+                if (embModel == null) throw new ArgumentException($"Embedding model {embeddingModel} not available");
                 if (embModel.EmbeddingDimension == 0)
                     embModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
 
-
-
                 _logger.LogInformation($"Processing MEAI query with models - Gen: {generationModel}, Emb: {embeddingModel}");
 
-                var _perRequestEmbeddings = new System.Collections.Concurrent.ConcurrentDictionary<string, Task<List<float>>>(StringComparer.Ordinal);
+                // Embedding cache for this query
+                var _perRequestEmbeddings = new ConcurrentDictionary<string, Task<List<float>>>(StringComparer.Ordinal);
 
                 async Task<List<float>> GetPerRequestEmbeddingAsync(string text)
                 {
-                    if (string.IsNullOrWhiteSpace(text))
-                        return new List<float>();
-
+                    if (string.IsNullOrWhiteSpace(text)) return new List<float>();
                     var task = _perRequestEmbeddings.GetOrAdd(text, _ => GetEmbeddingAsync(text, embModel));
                     try
                     {
@@ -395,43 +398,33 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     }
                 }
 
-
-                if (IsHistoryClearRequest(question))
-                {
-                    return await HandleHistoryClearRequest(context, dbSession.SessionId);
-                }
-
-                // 🆕 Check for similar conversations in database first (ONLY for MEAI queries)
-                //var questionEmbedding = await GetEmbeddingAsync(question, embModel);
-
+                // 🧠 Semantic similarity reuse from DB (fast lookup)
                 var questionEmbedding = await GetPerRequestEmbeddingAsync(question);
-
                 var similarConversations = await _conversationStorage.SearchSimilarConversationsAsync(
-                    questionEmbedding, plant, threshold: 0.85, limit: 2); // Increased threshold, reduced limit
+                    questionEmbedding, plant, threshold: 0.85, limit: 2);
 
                 if (similarConversations.Any())
                 {
-                    var bestMatch = similarConversations.First();
-                    if (bestMatch.Entry.WasAppreciated)
+                    var best = similarConversations.First();
+                    if (best.Entry.WasAppreciated)
                     {
-                        _logger.LogInformation($"💡 Reusing appreciated answer from database (ID: {bestMatch.Entry.Id})");
+                        _logger.LogInformation($"💡 Reusing appreciated answer from DB (ID: {best.Entry.Id})");
 
-                        // Create a copy for this session
                         await SaveConversationToDatabase(
-                            dbSession.SessionId, question, bestMatch.Entry.Answer,
+                            dbSession.SessionId, question, best.Entry.Answer,
                             new List<RelevantChunk>(), genModel, embModel,
-                            bestMatch.Similarity, stopwatch.ElapsedMilliseconds,
-                            isFromCorrection: false, parentId: null, plant: plant);
+                            best.Similarity, stopwatch.ElapsedMilliseconds,
+                            false, null, plant);
 
                         return new QueryResponse
                         {
-                            Answer = bestMatch.Entry.Answer,
-                            IsFromCorrection = false,
-                            Sources = bestMatch.Entry.Sources,
-                            Confidence = bestMatch.Similarity,
+                            Answer = best.Entry.Answer,
+                            Confidence = best.Similarity,
                             ProcessingTimeMs = stopwatch.ElapsedMilliseconds,
-                            RelevantChunks = new List<RelevantChunk>(),
                             SessionId = dbSession.SessionId,
+                            Sources = best.Entry.Sources,
+                            IsFromCorrection = false,
+                            RelevantChunks = new List<RelevantChunk>(),
                             ModelsUsed = new Dictionary<string, string>
                             {
                                 ["generation"] = generationModel,
@@ -441,198 +434,91 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     }
                 }
 
-                // Check corrections (existing logic) - ONLY for MEAI queries
-                if (correction != null)
-                {
-                    _logger.LogInformation($"🎯 Using correction for question: {question}");
-
-                    string finalAnswer = correction.Answer;
-                    try
-                    {
-                        finalAnswer = await _helperMethods.RephraseWithLLMAsync(correction.Answer, generationModel);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to rephrase correction — using raw answer.");
-                    }
-
-                    await SaveConversationToDatabase(
-                        dbSession.SessionId, question, finalAnswer,
-                        new List<RelevantChunk>(), genModel, embModel,
-                        1.0, stopwatch.ElapsedMilliseconds,
-                        isFromCorrection: true, parentId: null, plant: plant);
-
-                    stopwatch.Stop();
-
-                    return new QueryResponse
-                    {
-                        Answer = finalAnswer,
-                        IsFromCorrection = true,
-                        Sources = new List<string> { "User Correction" },
-                        Confidence = 1.0,
-                        ProcessingTimeMs = stopwatch.ElapsedMilliseconds,
-                        RelevantChunks = new List<RelevantChunk>(),
-                        SessionId = dbSession.SessionId,
-                        ModelsUsed = new Dictionary<string, string>
-                        {
-                            ["generation"] = generationModel,
-                            ["embedding"] = embeddingModel
-                        }
-                    };
-                }
-
-                // Check appreciated answers - ONLY for MEAI queries
-                if (appreciated != null)
-                {
-                    _logger.LogInformation("✨ Using appreciated answer match for question.");
-                    string finalAnswer = appreciated.Value.Answer;
-                    try
-                    {
-                        finalAnswer = await _helperMethods.RephraseWithLLMAsync(appreciated.Value.Answer, generationModel);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to rephrase correction — using raw answer.");
-                    }
-
-                    return new QueryResponse
-                    {
-                        Answer = finalAnswer,
-                        IsFromCorrection = false,
-                        Sources = new List<string> { "Appreciated Answer" },
-                        Confidence = 0.95,
-                        ProcessingTimeMs = stopwatch.ElapsedMilliseconds,
-                        SessionId = dbSession.SessionId,
-                        RelevantChunks = new List<RelevantChunk>(),
-                        ModelsUsed = new Dictionary<string, string>
-                        {
-                            ["generation"] = generationModel,
-                            ["embedding"] = embeddingModel
-                        }
-                    };
-                }
-
-                // Continue with rest of MEAI-specific logic...
-                // Check topic change and context
+                // 🧩 Topic & context
                 if (_conversationAnalysis.IsTopicChanged(question, context))
                 {
-                    _logger.LogInformation($"Topic changed for session {context.SessionId}, clearing context");
+                    _logger.LogInformation($"🔄 Topic changed for session {context.SessionId}; resetting context");
                     ClearContext(context);
                 }
 
-                var contextualQuery = _conversationAnalysis.BuildContextualQuery(question, context.History);
+                // Section detection before retrieval
+                var sectionQuery = await _policyAnalysis.DetectAndParseSection(question);
+                List<RelevantChunk> relevantChunks = new();
 
-                // Get relevant chunks - ONLY for MEAI queries
-                var relevantChunks = await GetRelevantChunksWithExpansionAsync(
-                                    contextualQuery, embModel, maxResults, meaiInfo, context, useReRanking, genModel, plant);
-
-                var sectionQuery = await _policyAnalysis.DetectAndParseSection(question); // Make it async
                 if (sectionQuery != null)
                 {
-                    _logger.LogInformation($"🎯 Detected section query: {sectionQuery.DocumentType} Section {sectionQuery.SectionNumber}");
-                    // Use section-specific search logic
+                    _logger.LogInformation($"🎯 Detected section query: {sectionQuery.DocumentType} - Section {sectionQuery.SectionNumber}");
                     relevantChunks = await SearchForSpecificSection(
                         sectionQuery, embModel, maxResults, plant,
                         await _collectionManager.GetOrCreateCollectionAsync(embModel));
                 }
                 else
                 {
-                    // Your existing general search logic
+                    var contextualQuery = _conversationAnalysis.BuildContextualQuery(question, context.History);
                     relevantChunks = await GetRelevantChunksWithExpansionAsync(
-                        contextualQuery, embModel, maxResults, meaiInfo, context, useReRanking, genModel, plant);
+                        contextualQuery, embModel, maxResults,
+                        meaiInfo, context, useReRanking, genModel, plant);
                 }
 
+                // Generate final answer
+                var parentId = context.History.Any() &&
+                               dbSession.Metadata.TryGetValue("lastConversationId", out var lastId) &&
+                               _conversationAnalysis.IsFollowUpQuestion(question, context)
+                               ? Convert.ToInt32(lastId)
+                               : (int?)null;
 
-                // Determine parent conversation ID for follow-ups
-                int? parentId = null;
-                if (context.History.Any())
-                {
-                    var lastConversationId = dbSession.Metadata.ContainsKey("lastConversationId")
-                        ? Convert.ToInt32(dbSession.Metadata["lastConversationId"])
-                        : (int?)null;
-
-                    if (lastConversationId.HasValue && _conversationAnalysis.IsFollowUpQuestion(question, context))
-                    {
-                        parentId = lastConversationId.Value;
-                    }
-                }
-
-
-
-                // 1️⃣ Get answer embedding
                 var answer = await GenerateChatResponseAsync(
-                    question, genModel, context.History, relevantChunks, context, ismeai: meaiInfo, plant: plant);
-                //var answerEmbedding = await GetEmbeddingAsync(answer, embModel);
-
+                    question, genModel, context.History, relevantChunks, context, meaiInfo, plant);
 
                 var answerEmbedding = await GetPerRequestEmbeddingAsync(answer);
-                // 2️⃣ Process only top 3 relevant chunks by initial similarity
-                var scoredChunks = await Task.WhenAll(
-                    relevantChunks
-                        .Where(x => x.Similarity > 0.4) // initial threshold
-                        .OrderByDescending(x => x.Similarity)
-                        .Take(3) // fewer chunks
+
+                // 🔍 Rank top chunks
+                var scored = await Task.WhenAll(
+                    relevantChunks.OrderByDescending(x => x.Similarity)
+                        .Take(5)
                         .Select(async chunk =>
                         {
-                            var chunkEmbedding = await GetPerRequestEmbeddingAsync(chunk.Text);
-                            var sim = CosineSimilarity(answerEmbedding, chunkEmbedding);
+                            var emb = await GetPerRequestEmbeddingAsync(chunk.Text);
+                            var sim = CosineSimilarity(answerEmbedding, emb);
                             chunk.Similarity = sim;
                             return (chunk, sim);
-                        })
-                );
+                        }));
 
-                // 3️⃣ Get final top 3 by recalculated similarity
-                var topChunks = scoredChunks
-                    .Where(c => c.sim > 0.5)
-                    .OrderByDescending(c => c.sim)
-                    .Take(3)
-                    .Select(c => c.chunk)
-                    .ToList();
+                var dynamicThreshold = scored.Any(s => s.sim > 0.6) ? 0.5 : 0.3;
+                var topChunks = scored.Where(s => s.sim > dynamicThreshold)
+                                      .OrderByDescending(s => s.sim)
+                                      .Take(5)
+                                      .Select(s => s.chunk)
+                                      .ToList();
 
-                // 4️⃣ Confidence score
-                var confidence = topChunks.FirstOrDefault()?.Similarity ?? 0;
+                // Compute confidence
+                var confidence = topChunks.Any() ? topChunks.Average(c => c.Similarity) : 0;
 
-                //var questionEmbeddingTask = GetEmbeddingAsync(question, embModel);
-                //var answerEmbeddingTask = GetEmbeddingAsync(answer, embModel);
-
-                var questionEmbeddingTask = GetPerRequestEmbeddingAsync(question);
-                var answerEmbeddingTask = GetPerRequestEmbeddingAsync(answer);
-
-                var entitiesTask = _entityExtraction.ExtractEntitiesAsync(answer);
-
-                await Task.WhenAll(questionEmbeddingTask, answerEmbeddingTask, entitiesTask);
-
-                var namedEntities = await entitiesTask;
-
-                // Save conversation to database
+                // Entity extraction and persistence
+                var entities = await _entityExtraction.ExtractEntitiesAsync(answer);
                 var conversationId = await SaveConversationToDatabaseFast(
-                                    dbSession.SessionId, question, answer, topChunks,
-                                    genModel, embModel, confidence, stopwatch.ElapsedMilliseconds,
-                                    isFromCorrection: false, parentId, plant,
-                                    questionEmbedding, answerEmbedding, namedEntities);
+                    dbSession.SessionId, question, answer, topChunks,
+                    genModel, embModel, confidence, stopwatch.ElapsedMilliseconds,
+                    false, parentId, plant, questionEmbedding, answerEmbedding, entities);
 
-                // Update session metadata with last conversation ID
                 dbSession.Metadata["lastConversationId"] = conversationId;
                 await _conversationStorage.UpdateSessionAsync(dbSession);
 
-                // Update in-memory context
-                await UpdateConversationHistoryFast(context, question, answer, relevantChunks, namedEntities);
+                await UpdateConversationHistoryFast(context, question, answer, topChunks, entities);
 
                 stopwatch.Stop();
-                _metrics.RecordQueryProcessing(stopwatch.ElapsedMilliseconds, relevantChunks.Count, true);
+                _metrics.RecordQueryProcessing(stopwatch.ElapsedMilliseconds, topChunks.Count, true);
 
-                var hasSufficientCoverage = _policyAnalysis.CheckPolicyCoverage(relevantChunks, question);
-
-                _metrics.RecordQueryProcessing(stopwatch.ElapsedMilliseconds, relevantChunks.Count, true);
-                LogMetric($"QueryTimeMs={stopwatch.ElapsedMilliseconds} | Chunks={relevantChunks.Count} | Confidence={confidence:F2}");
+                var coverage = _policyAnalysis.CheckPolicyCoverage(relevantChunks, question);
+                LogMetric($"QueryTimeMs={stopwatch.ElapsedMilliseconds} | TopChunks={topChunks.Count} | Confidence={confidence:F2}");
 
                 return new QueryResponse
                 {
                     Answer = answer,
-                    IsFromCorrection = false,
-                    Sources = relevantChunks.Select(c => c.Source).Distinct().ToList(),
                     Confidence = confidence,
                     ProcessingTimeMs = stopwatch.ElapsedMilliseconds,
+                    IsFromCorrection = false,
+                    Sources = topChunks.Select(c => c.Source).Distinct().ToList(),
                     RelevantChunks = topChunks,
                     SessionId = dbSession.SessionId,
                     ModelsUsed = new Dictionary<string, string>
@@ -641,18 +527,18 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                         ["embedding"] = embeddingModel
                     },
                     Plant = plant,
-                    HasSufficientPolicyCoverage = hasSufficientCoverage
+                    HasSufficientPolicyCoverage = coverage
                 };
             }
             catch (Exception ex)
             {
                 stopwatch.Stop();
-                _logger.LogError(ex, "Query processing failed for session {SessionId}", sessionId);
+                _logger.LogError(ex, "❌ Query processing failed for session {SessionId}, plant {Plant}", sessionId, plant);
                 _metrics.RecordQueryProcessing(stopwatch.ElapsedMilliseconds, 0, false);
-                _logger.LogError(ex, "Query processing failed for session {SessionId} and plant {Plant}", sessionId, plant);
                 throw new RAGServiceException($"Failed to process query for plant {plant}", ex);
             }
         }
+
 
         // Add this to your class
         private readonly ConcurrentDictionary<string, (List<float> Embedding, DateTime Cached)> _sessionEmbeddingCache = new();
@@ -1072,10 +958,10 @@ These abbreviations are standard across all MEAI HR policies and should be inter
         }
 
         // OPTIMIZED: Separate method for building MEAI system prompt
-       
 
-      
-        
+
+
+
 
 
 
@@ -1508,7 +1394,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             // Implementation here
             throw new NotImplementedException();
         }
-       
+
         private async Task<QueryResponse> ProcessNonMeaiQueryFast(
             string question,
             string? sessionId,
@@ -1699,9 +1585,9 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 return "I apologize, but I'm having trouble generating a response right now. Please try again.";
             }
         }
-        
+
         // 6. ADD THIS METHOD - Lightweight conversation update
-        private async Task UpdateConversationHistoryLightweight(ConversationContext context,string question, string answer)
+        private async Task UpdateConversationHistoryLightweight(ConversationContext context, string question, string answer)
         {
             try
             {
@@ -1727,7 +1613,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 _logger.LogError(ex, "Failed to update conversation history (lightweight)");
             }
         }
-        private async Task<int> SaveNonMeaiConversationToDatabase(string sessionId,string question,string answer,ModelConfiguration generationModel,double confidence,long processingTimeMs,bool isFromCorrection,string plant)
+        private async Task<int> SaveNonMeaiConversationToDatabase(string sessionId, string question, string answer, ModelConfiguration generationModel, double confidence, long processingTimeMs, bool isFromCorrection, string plant)
         {
             try
             {
@@ -1924,7 +1810,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 return new NonMeaiConversationStats();
             }
         }
-        private async Task ProcessChunkBatchForModelAsync(List<(string Text, string SourceFile, string SectionId, string Title)> chunks,ModelConfiguration model,string collectionId,DateTime lastModified,string plant)
+        private async Task ProcessChunkBatchForModelAsync(List<(string Text, string SourceFile, string SectionId, string Title)> chunks, ModelConfiguration model, string collectionId, DateTime lastModified, string plant)
         {
             try
             {
@@ -2256,7 +2142,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 return diagnostic;
             }
         }
-        private async Task<List<RelevantChunk>> SearchChromaDBAsync(string query,ModelConfiguration embeddingModel,int maxResults,string plant)
+        private async Task<List<RelevantChunk>> SearchChromaDBAsync(string query, ModelConfiguration embeddingModel, int maxResults, string plant)
         {
             var normalizedPlant = plant.Trim().ToLowerInvariant();
 
@@ -2283,7 +2169,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 _logger.LogError(ex, $"Enhanced search failed for: {query}");
                 return new List<RelevantChunk>();
             }
-        }        
+        }
         public async Task LearnFromSuccessfulQuery(string query, string sectionNumber, string documentType, List<RelevantChunk> chunks)
         {
             try
@@ -2433,7 +2319,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 }
             };
         }
-        private async Task<List<RelevantChunk>> SearchForSpecificSection(SectionQuery sectionQuery,ModelConfiguration embeddingModel,int maxResults,string plant,string collectionId)
+        private async Task<List<RelevantChunk>> SearchForSpecificSection(SectionQuery sectionQuery, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId)
         {
             // Create a single comprehensive search query instead of multiple
             var combinedQuery = $"Section {sectionQuery.SectionNumber} {sectionQuery.DocumentType} " +
@@ -2536,8 +2422,8 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             return hasExpectedContent;
         }
         // Supporting class for section queries
-       
-        private Dictionary<string, object> CreateChunkMetadata(string sourceFile,DateTime lastModified,string modelName,string text,string plant,string sectionId = "",string title = "",string documentType = "")
+
+        private Dictionary<string, object> CreateChunkMetadata(string sourceFile, DateTime lastModified, string modelName, string text, string plant, string sectionId = "", string title = "", string documentType = "")
         {
             var fileName = Path.GetFileName(sourceFile).ToLowerInvariant();
             var folderPath = Path.GetDirectoryName(sourceFile)?.ToLowerInvariant() ?? "";
@@ -2599,7 +2485,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             var match = Regex.Match(sectionId, @"(\d+(?:\.\d+)*)");
             return match.Success ? match.Groups[1].Value : "";
         }
-        private async Task<List<RelevantChunk>> GetRelevantChunksWithExpansionAsync(string query,ModelConfiguration embeddingModel,int maxResults,bool meaiInfo,ConversationContext context,bool useReRanking,ModelConfiguration generationModel,string plant)
+        private async Task<List<RelevantChunk>> GetRelevantChunksWithExpansionAsync(string query, ModelConfiguration embeddingModel, int maxResults, bool meaiInfo, ConversationContext context, bool useReRanking, ModelConfiguration generationModel, string plant)
         {
             if (!meaiInfo) return new List<RelevantChunk>();
 
@@ -2637,7 +2523,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 return await SearchChromaDBAsync(query, embeddingModel, maxResults, plant); // Fallback
             }
         }
-        private async Task<List<RelevantChunk>> PerformChromaSearch(string query,ModelConfiguration embeddingModel,int maxResults,string plant,string collectionId)
+        private async Task<List<RelevantChunk>> PerformChromaSearch(string query, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId)
         {
             try
             {
@@ -2691,7 +2577,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 return new List<RelevantChunk>();
             }
         }
-        private async Task<List<RelevantChunk>> SearchGeneral(string query,ModelConfiguration embeddingModel,int maxResults,string plant,string collectionId)
+        private async Task<List<RelevantChunk>> SearchGeneral(string query, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId)
         {
             try
             {
@@ -2917,6 +2803,9 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             public void RecordFailure() { lock (_lock) { _failureCount++; _lastFailureTime = DateTime.Now; } }
         }
 
+
+
+
         public async IAsyncEnumerable<StreamChunk> ProcessQueryStreamAsync(
     string question,
     string plant,
@@ -2928,6 +2817,9 @@ These abbreviations are standard across all MEAI HR policies and should be inter
     bool useReRanking = true,
     [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            StreamChunk? errorChunk = null;
+
+
             var stopwatch = Stopwatch.StartNew();
 
             // Early validation
@@ -3088,15 +2980,268 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             yield return new StreamChunk { Type = "status", Content = "Generating response..." };
 
             // Generate the actual response with streaming
-            await foreach (var responseChunk in GenerateStreamingResponse(question, genModel!, context, relevantChunks, meaiInfo, plant, cancellationToken))
+            var fullResponse = new StringBuilder();
+            var hasError = false;
+            string? errorMessage = null;
+
+            // ✅ Generate response without try-catch around yield
+            await foreach (var token in GenerateStreamingResponseSafe(
+                question,
+                genModel.Name!,
+                context,
+                relevantChunks,
+                meaiInfo,
+                plant,
+                cancellationToken))
             {
-                if (cancellationToken.IsCancellationRequested) yield break;
-                yield return responseChunk;
+                if (cancellationToken.IsCancellationRequested)
+                    yield break;
+
+                // Check if this is an error token
+                if (token.StartsWith("__ERROR__:"))
+                {
+                    hasError = true;
+                    errorMessage = token.Substring(10);
+                    break;
+                }
+
+                fullResponse.Append(token);
+
+                yield return new StreamChunk
+                {
+                    Type = "response",
+                    Content = token
+                };
             }
 
-            yield return new StreamChunk { Type = "complete", Content = "", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+            // Handle errors after yield loop
+            if (hasError)
+            {
+                yield return new StreamChunk
+                {
+                    Type = "error",
+                    Content = errorMessage ?? "Unknown error occurred"
+                };
+                yield break;
+            }
+
+            // Update context (outside yield loop, so we can use try-catch)
+            try
+            {
+                if (fullResponse.Length > 0)
+                {
+                    
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to update conversation context (non-critical)");
+            }
+
+            yield return new StreamChunk
+            {
+                Type = "complete",
+                Content = "Done",
+                ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+            };
         }
 
+        private async IAsyncEnumerable<string> GenerateStreamingResponseSafe(
+    string question,
+    string model,
+    ConversationContext context,
+    List<RelevantChunk> relevantChunks,
+    bool meaiInfo,
+    string plant,
+    [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var prompt = BuildEnhancedPrompt(question, relevantChunks, context, meaiInfo, plant);
+
+            _logger.LogInformation("Streaming response from model: {Model}", model);
+
+            IAsyncEnumerable<string>? stream = null;
+
+            try
+            {
+                stream = StreamGenerateAsync(model, prompt, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to start streaming: {Message}", ex.Message);
+                yield break;
+            }
+
+            if (stream == null)
+            {
+                yield return "__ERROR__:Stream was null";
+                yield break;
+            }
+
+            // Now stream tokens - errors here will propagate up naturally
+            await foreach (var token in stream.WithCancellation(cancellationToken))
+            {
+                if (cancellationToken.IsCancellationRequested)
+                    yield break;
+
+                yield return token;
+            }
+        }
+
+        private async IAsyncEnumerable<string> GenerateStreamingResponseFromLLM(
+    string question,
+    string model,
+    ConversationContext context,
+    List<RelevantChunk> relevantChunks,
+    bool meaiInfo,
+    string plant,
+    [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            // Build the prompt with context
+            var prompt = BuildEnhancedPrompt(question, relevantChunks, context, meaiInfo, plant);
+
+            _logger.LogInformation("Streaming response from model: {Model}", model);
+
+            // Stream from Ollama
+            await foreach (var token in StreamGenerateAsync(model, prompt, cancellationToken))
+            {
+                if (cancellationToken.IsCancellationRequested)
+                    yield break;
+
+                yield return token;
+            }
+        }
+
+        private string BuildEnhancedPrompt(
+    string question,
+    List<RelevantChunk> relevantChunks,
+    ConversationContext context,
+    bool meaiInfo,
+    string plant)
+        {
+            var promptBuilder = new StringBuilder();
+
+            // Add conversation history if available
+            if (context.History.Any())
+            {
+                promptBuilder.AppendLine("Previous conversation:");
+                foreach (var entry in context.History.TakeLast(3))
+                {
+                    promptBuilder.AppendLine($"Q: {entry.Question}");
+                    promptBuilder.AppendLine($"A: {entry.Answer}");
+                }
+                promptBuilder.AppendLine();
+            }
+
+            // Add retrieved context
+            if (relevantChunks.Any())
+            {
+                promptBuilder.AppendLine("Relevant information from company documents:");
+                foreach (var chunk in relevantChunks.Take(5))
+                {
+                    promptBuilder.AppendLine($"Source: {chunk.Source}");
+                    promptBuilder.AppendLine(chunk.Text);
+                    promptBuilder.AppendLine();
+                }
+            }
+
+            // Add the actual question
+            if (meaiInfo)
+            {
+                promptBuilder.AppendLine($"Based on the above information from {plant} plant, please answer:");
+            }
+            else
+            {
+                promptBuilder.AppendLine("Please answer the following question:");
+            }
+
+            promptBuilder.AppendLine(question);
+
+            // Add instructions
+            promptBuilder.AppendLine("\nProvide a clear, concise answer based on the provided context.");
+
+            return promptBuilder.ToString();
+        }
+
+        public async IAsyncEnumerable<string> StreamGenerateAsync(
+        string model,
+        string prompt,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var requestBody = new
+            {
+                model = model,
+                prompt = prompt,
+                stream = true,  // ← CRITICAL: Enable streaming
+                options = new
+                {
+                    temperature = 0.7,
+                    num_predict = 2000,
+                    top_k = 40,
+                    top_p = 0.9
+                }
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/generate")
+            {
+                Content = JsonContent.Create(requestBody)
+            };
+
+            _logger.LogInformation("Starting streaming generation with model: {Model}", model);
+
+            using var response = await _httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,  // ← Don't buffer the entire response
+                cancellationToken);
+
+            response.EnsureSuccessStatusCode();
+
+            using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var reader = new StreamReader(stream);
+
+            int tokenCount = 0;
+            while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+            {
+                var line = await reader.ReadLineAsync();
+
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
+
+
+                var streamResponse = JsonSerializer.Deserialize<OllamaStreamResponse>(line);
+
+                if (streamResponse?.Response != null && !string.IsNullOrEmpty(streamResponse.Response))
+                {
+                    tokenCount++;
+                    yield return streamResponse.Response;
+                }
+
+                // Check if streaming is complete
+                if (streamResponse?.Done == true)
+                {
+                    _logger.LogInformation("Streaming complete. Total tokens: {Count}", tokenCount);
+                    break;
+                }
+
+                _logger.LogWarning("Failed to parse Ollama stream response");
+                continue;
+            }
+        }
+
+        // Response model for Ollama streaming
+        private class OllamaStreamResponse
+        {
+            [JsonPropertyName("model")]
+            public string? Model { get; set; }
+
+            [JsonPropertyName("response")]
+            public string? Response { get; set; }
+
+            [JsonPropertyName("done")]
+            public bool Done { get; set; }
+
+            [JsonPropertyName("context")]
+            public int[]? Context { get; set; }
+        }
         private async Task<SessionResult> SafeInitializeSession(string sessionId)
         {
             try
@@ -3273,7 +3418,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             public string? TextPreview { get; set; }  // Added for HTML compatibility
         }
 
-            public class ResponseGenerationResult
+        public class ResponseGenerationResult
         {
             public bool HasError { get; set; }
             public string ErrorMessage { get; set; } = "";
@@ -3402,7 +3547,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
         {
             try
             {
-                var response = await GenerateNonMeaiChatResponseAsync(question, generationModel,new List<ConversationTurn>());
+                var response = await GenerateNonMeaiChatResponseAsync(question, generationModel, new List<ConversationTurn>());
                 return new SimpleResponseResult
                 {
                     HasError = false,
