@@ -423,9 +423,12 @@ public partial class DynamicCodingAssistanceService
             //var solution = await GenerateCodingResponseAsync(
             //    codingPrompt, generationModel, context.History, languageConfig);
 
-            var solution = await _ollama.EnqueueAsync(
+
+            var solution = await GenerateCodingResponseAsync(
     codingPrompt,
-    _config.DefaultGenerationModel! // or get from config
+    generationModel,
+    context.History,
+    languageConfig
 );
 
             // Extract code examples from the response
@@ -474,96 +477,294 @@ public partial class DynamicCodingAssistanceService
     /// Builds a language-specific prompt for coding assistance
     /// </summary>
     private string BuildLanguageSpecificCodingPrompt(
-        string question,
-        string? codeContext,
-        string difficulty,
-        bool includeExamples,
-        ConversationContext context,
-        LanguageConfig languageConfig)
+    string question,
+    string? codeContext,
+    string difficulty,
+    bool includeExamples,
+    ConversationContext context,
+    LanguageConfig languageConfig)
     {
         var promptBuilder = new StringBuilder();
 
-        promptBuilder.AppendLine($"You are an expert {languageConfig.Name} programming assistant.");
+        // Header
+        promptBuilder.AppendLine($"You are an expert {languageConfig.Name} programming assistant with deep knowledge of software development best practices, design patterns, and modern coding standards.");
         promptBuilder.AppendLine();
-        promptBuilder.AppendLine("🎯 **CODING ASSISTANCE GUIDELINES:**");
+        promptBuilder.AppendLine("═══════════════════════════════════════════════════════════════");
+        promptBuilder.AppendLine();
+
+        // Core Mission
+        promptBuilder.AppendLine("🎯 **YOUR MISSION:**");
+        promptBuilder.AppendLine($"Provide expert {languageConfig.Name} programming assistance that is:");
+        promptBuilder.AppendLine("- ✅ **Accurate**: Syntactically correct and functionally sound");
+        promptBuilder.AppendLine("- ✅ **Educational**: Explains concepts clearly with reasoning");
+        promptBuilder.AppendLine("- ✅ **Practical**: Production-ready, maintainable code");
+        promptBuilder.AppendLine("- ✅ **Complete**: Includes error handling, edge cases, and documentation");
+        promptBuilder.AppendLine();
+        promptBuilder.AppendLine("═══════════════════════════════════════════════════════════════");
         promptBuilder.AppendLine();
 
         // Difficulty-specific instructions
+        promptBuilder.AppendLine($"📊 **SKILL LEVEL: {difficulty.ToUpperInvariant()}**");
+        promptBuilder.AppendLine();
+
         switch (difficulty.ToLowerInvariant())
         {
             case "beginner":
-                promptBuilder.AppendLine("**BEGINNER LEVEL ASSISTANCE:**");
-                promptBuilder.AppendLine("- Provide detailed explanations for each concept");
-                promptBuilder.AppendLine("- Include basic syntax explanations");
-                promptBuilder.AppendLine("- Use simple, clear language");
-                promptBuilder.AppendLine("- Explain WHY things work, not just HOW");
+                promptBuilder.AppendLine("**BEGINNER LEVEL APPROACH:**");
+                promptBuilder.AppendLine("1. **Explain Fundamentals**:");
+                promptBuilder.AppendLine("   - Break down complex concepts into simple terms");
+                promptBuilder.AppendLine("   - Define technical terms when first used");
+                promptBuilder.AppendLine("   - Use analogies and real-world examples");
+                promptBuilder.AppendLine();
+                promptBuilder.AppendLine("2. **Code with Learning in Mind**:");
+                promptBuilder.AppendLine("   - Add detailed inline comments explaining each step");
+                promptBuilder.AppendLine("   - Use descriptive variable and function names");
+                promptBuilder.AppendLine("   - Avoid overly clever or compact code");
+                promptBuilder.AppendLine("   - Show the simplest working solution first");
+                promptBuilder.AppendLine();
+                promptBuilder.AppendLine("3. **Educational Focus**:");
+                promptBuilder.AppendLine("   - Explain WHY things work, not just HOW");
+                promptBuilder.AppendLine("   - Point out common beginner mistakes to avoid");
+                promptBuilder.AppendLine("   - Suggest learning resources for deeper understanding");
+                promptBuilder.AppendLine("   - Include step-by-step execution flow");
                 break;
 
             case "intermediate":
-                promptBuilder.AppendLine("**INTERMEDIATE LEVEL ASSISTANCE:**");
-                promptBuilder.AppendLine("- Focus on best practices and patterns");
-                promptBuilder.AppendLine("- Include performance considerations");
-                promptBuilder.AppendLine("- Suggest alternative approaches");
-                promptBuilder.AppendLine("- Explain trade-offs between solutions");
+                promptBuilder.AppendLine("**INTERMEDIATE LEVEL APPROACH:**");
+                promptBuilder.AppendLine("1. **Best Practices & Patterns**:");
+                promptBuilder.AppendLine("   - Demonstrate industry-standard coding patterns");
+                promptBuilder.AppendLine("   - Apply SOLID principles where relevant");
+                promptBuilder.AppendLine("   - Show proper separation of concerns");
+                promptBuilder.AppendLine("   - Use appropriate design patterns");
+                promptBuilder.AppendLine();
+                promptBuilder.AppendLine("2. **Performance & Optimization**:");
+                promptBuilder.AppendLine("   - Consider time and space complexity");
+                promptBuilder.AppendLine("   - Explain performance trade-offs");
+                promptBuilder.AppendLine("   - Suggest optimization opportunities");
+                promptBuilder.AppendLine("   - Discuss algorithmic efficiency");
+                promptBuilder.AppendLine();
+                promptBuilder.AppendLine("3. **Alternative Approaches**:");
+                promptBuilder.AppendLine("   - Present multiple valid solutions");
+                promptBuilder.AppendLine("   - Compare pros and cons of each approach");
+                promptBuilder.AppendLine("   - Explain when to use which approach");
+                promptBuilder.AppendLine("   - Discuss real-world application scenarios");
                 break;
 
             case "advanced":
-                promptBuilder.AppendLine("**ADVANCED LEVEL ASSISTANCE:**");
-                promptBuilder.AppendLine("- Deep dive into advanced concepts");
-                promptBuilder.AppendLine("- Discuss architecture and design patterns");
-                promptBuilder.AppendLine("- Include performance optimization tips");
-                promptBuilder.AppendLine("- Consider scalability and maintainability");
+                promptBuilder.AppendLine("**ADVANCED LEVEL APPROACH:**");
+                promptBuilder.AppendLine("1. **Architecture & Design**:");
+                promptBuilder.AppendLine("   - Apply advanced design patterns (Factory, Strategy, Observer, etc.)");
+                promptBuilder.AppendLine("   - Consider system architecture implications");
+                promptBuilder.AppendLine("   - Discuss scalability and distributed systems considerations");
+                promptBuilder.AppendLine("   - Address concurrency and thread safety");
+                promptBuilder.AppendLine();
+                promptBuilder.AppendLine("2. **Performance Engineering**:");
+                promptBuilder.AppendLine("   - Deep-dive into optimization techniques");
+                promptBuilder.AppendLine("   - Analyze algorithmic complexity (Big O notation)");
+                promptBuilder.AppendLine("   - Discuss memory management and profiling");
+                promptBuilder.AppendLine("   - Consider caching strategies and lazy loading");
+                promptBuilder.AppendLine();
+                promptBuilder.AppendLine("3. **Enterprise Considerations**:");
+                promptBuilder.AppendLine("   - Production-ready error handling and logging");
+                promptBuilder.AppendLine("   - Testability and dependency injection");
+                promptBuilder.AppendLine("   - Maintainability and code extensibility");
+                promptBuilder.AppendLine("   - Security best practices and vulnerability prevention");
+                break;
+
+            default:
+                promptBuilder.AppendLine("**GENERAL APPROACH:**");
+                promptBuilder.AppendLine("- Provide clear, well-structured solutions");
+                promptBuilder.AppendLine("- Balance simplicity with best practices");
+                promptBuilder.AppendLine("- Include explanations for key decisions");
                 break;
         }
 
         promptBuilder.AppendLine();
-        promptBuilder.AppendLine("**RESPONSE FORMAT:**");
-        promptBuilder.AppendLine("1. **Brief Explanation** - Summarize the solution approach");
-        promptBuilder.AppendLine($"2. **Code Solution** - Provide working {languageConfig.Name} code with comments");
-        promptBuilder.AppendLine("3. **Key Points** - Highlight important concepts");
-        promptBuilder.AppendLine($"4. **Best Practices** - Mention relevant {languageConfig.Name} coding standards");
+        promptBuilder.AppendLine("═══════════════════════════════════════════════════════════════");
+        promptBuilder.AppendLine();
+
+        // Response Structure
+        promptBuilder.AppendLine("📋 **REQUIRED RESPONSE STRUCTURE:**");
+        promptBuilder.AppendLine();
+        promptBuilder.AppendLine("## 1. Solution Overview");
+        promptBuilder.AppendLine("   - Brief summary of the approach (2-3 sentences)");
+        promptBuilder.AppendLine("   - Key algorithm or pattern being used");
+        promptBuilder.AppendLine("   - Time/Space complexity (if relevant)");
+        promptBuilder.AppendLine();
+        promptBuilder.AppendLine($"## 2. Complete {languageConfig.Name} Code Solution");
+        promptBuilder.AppendLine($"   ```{languageConfig.CodeBlockIdentifier}");
+        promptBuilder.AppendLine("   // Well-commented, production-ready code");
+        promptBuilder.AppendLine("   // Include error handling");
+        promptBuilder.AppendLine("   // Follow language conventions");
+        promptBuilder.AppendLine("   ```");
+        promptBuilder.AppendLine();
+        promptBuilder.AppendLine("## 3. Code Explanation");
+        promptBuilder.AppendLine("   - Walk through the logic step-by-step");
+        promptBuilder.AppendLine("   - Explain complex sections in detail");
+        promptBuilder.AppendLine("   - Highlight important design decisions");
+        promptBuilder.AppendLine();
+        promptBuilder.AppendLine("## 4. Key Concepts & Learning Points");
+        promptBuilder.AppendLine("   - Core concepts demonstrated");
+        promptBuilder.AppendLine("   - Why this approach was chosen");
+        promptBuilder.AppendLine("   - Important takeaways");
+        promptBuilder.AppendLine();
+        promptBuilder.AppendLine($"## 5. {languageConfig.Name} Best Practices Applied");
+        promptBuilder.AppendLine("   - Specific standards followed");
+        promptBuilder.AppendLine("   - Code quality considerations");
+        promptBuilder.AppendLine("   - Language-specific idioms used");
+        promptBuilder.AppendLine();
 
         if (includeExamples)
         {
-            promptBuilder.AppendLine("5. **Usage Example** - Show how to use the solution");
+            promptBuilder.AppendLine("## 6. Usage Example");
+            promptBuilder.AppendLine("   - Practical demonstration of how to use the code");
+            promptBuilder.AppendLine("   - Sample input/output");
+            promptBuilder.AppendLine("   - Common use cases");
+            promptBuilder.AppendLine();
         }
 
+        promptBuilder.AppendLine("## 7. Additional Considerations");
+        promptBuilder.AppendLine("   - Edge cases and error handling");
+        promptBuilder.AppendLine("   - Potential pitfalls to avoid");
+        promptBuilder.AppendLine("   - Suggestions for further improvement");
+        promptBuilder.AppendLine("   - Testing recommendations");
         promptBuilder.AppendLine();
-        promptBuilder.AppendLine($"**{languageConfig.Name.ToUpper()} CODING STANDARDS:**");
+
+        promptBuilder.AppendLine("═══════════════════════════════════════════════════════════════");
+        promptBuilder.AppendLine();
+
+        // Language-specific standards
+        promptBuilder.AppendLine($"⚡ **{languageConfig.Name.ToUpper()} CODING STANDARDS TO FOLLOW:**");
+        promptBuilder.AppendLine();
         foreach (var practice in languageConfig.BestPractices)
         {
-            promptBuilder.AppendLine($"- {practice}");
+            promptBuilder.AppendLine($"✓ {practice}");
         }
         promptBuilder.AppendLine();
 
-        // Add context if provided
+        // Code Quality Requirements
+        promptBuilder.AppendLine("🎯 **CODE QUALITY REQUIREMENTS:**");
+        promptBuilder.AppendLine();
+        promptBuilder.AppendLine("**Must Include:**");
+        promptBuilder.AppendLine("- ✅ Proper error handling (try-catch, validation)");
+        promptBuilder.AppendLine("- ✅ Input validation and sanitization");
+        promptBuilder.AppendLine("- ✅ Clear variable and function naming");
+        promptBuilder.AppendLine("- ✅ Appropriate comments (explain 'why', not 'what')");
+        promptBuilder.AppendLine("- ✅ Edge case handling");
+        promptBuilder.AppendLine("- ✅ Type safety (where applicable)");
+        promptBuilder.AppendLine();
+        promptBuilder.AppendLine("**Must Avoid:**");
+        promptBuilder.AppendLine("- ❌ Hardcoded values (use constants/config)");
+        promptBuilder.AppendLine("- ❌ Magic numbers without explanation");
+        promptBuilder.AppendLine("- ❌ Overly complex nested logic");
+        promptBuilder.AppendLine("- ❌ Code duplication (DRY principle)");
+        promptBuilder.AppendLine("- ❌ Ignoring potential exceptions");
+        promptBuilder.AppendLine("- ❌ Poor naming conventions");
+        promptBuilder.AppendLine();
+
+        promptBuilder.AppendLine("═══════════════════════════════════════════════════════════════");
+        promptBuilder.AppendLine();
+
+        // Existing code context
         if (!string.IsNullOrEmpty(codeContext))
         {
-            promptBuilder.AppendLine("**EXISTING CODE CONTEXT:**");
+            promptBuilder.AppendLine("📄 **EXISTING CODE CONTEXT:**");
+            promptBuilder.AppendLine();
+            promptBuilder.AppendLine("The user has provided the following code for reference or modification:");
+            promptBuilder.AppendLine();
             promptBuilder.AppendLine($"```{languageConfig.CodeBlockIdentifier}");
             promptBuilder.AppendLine(codeContext);
             promptBuilder.AppendLine("```");
             promptBuilder.AppendLine();
-        }
-
-        // Add conversation history context
-        if (context.History.Any())
-        {
-            promptBuilder.AppendLine("**CONVERSATION CONTEXT:**");
-            var recentCodingQuestions = context.History.TakeLast(2)
-                .Where(h => IsCodingRelated(h.Question, languageConfig))
-                .ToList();
-
-            foreach (var turn in recentCodingQuestions)
-            {
-                promptBuilder.AppendLine($"Previous Q: {turn.Question}");
-                promptBuilder.AppendLine($"Previous A: {TruncateText(turn.Answer, 200)}");
-            }
+            promptBuilder.AppendLine("**Instructions for handling existing code:**");
+            promptBuilder.AppendLine("- Understand the current implementation thoroughly");
+            promptBuilder.AppendLine("- Identify potential issues or improvements");
+            promptBuilder.AppendLine("- Maintain consistency with existing code style");
+            promptBuilder.AppendLine("- Explain what changes you're making and why");
+            promptBuilder.AppendLine("- Point out any bugs or anti-patterns found");
+            promptBuilder.AppendLine();
+            promptBuilder.AppendLine("═══════════════════════════════════════════════════════════════");
             promptBuilder.AppendLine();
         }
 
-        promptBuilder.AppendLine("**USER QUESTION:**");
+        // Conversation history
+        if (context.History.Any())
+        {
+            var recentCodingQuestions = context.History.TakeLast(3)
+                .Where(h => IsCodingRelated(h.Question, languageConfig))
+                .ToList();
+
+            if (recentCodingQuestions.Any())
+            {
+                promptBuilder.AppendLine("💬 **CONVERSATION CONTEXT:**");
+                promptBuilder.AppendLine();
+                promptBuilder.AppendLine("Previous related discussion in this session:");
+                promptBuilder.AppendLine();
+
+                foreach (var turn in recentCodingQuestions)
+                {
+                    promptBuilder.AppendLine($"**Previous Question:** {turn.Question}");
+                    promptBuilder.AppendLine($"**Previous Answer Summary:** {TruncateText(turn.Answer, 300)}");
+                    promptBuilder.AppendLine();
+                }
+
+                promptBuilder.AppendLine("**Context Awareness:**");
+                promptBuilder.AppendLine("- Build upon previous explanations");
+                promptBuilder.AppendLine("- Reference earlier code if relevant");
+                promptBuilder.AppendLine("- Show progression and iteration");
+                promptBuilder.AppendLine("- Avoid repeating already explained concepts");
+                promptBuilder.AppendLine();
+                promptBuilder.AppendLine("═══════════════════════════════════════════════════════════════");
+                promptBuilder.AppendLine();
+            }
+        }
+
+        // Security considerations
+        promptBuilder.AppendLine("🔒 **SECURITY CONSIDERATIONS:**");
+        promptBuilder.AppendLine();
+        promptBuilder.AppendLine("Always consider and address:");
+        promptBuilder.AppendLine("- Input validation and sanitization");
+        promptBuilder.AppendLine("- SQL injection prevention (if database involved)");
+        promptBuilder.AppendLine("- XSS prevention (if web-related)");
+        promptBuilder.AppendLine("- Authentication and authorization");
+        promptBuilder.AppendLine("- Sensitive data handling (passwords, tokens, PII)");
+        promptBuilder.AppendLine("- Resource cleanup and disposal");
+        promptBuilder.AppendLine();
+        promptBuilder.AppendLine("═══════════════════════════════════════════════════════════════");
+        promptBuilder.AppendLine();
+
+        // Testing guidance
+        promptBuilder.AppendLine("🧪 **TESTING RECOMMENDATIONS:**");
+        promptBuilder.AppendLine();
+        promptBuilder.AppendLine("Suggest how to test the solution:");
+        promptBuilder.AppendLine("- Unit test scenarios to cover");
+        promptBuilder.AppendLine("- Edge cases to validate");
+        promptBuilder.AppendLine("- Integration test considerations");
+        promptBuilder.AppendLine($"- Appropriate {languageConfig.Name} testing frameworks");
+        promptBuilder.AppendLine();
+        promptBuilder.AppendLine("═══════════════════════════════════════════════════════════════");
+        promptBuilder.AppendLine();
+
+        // User's question
+        promptBuilder.AppendLine("❓ **USER'S QUESTION:**");
+        promptBuilder.AppendLine();
         promptBuilder.AppendLine(question);
+        promptBuilder.AppendLine();
+        promptBuilder.AppendLine("═══════════════════════════════════════════════════════════════");
+        promptBuilder.AppendLine();
+
+        // Final instructions
+        promptBuilder.AppendLine("**FINAL INSTRUCTIONS:**");
+        promptBuilder.AppendLine();
+        promptBuilder.AppendLine("1. Read the question carefully and understand the requirements completely");
+        promptBuilder.AppendLine("2. Consider the skill level and adjust explanation depth accordingly");
+        promptBuilder.AppendLine("3. Provide complete, working, tested code");
+        promptBuilder.AppendLine("4. Follow ALL the standards and requirements mentioned above");
+        promptBuilder.AppendLine("5. Be thorough but concise - quality over quantity");
+        promptBuilder.AppendLine("6. If requirements are unclear, state assumptions explicitly");
+        promptBuilder.AppendLine($"7. Ensure code follows {languageConfig.Name} conventions and best practices");
+        promptBuilder.AppendLine();
+        promptBuilder.AppendLine("Now, provide your expert assistance! 🚀");
 
         return promptBuilder.ToString();
     }
@@ -577,74 +778,323 @@ public partial class DynamicCodingAssistanceService
         List<ConversationTurn> history,
         LanguageConfig languageConfig)
     {
+        try
+        {
+            var messages = BuildCodingMessages(prompt, history, languageConfig);
+            var requestData = BuildCodingRequestData(generationModel, messages, languageConfig);
+
+            _logger.LogInformation(
+                $"🤖 Generating {languageConfig.Name} response | Model: {generationModel.Name} | Context: {messages.Count} messages");
+
+            var response = await ExecuteCodeGenerationRequestAsync(requestData, languageConfig);
+
+            if (response == null)
+            {
+                return BuildFallbackResponse(languageConfig, "generation failed");
+            }
+
+            // Validate and enhance the response
+            var validatedResponse = await ValidateAndEnhanceCodingResponse(response, languageConfig, prompt);
+
+            _logger.LogInformation($"✅ Successfully generated {languageConfig.Name} response ({validatedResponse.Length} chars)");
+
+            return validatedResponse;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"❌ Critical error in {languageConfig.Name} response generation");
+            return BuildFallbackResponse(languageConfig, "unexpected error", ex.Message);
+        }
+    }
+
+    private List<object> BuildCodingMessages(
+        string prompt,
+        List<ConversationTurn> history,
+        LanguageConfig languageConfig)
+    {
         var messages = new List<object>();
 
-        // Language-specific system message
-        messages.Add(new
-        {
-            role = "system",
-            content = $@"{languageConfig.SystemPrompt}
-            
-            Always format code blocks with ```{languageConfig.CodeBlockIdentifier}
-            Focus on {languageConfig.Name}-specific best practices and idioms."
-        });
+        // Enhanced system message with language-specific guidance
+        var systemMessage = $@"{languageConfig.SystemPrompt}
 
-        // Add recent coding-related conversation history
-        var codingHistory = history.TakeLast(4)
-            .Where(turn => IsCodingRelated(turn.Question, languageConfig))
-            .ToList();
+═══════════════════════════════════════════════════════════════
+
+**CRITICAL FORMATTING REQUIREMENTS:**
+
+1. **Code Blocks**: Always use ```{languageConfig.CodeBlockIdentifier} for code
+2. **Structure**: Follow the required response format exactly
+3. **Completeness**: Provide full, working solutions - no placeholders or TODOs
+4. **Comments**: Add meaningful comments explaining complex logic
+5. **Error Handling**: Include proper error handling in all code
+
+**{languageConfig.Name.ToUpperInvariant()} SPECIFIC FOCUS:**
+- Follow {languageConfig.Name} naming conventions strictly
+- Use {languageConfig.Name}-specific idioms and patterns
+- Apply language-specific best practices
+- Consider {languageConfig.Name} ecosystem tools and libraries
+
+**QUALITY CHECKLIST:**
+✓ Code compiles/runs without errors
+✓ Handles edge cases and errors
+✓ Well-commented and documented
+✓ Follows language conventions
+✓ Production-ready quality
+✓ Includes usage examples
+
+**RESPONSE TONE:**
+- Professional yet educational
+- Clear and concise explanations
+- Encourage best practices
+- Guide learning and understanding
+
+═══════════════════════════════════════════════════════════════";
+
+        messages.Add(new { role = "system", content = systemMessage });
+
+        // Add relevant conversation history with better filtering
+        var codingHistory = FilterRelevantCodingHistory(history, languageConfig, maxTurns: 3);
 
         foreach (var turn in codingHistory)
         {
-            messages.Add(new { role = "user", content = turn.Question });
-            messages.Add(new { role = "assistant", content = TruncateText(turn.Answer, 1000) });
+            // Add context marker for better continuity
+            var userMessage = turn.Question;
+            if (codingHistory.IndexOf(turn) > 0)
+            {
+                userMessage = $"[Previous context] {userMessage}";
+            }
+
+            messages.Add(new { role = "user", content = userMessage });
+
+            // Truncate assistant responses but preserve code blocks
+            var assistantResponse = TruncatePreservingCode(turn.Answer, maxLength: 1500);
+            messages.Add(new { role = "assistant", content = assistantResponse });
         }
 
-        // Add current prompt
-        messages.Add(new { role = "user", content = prompt });
+        // Add current prompt with emphasis
+        messages.Add(new { role = "user", content = $"**CURRENT QUESTION:**\n\n{prompt}" });
 
-        var requestData = new
+        return messages;
+    }
+
+    private List<ConversationTurn> FilterRelevantCodingHistory(
+        List<ConversationTurn> history,
+        LanguageConfig languageConfig,
+        int maxTurns)
+    {
+        return history
+            .TakeLast(6) // Look at more history for better filtering
+            .Where(turn => IsCodingRelated(turn.Question, languageConfig))
+            .Where(turn => IsRelevantToCurrentContext(turn, languageConfig))
+            .TakeLast(maxTurns)
+            .ToList();
+    }
+
+    private bool IsRelevantToCurrentContext(ConversationTurn turn, LanguageConfig languageConfig)
+    {
+        // Check if the turn contains meaningful coding content
+        if (string.IsNullOrWhiteSpace(turn.Answer)) return false;
+
+        // Prefer turns with code blocks
+        if (turn.Answer.Contains($"```{languageConfig.CodeBlockIdentifier}")) return true;
+
+        // Check for common coding keywords
+        var codingKeywords = new[] { "function", "class", "method", "variable", "error", "bug", "implement", "code" };
+        return codingKeywords.Any(keyword =>
+            turn.Question.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private string TruncatePreservingCode(string text, int maxLength)
+    {
+        if (text.Length <= maxLength) return text;
+
+        // Try to preserve code blocks if present
+        var codeBlockStart = text.IndexOf("```");
+        var codeBlockEnd = text.LastIndexOf("```");
+
+        if (codeBlockStart >= 0 && codeBlockEnd > codeBlockStart && codeBlockEnd < maxLength)
+        {
+            // Keep the code block and some context
+            return text.Substring(0, Math.Min(codeBlockEnd + 3, maxLength)) + "\n\n[...truncated for context]";
+        }
+
+        return TruncateText(text, maxLength);
+    }
+
+    private object BuildCodingRequestData(
+        ModelConfiguration generationModel,
+        List<object> messages,
+        LanguageConfig languageConfig)
+    {
+        // Adjust parameters based on language complexity
+        var complexity = DetermineLanguageComplexity(languageConfig);
+
+        return new
         {
             model = generationModel.Name,
             messages,
-            temperature = 0.2, // Lower temperature for more focused coding responses
+            temperature = complexity switch
+            {
+                "high" => 0.3,      // More creative for complex languages
+                "medium" => 0.2,    // Balanced
+                "low" => 0.1,       // Very focused for simpler tasks
+                _ => 0.2
+            },
             stream = false,
             options = new Dictionary<string, object>
-            {
-                { "num_ctx", 6000 },
-                { "num_predict", 3000 },
-                { "top_p", 0.9 },
-                { "repeat_penalty", 1.05 }
-            }
+        {
+            { "num_ctx", 8000 },              // Increased context window
+            { "num_predict", 4000 },          // More tokens for detailed responses
+            { "top_p", 0.9 },
+            { "repeat_penalty", 1.1 },        // Slightly higher to avoid repetition
+            { "top_k", 40 },
+            { "frequency_penalty", 0.1 },
+            { "presence_penalty", 0.1 },
+            { "stop", new[] { "[END]", "[DONE]" } }  // Stop sequences
+        }
         };
+    }
+
+    private string DetermineLanguageComplexity(LanguageConfig languageConfig)
+    {
+        // Categorize languages by typical complexity
+        var highComplexity = new[] { "C++", "Rust", "Assembly", "Haskell" };
+        var lowComplexity = new[] { "Python", "JavaScript", "Ruby" };
+
+        if (highComplexity.Contains(languageConfig.Name)) return "high";
+        if (lowComplexity.Contains(languageConfig.Name)) return "low";
+        return "medium";
+    }
+
+    private async Task<string?> ExecuteCodeGenerationRequestAsync(
+        object requestData,
+        LanguageConfig languageConfig)
+    {
+        // Use longer timeout for complex code generation
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
 
         try
         {
-            _logger.LogInformation($"🤖 Generating {languageConfig.Name} response with model: {generationModel.Name}");
-
-            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
-            var response = await _httpClient.PostAsJsonAsync("/api/chat", requestData, cts.Token);
+            var response = await _httpClient.PostAsJsonAsync("/api/generate", requestData, cts.Token);
 
             if (!response.IsSuccessStatusCode)
             {
                 var errorContent = await response.Content.ReadAsStringAsync();
-                _logger.LogError($"❌ {languageConfig.Name} response generation failed: {response.StatusCode} - {errorContent}");
-                return $"I apologize, but I'm having trouble generating a {languageConfig.Name} solution right now. Please try again.";
+                _logger.LogError(
+                    $"❌ {languageConfig.Name} generation failed | Status: {response.StatusCode} | Error: {errorContent}");
+
+                // Try to extract meaningful error info
+                if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
+                {
+                    _logger.LogWarning("Model service unavailable, may need to retry");
+                }
+
+                return null;
             }
 
             var json = await response.Content.ReadAsStringAsync();
+
+            // Validate response has content
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                _logger.LogError($"❌ Empty response received for {languageConfig.Name}");
+                return null;
+            }
+
             return await ParseLLMResponse(json, false, "");
         }
         catch (OperationCanceledException)
         {
-            _logger.LogError($"❌ {languageConfig.Name} response generation timed out");
-            return $"The {languageConfig.Name} response generation timed out. Please try with a simpler question.";
+            _logger.LogError($"⏱️ {languageConfig.Name} response generation timed out after 5 minutes");
+            return null;
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, $"🌐 Network error during {languageConfig.Name} generation");
+            return null;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"❌ {languageConfig.Name} response generation failed");
-            return $"I apologize, but I encountered an error while generating the {languageConfig.Name} solution.";
+            _logger.LogError(ex, $"❌ Unexpected error during {languageConfig.Name} generation request");
+            return null;
         }
+    }
+
+    private async Task<string> ValidateAndEnhanceCodingResponse(
+        string response,
+        LanguageConfig languageConfig,
+        string originalPrompt)
+    {
+        // Basic validation
+        if (string.IsNullOrWhiteSpace(response))
+        {
+            return BuildFallbackResponse(languageConfig, "empty response");
+        }
+
+        // Check if response contains code
+        var hasCodeBlock = response.Contains($"```{languageConfig.CodeBlockIdentifier}") ||
+                           response.Contains("```");
+
+        if (!hasCodeBlock && IsCodeRequested(originalPrompt))
+        {
+            _logger.LogWarning($"⚠️ Response missing expected code blocks for {languageConfig.Name}");
+            response += $"\n\n*Note: The response may be incomplete. Code blocks should be formatted with ```{languageConfig.CodeBlockIdentifier}*";
+        }
+
+        // Check for common incomplete response patterns
+        if (response.Contains("[TODO]") || response.Contains("[PLACEHOLDER]") || response.Contains("..."))
+        {
+            _logger.LogWarning($"⚠️ Response contains placeholders for {languageConfig.Name}");
+            response += "\n\n*Note: Some sections may need completion. Please ask for clarification on specific parts.*";
+        }
+
+        // Ensure response ends properly
+        if (!response.TrimEnd().EndsWith(".") &&
+            !response.TrimEnd().EndsWith("```") &&
+            !response.TrimEnd().EndsWith("*"))
+        {
+            _logger.LogWarning($"⚠️ Response may be truncated for {languageConfig.Name}");
+            response += "\n\n*Response may have been truncated. Please ask if you need more details.*";
+        }
+
+        return response;
+    }
+
+    private bool IsCodeRequested(string prompt)
+    {
+        var codeKeywords = new[]
+        {
+        "write code", "implement", "create function", "create class",
+        "code for", "program", "script", "show me code", "write a"
+    };
+
+        return codeKeywords.Any(keyword =>
+            prompt.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private string BuildFallbackResponse(
+        LanguageConfig languageConfig,
+        string reason,
+        string? additionalInfo = null)
+    {
+        var message = $@"I apologize, but I'm having trouble generating a {languageConfig.Name} solution right now.
+
+**Issue**: {reason}
+{(additionalInfo != null ? $"**Details**: {additionalInfo}\n" : "")}
+**Suggestions**:
+1. Try rephrasing your question more specifically
+2. Break down complex requests into smaller parts
+3. Ensure your question is clear and focused on {languageConfig.Name}
+4. Try again in a moment if this is a temporary issue
+
+**How I can help**:
+- Explain {languageConfig.Name} concepts
+- Review and debug code
+- Suggest best practices
+- Provide examples and tutorials
+
+Please try again with a more specific question, and I'll do my best to assist you with {languageConfig.Name}! 🚀";
+
+        return message;
     }
 
     /// <summary>

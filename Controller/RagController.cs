@@ -262,8 +262,9 @@ namespace MEAI_GPT_API.Controller
         }
         private async IAsyncEnumerable<string> ProcessCodingQueryStreamAsync(QueryRequest request, CodingDetectionResult codingDetection)
         {
-            yield return "Analyzing coding requirements...";
-            yield return $"Detected {codingDetection.DetectedLanguage} programming query";
+            yield return JsonSerializer.Serialize(new { type = "status", message = "Analyzing coding requirements..." });
+            yield return JsonSerializer.Serialize(new { type = "status", message = $"Detected {codingDetection.DetectedLanguage} programming query" });
+
 
             // Handle coding service call safely outside yield context
             CodingAssistanceResponse codingResponse = null;
@@ -300,15 +301,16 @@ namespace MEAI_GPT_API.Controller
 
             if (hasError || codingResponse == null || string.IsNullOrEmpty(codingResponse.Solution))
             {
-                yield return "I apologize, but I couldn't generate a coding solution at this time.";
+                yield return JsonSerializer.Serialize(new { type = "error", message = "I apologize, but I couldn't generate a coding solution at this time." });
                 yield break;
             }
 
-            yield return "Generating coding solution...";
+            yield return JsonSerializer.Serialize(new { type = "status", message = "Generating coding solution..." });
 
             await foreach (var chunk in StreamCodeSolution(codingResponse.Solution))
             {
-                yield return chunk;
+                yield return JsonSerializer.Serialize(new { type = "chunk", content = chunk });
+
             }
         }
         private async IAsyncEnumerable<string> StreamResponseSafely(string response)

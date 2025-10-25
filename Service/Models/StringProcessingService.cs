@@ -153,7 +153,11 @@ namespace MEAI_GPT_API.Service.Models
                 .Replace("•", "*")
                 .Replace("▪", "*");
 
-            // Rest of your existing method...
+            cleaned = Regex.Replace(cleaned, @"DOCUMENT\s+SECTION.*?$", "", RegexOptions.IgnoreCase | RegexOptions.Multiline);
+            cleaned = Regex.Replace(cleaned, @"SECTION\s+TITLE.*?$", "", RegexOptions.IgnoreCase | RegexOptions.Multiline);
+            cleaned = Regex.Replace(cleaned, @"DOCUMENT\s+TYPE.*?$", "", RegexOptions.IgnoreCase | RegexOptions.Multiline);
+            cleaned = Regex.Replace(cleaned, @"CONTENT.*?$", "", RegexOptions.IgnoreCase | RegexOptions.Multiline);
+
 
             // 🔧 STEP 2: Normalize whitespace
             cleaned = Regex.Replace(cleaned, @"\s+", " ");
@@ -195,7 +199,7 @@ namespace MEAI_GPT_API.Service.Models
             if (string.IsNullOrWhiteSpace(cleaned))
             {
                 _logger.LogWarning($"⚠️ Text cleaning resulted in empty string for model {model.Name}");
-                return "empty content";
+                return "";
             }
 
             _logger.LogDebug($"✅ Cleaned text for {model.Name}: {cleaned.Length} chars");

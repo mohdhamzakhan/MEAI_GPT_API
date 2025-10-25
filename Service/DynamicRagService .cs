@@ -6,6 +6,7 @@ using MEAI_GPT_API.Service.Models;
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -244,12 +245,26 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             _logger.LogInformation($"📋 Total files for {plant}: {policyFiles.Count}");
             return policyFiles;
         }
+
+        // This cache tracks processed files with their last write time to skip unchanged files
+        private readonly ConcurrentDictionary<string, DateTime> processedFilesCache = new();
         // In your ProcessFileForModelAsync method, ensure you're using proper document processing
         private async Task ProcessFileForModelAsync(string filePath, ModelConfiguration model, string collectionId, string plant)
         {
             try
             {
                 var fileInfo = new FileInfo(filePath);
+                var lastWriteTime = fileInfo.LastWriteTime;
+
+                // Skip file if processed already and not changed
+                if (processedFilesCache.TryGetValue(filePath, out var cachedWriteTime))
+                {
+                    if (cachedWriteTime >= lastWriteTime)
+                    {
+                        _logger.LogInformation($"Skipping unchanged file '{filePath}' for model '{model.Name}'.");
+                        return;
+                    }
+                }
 
                 // 🔧 IMPORTANT: Use proper document processor instead of copy-paste text
                 var content = await _documentProcessor.ExtractTextAsync(filePath);
@@ -272,6 +287,8 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
                 var chunks = _textChunking.ChunkText(content, filePath);
                 await ProcessChunkBatchForModelAsync(chunks, model, collectionId, fileInfo.LastWriteTime, plant);
+                processedFilesCache[filePath] = lastWriteTime;
+                _logger.LogInformation($"Processed and cached file '{filePath}' for model '{model.Name}'.");
             }
             catch (Exception ex)
             {
@@ -2639,51 +2656,79 @@ These abbreviations are standard across all MEAI HR policies and should be inter
         {
             await _collectionManager.DeleteModelCollectionAsync(modelName);
         }
+        //public async Task InitializeAsync()
+        //{
+        //    if (_isInitialized) return;
+
+        //    try
+        //    {
+        //        _logger.LogInformation("🚀 Starting parallel RAG system initialization");
+
+        //        // Parallel model discovery and configuration
+        //        var initTasks = new List<Task>
+        //{
+        //    Task.Run(async () =>
+        //    {
+        //        var availableModels = await _modelManager.DiscoverAvailableModelsAsync();
+        //        await ConfigureDefaultModelsAsync(availableModels);
+        //        return availableModels;
+        //    }),
+        //    Task.Run(() => EnsureDirectoriesExist()),
+        //    Task.Run(() => EnsureAbbreviationContext()),
+        //    Task.Run(async () => await LoadCorrectionCacheAsync()),
+        //    Task.Run(async () => await LoadHistoricalAppreciatedAnswersAsync())
+        //};
+
+        //        await Task.WhenAll(initTasks);
+
+        //        // Parallel document processing for all plants
+        //        var plantTasks = _plants.Plants.Keys.Select(async plant =>
+        //        {
+        //            _logger.LogInformation($"Processing documents for plant: {plant}");
+        //            var models = await _modelManager.DiscoverAvailableModelsAsync();
+        //            var embeddingModels = models.Where(m => m.Type == "embedding" || m.Type == "both").ToList();
+        //            await ProcessDocumentsForAllModelsAsync(embeddingModels, plant);
+        //        });
+
+        //        await Task.WhenAll(plantTasks);
+
+        //        _isInitialized = true;
+        //        _logger.LogInformation("✅ Parallel RAG system initialization completed");
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        _logger.LogError(ex, "❌ Failed to initialize RAG system");
+        //        throw;
+        //    }
+        //}
+
+        private bool isInitialized = false;
+        private readonly object initLock = new object();
+
         public async Task InitializeAsync()
         {
-            if (_isInitialized) return;
+            if (isInitialized) return;
 
-            try
+            lock (initLock)
             {
-                _logger.LogInformation("🚀 Starting parallel RAG system initialization");
-
-                // Parallel model discovery and configuration
-                var initTasks = new List<Task>
-        {
-            Task.Run(async () =>
-            {
-                var availableModels = await _modelManager.DiscoverAvailableModelsAsync();
-                await ConfigureDefaultModelsAsync(availableModels);
-                return availableModels;
-            }),
-            Task.Run(() => EnsureDirectoriesExist()),
-            Task.Run(() => EnsureAbbreviationContext()),
-            Task.Run(async () => await LoadCorrectionCacheAsync()),
-            Task.Run(async () => await LoadHistoricalAppreciatedAnswersAsync())
-        };
-
-                await Task.WhenAll(initTasks);
-
-                // Parallel document processing for all plants
-                var plantTasks = _plants.Plants.Keys.Select(async plant =>
-                {
-                    _logger.LogInformation($"Processing documents for plant: {plant}");
-                    var models = await _modelManager.DiscoverAvailableModelsAsync();
-                    var embeddingModels = models.Where(m => m.Type == "embedding" || m.Type == "both").ToList();
-                    await ProcessDocumentsForAllModelsAsync(embeddingModels, plant);
-                });
-
-                await Task.WhenAll(plantTasks);
-
-                _isInitialized = true;
-                _logger.LogInformation("✅ Parallel RAG system initialization completed");
+                if (isInitialized) return;
+                isInitialized = true;
             }
-            catch (Exception ex)
+
+            _logger.LogInformation("Starting DynamicRagService Initialization...");
+
+            var models = await _modelManager.DiscoverAvailableModelsAsync();
+            var embeddingModels = models.Where(m => m.Type == "embedding" || m.Type == "both").ToList();
+
+            // Process documents for each plant configuration in parallel
+            var plantTasks = _plants.Plants.Keys.Select(async plant =>
             {
-                _logger.LogError(ex, "❌ Failed to initialize RAG system");
-                throw;
-            }
+                await ProcessDocumentsForAllModelsAsync(embeddingModels, plant);
+            });
+
+            await Task.WhenAll(plantTasks);
         }
+
         private async Task<List<float>> GetEmbeddingAsync(string text, ModelConfiguration model)
         {
             if (string.IsNullOrWhiteSpace(text))
@@ -3030,7 +3075,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             {
                 if (fullResponse.Length > 0)
                 {
-                    
+
                 }
             }
             catch (Exception ex)
@@ -3055,7 +3100,10 @@ These abbreviations are standard across all MEAI HR policies and should be inter
     string plant,
     [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            var prompt = BuildEnhancedPrompt(question, relevantChunks, context, meaiInfo, plant);
+            var prompt = meaiInfo ? await _systemPromptBuilder.BuildMeaiSystemPrompt(plant, relevantChunks, question) :
+                BuildEnhancedPrompt(question, relevantChunks, context, meaiInfo, plant);
+
+
 
             _logger.LogInformation("Streaming response from model: {Model}", model);
 
@@ -3111,56 +3159,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             }
         }
 
-        private string BuildEnhancedPrompt(
-    string question,
-    List<RelevantChunk> relevantChunks,
-    ConversationContext context,
-    bool meaiInfo,
-    string plant)
-        {
-            var promptBuilder = new StringBuilder();
 
-            // Add conversation history if available
-            if (context.History.Any())
-            {
-                promptBuilder.AppendLine("Previous conversation:");
-                foreach (var entry in context.History.TakeLast(3))
-                {
-                    promptBuilder.AppendLine($"Q: {entry.Question}");
-                    promptBuilder.AppendLine($"A: {entry.Answer}");
-                }
-                promptBuilder.AppendLine();
-            }
-
-            // Add retrieved context
-            if (relevantChunks.Any())
-            {
-                promptBuilder.AppendLine("Relevant information from company documents:");
-                foreach (var chunk in relevantChunks.Take(5))
-                {
-                    promptBuilder.AppendLine($"Source: {chunk.Source}");
-                    promptBuilder.AppendLine(chunk.Text);
-                    promptBuilder.AppendLine();
-                }
-            }
-
-            // Add the actual question
-            if (meaiInfo)
-            {
-                promptBuilder.AppendLine($"Based on the above information from {plant} plant, please answer:");
-            }
-            else
-            {
-                promptBuilder.AppendLine("Please answer the following question:");
-            }
-
-            promptBuilder.AppendLine(question);
-
-            // Add instructions
-            promptBuilder.AppendLine("\nProvide a clear, concise answer based on the provided context.");
-
-            return promptBuilder.ToString();
-        }
 
         public async IAsyncEnumerable<string> StreamGenerateAsync(
         string model,
@@ -3471,31 +3470,6 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             }
         }
 
-        private async IAsyncEnumerable<StreamChunk> GenerateStreamingResponse(
-    string question,
-    ModelConfiguration genModel,
-    ConversationContext context,
-    List<RelevantChunk> relevantChunks,
-    bool ismeai,
-    string plant,
-    [EnumeratorCancellation] CancellationToken cancellationToken = default)
-        {
-            var prompt = BuildPrompt(question, context.History, relevantChunks, ismeai, plant);
-
-            var responseResult = await SafeGenerateResponse(prompt, genModel, cancellationToken);
-            if (responseResult.HasError)
-            {
-                yield return new StreamChunk { Type = "error", Content = responseResult.ErrorMessage };
-                yield break;
-            }
-
-            // Stream the response tokens
-            await foreach (var token in responseResult.TokenStream)
-            {
-                if (cancellationToken.IsCancellationRequested) yield break;
-                yield return new StreamChunk { Type = "response", Content = token };
-            }
-        }
 
 
         private async Task<ResponseGenerationResult> SafeGenerateResponse(
@@ -3564,58 +3538,56 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 };
             }
         }
-        private string BuildPrompt(string question, List<ConversationTurn> history, List<RelevantChunk> chunks, bool ismeai, string plant)
+
+        private string BuildEnhancedPrompt(
+    string question,
+    List<RelevantChunk> relevantChunks,
+    ConversationContext context,
+    bool meaiInfo,
+    string plant)
         {
-            var prompt = new StringBuilder();
+            var promptBuilder = new StringBuilder();
 
-            if (ismeai)
+            // Add conversation history if available
+            if (context.History.Any())
             {
-                // Build MEAI-specific prompt with context
-                prompt.AppendLine($"You are MEAI Policy Assistant for {plant}.");
-                prompt.AppendLine();
-
-                if (chunks.Any())
+                promptBuilder.AppendLine("Previous conversation:");
+                foreach (var entry in context.History.TakeLast(3))
                 {
-                    prompt.AppendLine("=== POLICY CONTEXT ===");
-                    foreach (var chunk in chunks.Take(5))
-                    {
-                        prompt.AppendLine($"Source: {chunk.Source}");
-                        prompt.AppendLine(chunk.Text);
-                        prompt.AppendLine("---");
-                    }
-                    prompt.AppendLine();
+                    promptBuilder.AppendLine($"Q: {entry.Question}");
+                    promptBuilder.AppendLine($"A: {entry.Answer}");
                 }
+                promptBuilder.AppendLine();
+            }
 
-                prompt.AppendLine("INSTRUCTIONS:");
-                prompt.AppendLine("1. Answer based ONLY on the provided policy context");
-                prompt.AppendLine("2. Be accurate and comprehensive");
-                prompt.AppendLine("3. Cite source documents");
-                prompt.AppendLine("4. If information is not in context, say so clearly");
-                prompt.AppendLine();
+            // Add retrieved context
+            if (relevantChunks.Any())
+            {
+                promptBuilder.AppendLine("Relevant information from company documents:");
+                foreach (var chunk in relevantChunks.Take(5))
+                {
+                    promptBuilder.AppendLine($"Source: {chunk.Source}");
+                    promptBuilder.AppendLine(chunk.Text);
+                    promptBuilder.AppendLine();
+                }
+            }
+
+            // Add the actual question
+            if (meaiInfo)
+            {
+                promptBuilder.AppendLine($"Based on the above information from {plant} plant, please answer:");
             }
             else
             {
-                // General assistant prompt
-                prompt.AppendLine("You are a helpful AI assistant.");
-                prompt.AppendLine("Provide accurate, helpful responses on any topic.");
-                prompt.AppendLine();
+                promptBuilder.AppendLine("Please answer the following question:");
             }
 
-            // Add conversation history
-            if (history.Any())
-            {
-                prompt.AppendLine("=== CONVERSATION HISTORY ===");
-                foreach (var turn in history.TakeLast(4))
-                {
-                    prompt.AppendLine($"User: {turn.Question}");
-                    prompt.AppendLine($"Assistant: {turn.Answer}");
-                    prompt.AppendLine();
-                }
-            }
+            promptBuilder.AppendLine(question);
 
-            prompt.AppendLine($"Current Question: {question}");
+            // Add instructions
+            promptBuilder.AppendLine("\nProvide a clear, concise answer based on the provided context.");
 
-            return prompt.ToString();
+            return promptBuilder.ToString();
         }
 
         private async IAsyncEnumerable<string> StreamGenerateAsync(

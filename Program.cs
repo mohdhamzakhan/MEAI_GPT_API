@@ -100,6 +100,7 @@ builder.Services.AddDbContext<ConversationDbContext>(options =>
 builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>();
 builder.Services.AddSingleton<ICacheManager, CacheManager>();
 builder.Services.AddSingleton<IMetricsCollector, MetricsCollector>();
+builder.Services.AddSingleton<RagStateManager>();
 
 // FIXED: Keep RAGService as scoped
 builder.Services.AddScoped<IRAGService, DynamicRagService>();
@@ -170,12 +171,24 @@ builder.Services.AddSingleton<DynamicCollectionManager>(provider =>
 });
 
 
-builder.Host.UseSerilog((context, config) =>
+if (Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development")
+{
+    builder.Host.UseSerilog((context, config) =>
 {
     config
         .MinimumLevel.Information()
-        .WriteTo.File("Logs/server-log.txt", rollingInterval: RollingInterval.Day);
+        .WriteTo.Console();
 });
+}
+else
+{
+    builder.Host.UseSerilog((context, config) =>
+{
+    config
+        .MinimumLevel.Information()
+        .WriteTo.File("logs/meai_rag_api.log", rollingInterval: RollingInterval.Day);
+});
+}
 
 builder.Services.Configure<ChromaDbOptions>(
     builder.Configuration.GetSection("ChromaDB"));
@@ -188,6 +201,28 @@ using (var scope = app.Services.CreateScope())
     var context = scope.ServiceProvider.GetRequiredService<ConversationDbContext>();
     context.Database.EnsureCreated();
 }
+
+try
+{
+    var logger = app.Services.GetRequiredService<ILogger<Program>>();
+    var ragService = app.Services.GetRequiredService<IRAGService>();
+    
+    logger.LogInformation("🚀 Initializing RAG Service at startup...");
+    
+    // Initialize synchronously at startup
+    await ragService.InitializeAsync();
+    
+    logger.LogInformation("✅ RAG Service initialization completed successfully");
+}
+catch (Exception ex)
+{
+    var logger = app.Services.GetRequiredService<ILogger<Program>>();
+    logger.LogError(ex, "❌ Failed to initialize RAG Service at startup");
+    
+    // Optional: Decide whether to continue or stop the application
+    // throw; // Uncomment to stop application if RAG initialization fails
+}
+
 if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
 {
     app.UseSwagger();

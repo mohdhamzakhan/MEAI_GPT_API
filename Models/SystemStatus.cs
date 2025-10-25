@@ -13,5 +13,7 @@
         public List<ModelConfiguration> GenerationModels { get; set; } = new();
         public string DefaultEmbeddingModel { get; set; } = string.Empty;
         public string DefaultGenerationModel { get; set; } = string.Empty;
+        public bool IsInitialized {get; set; } = false;
+        public string Message { get; set; } = string.Empty;
     }
 }
