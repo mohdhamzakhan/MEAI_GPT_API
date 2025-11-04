@@ -416,7 +416,7 @@ public partial class DynamicCodingAssistanceService
             }
 
             // Build language-specific coding prompt
-            var codingPrompt = BuildLanguageSpecificCodingPrompt(
+            var codingPrompt = OldBuildLanguageSpecificCodingPrompt(
                 codingQuestion, codeContext, difficulty, includeExamples, context, languageConfig);
 
             // Generate coding assistance response
@@ -473,10 +473,12 @@ public partial class DynamicCodingAssistanceService
         }
     }
 
+
+
     /// <summary>
     /// Builds a language-specific prompt for coding assistance
     /// </summary>
-    private string BuildLanguageSpecificCodingPrompt(
+    private string OldBuildLanguageSpecificCodingPrompt(
     string question,
     string? codeContext,
     string difficulty,
