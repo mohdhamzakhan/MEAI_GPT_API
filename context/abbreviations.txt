@@ -44,6 +44,7 @@ OKR = Objectives and Key Results
 CEO = Chief Executive Officer
 CTO = Chief Technology Officer
 CFO = Chief Financial Officer
+COO = Chief Operating Officer 
 CHRO = Chief Human Resources Officer
 VP = Vice President
 GM = General Manager
@@ -55,6 +56,9 @@ PM = Project Manager
 AM = Assistant Manager
 DM = Deputy Manager
 SM = Senior Manager
+MD = Managing Director
+CPO = Chief People Office
+CSFO = Chief Shop Floor Office
 
 // === EMPLOYMENT TERMS ===
 DOJ = Date of Joining
@@ -112,17 +116,18 @@ SAN = Sanand
 GUR = Gurgaon
 
 
-// === DEPARTMENTS ===
+// === SANAND DEPARTMENTS ===
 IT = Information Technology
 QA = Quality Assurance
-QC = Quality Control
-R&D = Research and Development
-P&A = People and Administration
+Matls = Materials
+PPC = Production Planning and Control
 F&A = Finance and Accounts
-SCM = Supply Chain Management
-MIS = Management Information System
-EHS = Environment Health and Safety
-IR = Industrial Relations
+TC = Technical Center
+HR&Admn = Human Resource and Administration
+
+// === Sanand Heads Name === 
+
+
 
 // === COMMON QUESTIONS MAPPING ===
 // These help with query understanding

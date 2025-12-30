@@ -1,11 +1,16 @@
 ﻿// Services/DynamicRagService.cs
+using DocumentFormat.OpenXml.Office2013.Excel;
+using DocumentFormat.OpenXml.Spreadsheet;
 using MEAI_GPT_API.Models;
 using MEAI_GPT_API.Service;
 using MEAI_GPT_API.Service.Interface;
 using MEAI_GPT_API.Service.Models;
+using MEAIGPTAPI.Services;
 using Microsoft.Extensions.Options;
+using Microsoft.VisualBasic;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Net.Http;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -13,6 +18,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using static MEAI_GPT_API.Models.Conversation;
+using static MEAI_GPT_API.Services.DynamicRagService;
 
 namespace MEAI_GPT_API.Services
 {
@@ -71,7 +77,7 @@ namespace MEAI_GPT_API.Services
         private readonly ConcurrentDictionary<string, List<string>> _learnedAssociations = new();
 
         private readonly string _metricsFile = Path.Combine(AppContext.BaseDirectory, "Logs", "rag-metrics.log");
-
+        private readonly OllamaHttpClient _ollamaClient;
         public DynamicRagService(
             IModelManager modelManager,
             DynamicCollectionManager collectionManager,
@@ -93,7 +99,8 @@ namespace MEAI_GPT_API.Services
             ConversationAnalysisService conversationAnalysis,
             EntityExtractionService entityExtraction,
             SystemPromptBuilder systemPromptBuilder,
-            HelperMethods helperMethods)
+            HelperMethods helperMethods,
+            OllamaHttpClient ollamaClient)
         {
             _modelManager = modelManager;
             _collectionManager = collectionManager;
@@ -118,6 +125,7 @@ namespace MEAI_GPT_API.Services
             _conversationAnalysis = conversationAnalysis;
             _entityExtraction = entityExtraction;
             _systemPromptBuilder = systemPromptBuilder;
+            _ollamaClient = ollamaClient;
 
             InitializeSessionCleanup();
             _helperMethods = helperMethods;
@@ -162,6 +170,28 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 _logger.LogInformation("Created abbreviations context file");
             }
         }
+
+        private void EnsurePlantSpecificOrganizationContext()
+        {
+            foreach (var plant in _plants.Plants.Keys)
+            {
+                var plantOrgPath = Path.Combine(
+                    _chromaOptions.ContextFolder,
+                    $"organization-{plant.ToLower()}.txt"
+                );
+
+                if (!File.Exists(plantOrgPath))
+                {
+                    var plantOrgContent = $@"MEAI {plant} Plant - Organization Details
+
+These are the fixed organizational details for {plant} plant.";
+
+                    File.WriteAllText(plantOrgPath, plantOrgContent);
+                    _logger.LogInformation($"Created organization context file for {plant}");
+                }
+            }
+        }
+
         private async Task ConfigureDefaultModelsAsync(List<ModelConfiguration> availableModels)
         {
             if (string.IsNullOrEmpty(_config.DefaultEmbeddingModel))
@@ -191,7 +221,12 @@ These abbreviations are standard across all MEAI HR policies and should be inter
         private async Task ProcessDocumentsForAllModelsAsync(List<ModelConfiguration> embeddingModels, string plant)
         {
             var policyFiles = GetPolicyFiles(plant);
-            _logger.LogInformation($"📄 Processing {policyFiles.Count} files for {embeddingModels.Count} embedding models");
+
+            // ✅ ADD: Include context files (abbreviations, etc.)
+            var contextFiles = GetContextFiles();
+            var allFiles = policyFiles.Concat(contextFiles).ToList();
+
+            _logger.LogInformation($"📄 Processing {policyFiles.Count} policy files + {contextFiles.Count} context files for {embeddingModels.Count} embedding models");
 
             var tasks = embeddingModels.Select(async model =>
             {
@@ -199,7 +234,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
                 var collectionId = await _collectionManager.GetOrCreateCollectionAsync(model);
 
-                foreach (var filePath in policyFiles)
+                foreach (var filePath in allFiles)
                 {
                     await ProcessFileForModelAsync(filePath, model, collectionId, plant);
                 }
@@ -209,6 +244,28 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
             await Task.WhenAll(tasks);
         }
+
+        // ✅ NEW METHOD: Get context files
+        private List<string> GetContextFiles()
+        {
+            var contextFiles = new List<string>();
+
+            if (Directory.Exists(_chromaOptions.ContextFolder))
+            {
+                // Get all context files (abbreviations, organization, etc.)
+                contextFiles.AddRange(Directory.GetFiles(_chromaOptions.ContextFolder, "*.txt"));
+
+                _logger.LogInformation($"Found {contextFiles.Count} context files:");
+                foreach (var file in contextFiles)
+                {
+                    _logger.LogInformation($"  - {Path.GetFileName(file)}");
+                }
+            }
+
+            return contextFiles;
+        }
+
+
         private List<string> GetPolicyFiles(string plant)
         {
             var policyFiles = new List<string>();
@@ -236,65 +293,217 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 _logger.LogInformation($"📁 Found {centralizedFiles.Count()} centralized policy files");
             }
 
-            // Context files (apply to all plants)
-            if (Directory.Exists(_chromaOptions.ContextFolder))
-            {
-                policyFiles.AddRange(Directory.GetFiles(_chromaOptions.ContextFolder, "*.txt", SearchOption.AllDirectories));
-            }
 
             _logger.LogInformation($"📋 Total files for {plant}: {policyFiles.Count}");
             return policyFiles;
         }
 
+
         // This cache tracks processed files with their last write time to skip unchanged files
         private readonly ConcurrentDictionary<string, DateTime> processedFilesCache = new();
         // In your ProcessFileForModelAsync method, ensure you're using proper document processing
+
+
+        /// <summary>
+        /// Check if embeddings already exist for this file in ChromaDB
+        /// </summary>
+        private async Task<bool> FileEmbeddingsExistAsync(string filePath, string modelName, string collectionId)
+        {
+            try
+            {
+                var fileName = Path.GetFileName(filePath);
+
+                // Query ChromaDB for any embeddings with this source file
+                var queryData = new
+                {
+                    where = new Dictionary<string, object>
+            {
+                { "source_file", new Dictionary<string, object>
+                    {
+                        { "$eq", filePath }
+                    }
+                }
+            },
+                    limit = 1 // Just check if any exist
+                };
+
+                var response = await _chromaClient.PostAsJsonAsync(
+                    $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/get",
+                    queryData);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    using var doc = JsonDocument.Parse(content);
+
+                    if (doc.RootElement.TryGetProperty("ids", out var idsArray))
+                    {
+                        var hasEmbeddings = idsArray.GetArrayLength() > 0;
+
+                        if (hasEmbeddings)
+                        {
+                            _logger.LogDebug($"✓ Embeddings already exist for {fileName} in collection {collectionId}");
+                        }
+
+                        return hasEmbeddings;
+                    }
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, $"Failed to check existing embeddings for {filePath}");
+                return false; // Assume doesn't exist if check fails
+            }
+        }
         private async Task ProcessFileForModelAsync(string filePath, ModelConfiguration model, string collectionId, string plant)
         {
             try
             {
                 var fileInfo = new FileInfo(filePath);
                 var lastWriteTime = fileInfo.LastWriteTime;
+                var cacheKey = $"{filePath}:{model.Name}";
 
-                // Skip file if processed already and not changed
-                if (processedFilesCache.TryGetValue(filePath, out var cachedWriteTime))
+                // ✅ CHECK 1: In-memory cache
+                if (processedFilesCache.TryGetValue(cacheKey, out var cachedWriteTime))
                 {
                     if (cachedWriteTime >= lastWriteTime)
                     {
-                        _logger.LogInformation($"Skipping unchanged file '{filePath}' for model '{model.Name}'.");
-                        return;
+                        _logger.LogDebug($"✓ [CACHE HIT] Skipping '{Path.GetFileName(filePath)}' for model '{model.Name}'");
+                        return; // ← EARLY EXIT
                     }
                 }
 
-                // 🔧 IMPORTANT: Use proper document processor instead of copy-paste text
+                // ✅ CHECK 2: ChromaDB existence (in case cache was cleared but embeddings exist)
+                var embeddingsExist = await FileEmbeddingsExistAsync(filePath, model.Name, collectionId);
+
+                if (embeddingsExist && cachedWriteTime >= lastWriteTime)
+                {
+                    _logger.LogInformation($"✓ [DB HIT] Embeddings exist for '{Path.GetFileName(filePath)}', skipping reprocessing");
+
+                    // Update cache
+                    processedFilesCache[cacheKey] = lastWriteTime;
+                    return; // ← EARLY EXIT
+                }
+
+                _logger.LogInformation($"📄 Processing NEW/MODIFIED file: {Path.GetFileName(filePath)} for model: {model.Name}");
+
+                // Only delete if we're reprocessing a changed file
+                if (embeddingsExist)
+                {
+                    _logger.LogInformation($"🗑️ Deleting old embeddings for modified file: {Path.GetFileName(filePath)}");
+                    await DeleteFileEmbeddingsAsync(filePath, model.Name, collectionId);
+                }
+
+                _logger.LogInformation($"📄 Extracting text from {Path.GetFileName(filePath)}");
                 var content = await _documentProcessor.ExtractTextAsync(filePath);
 
+                // ✅ VALIDATE EXTRACTED TEXT
                 if (string.IsNullOrWhiteSpace(content))
                 {
-                    _logger.LogWarning($"⚠️ No content extracted from {filePath}");
+                    _logger.LogWarning($"❌ No content extracted from {Path.GetFileName(filePath)}");
                     return;
                 }
 
-                // Log the extraction quality
-                _logger.LogInformation($"📄 Extracted {content.Length} characters from {Path.GetFileName(filePath)}");
+                // ✅ CHECK FOR BINARY/CORRUPTED DATA
+                var replacementCharCount = content.Count(c => c == '\uFFFD');
+                if (replacementCharCount > 10) // Allow some tolerance
+                {
+                    _logger.LogError($"❌ File appears corrupted: {Path.GetFileName(filePath)} " +
+                                  $"contains {replacementCharCount} replacement characters");
+                    return;
+                }
 
-                // Check for section headers in extracted content
+                // ✅ CHECK TEXT QUALITY
+                var alphanumericRatio = content.Count(char.IsLetterOrDigit) / (double)content.Length;
+                if (alphanumericRatio < 0.5) // Less than 50% readable chars
+                {
+                    _logger.LogWarning($"⚠️ Low quality text in {Path.GetFileName(filePath)}: " +
+                                    $"{alphanumericRatio:P0} alphanumeric");
+                }
 
-                var sectionMatches = System.Text.RegularExpressions.Regex.Matches(
-                    content, @"Section\s+\d+", RegexOptions.IgnoreCase);
-                _logger.LogInformation($"🔍 Found {sectionMatches.Count} section headers in extracted content");
-
+                _logger.LogInformation($"✅ Extracted {content.Length} characters from {Path.GetFileName(filePath)}");
 
                 var chunks = _textChunking.ChunkText(content, filePath);
-                await ProcessChunkBatchForModelAsync(chunks, model, collectionId, fileInfo.LastWriteTime, plant);
-                processedFilesCache[filePath] = lastWriteTime;
-                _logger.LogInformation($"Processed and cached file '{filePath}' for model '{model.Name}'.");
+
+                if (string.IsNullOrWhiteSpace(content))
+                {
+                    _logger.LogWarning($"⚠️ No content extracted from {Path.GetFileName(filePath)}");
+                    return;
+                }
+
+
+                if (!chunks.Any())
+                {
+                    _logger.LogWarning($"⚠️ No chunks created from {Path.GetFileName(filePath)}");
+                    return;
+                }
+
+                var successCount = await ProcessChunkBatchForModelAsync(chunks, model, collectionId, fileInfo.LastWriteTime, plant);
+
+                if (successCount > 0)
+                {
+                    processedFilesCache[cacheKey] = lastWriteTime;
+                    _logger.LogInformation($"✅ Successfully processed & CACHED {successCount}/{chunks.Count} chunks from {Path.GetFileName(filePath)}");
+                }
+                else
+                {
+                    _logger.LogError($"❌ Failed to process - NOT caching");
+                    processedFilesCache.TryRemove(cacheKey, out _);
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Failed to process file {filePath} for model {model.Name}");
+                _logger.LogError(ex, $"❌ Failed to process file {filePath}");
+                processedFilesCache.TryRemove($"{filePath}:{model.Name}", out _);
             }
         }
+
+        /// <summary>
+        /// Delete all embeddings for a specific file from ChromaDB
+        /// </summary>
+        private async Task DeleteFileEmbeddingsAsync(string filePath, string modelName, string collectionId)
+        {
+            try
+            {
+                var fileName = Path.GetFileName(filePath);
+                _logger.LogInformation($"🗑️ Deleting old embeddings for: {fileName} (model: {modelName})");
+
+                // ChromaDB delete by metadata filter
+                var deleteRequest = new
+                {
+                    where = new Dictionary<string, object>
+                    {
+                        { "source_file", new Dictionary<string, object>
+                            {
+                                { "$eq", filePath }
+                            }
+                        }
+                    }
+                };
+
+                var response = await _chromaClient.PostAsJsonAsync(
+                    $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/delete",
+                    deleteRequest);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    _logger.LogInformation($"✅ Deleted old embeddings for {fileName}");
+                }
+                else
+                {
+                    var error = await response.Content.ReadAsStringAsync();
+                    _logger.LogWarning($"⚠️ Failed to delete old embeddings: {response.StatusCode} - {error}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, $"Failed to delete old embeddings for {filePath} - continuing anyway");
+                // Don't throw - allow reprocessing to continue even if deletion fails
+            }
+        }
+
 
         private QueryResponse CreateSuccessResponse(
     string answer,
@@ -588,7 +797,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     SessionId = sessionId,
                     Question = question,
                     Answer = answer,
-                    CreatedAt = DateTime.UtcNow,
+                    CreatedAt = DateTime.Now,
                     QuestionEmbedding = questionEmbedding,
                     AnswerEmbedding = answerEmbedding,
                     NamedEntities = namedEntities,
@@ -633,7 +842,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     SessionId = sessionId,
                     Question = question,
                     Answer = answer,
-                    CreatedAt = DateTime.UtcNow,
+                    CreatedAt = DateTime.Now,
                     QuestionEmbedding = questionEmbedding,
                     AnswerEmbedding = answerEmbedding,
                     NamedEntities = namedEntities,
@@ -940,7 +1149,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
                 // OPTIMIZED: Reduced timeout
                 using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(20));
-                var response = await _httpClient.PostAsJsonAsync("/api/chat", requestData, cts.Token);
+                var response = await _ollamaClient.PostAsJsonAsync("/api/chat", requestData, cts.Token);
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -1152,7 +1361,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             {
                 TotalEmbeddings = await GetTotalEmbeddingsAcrossModelsAsync(),
                 TotalCorrections = await GetCorrectionsCountAsync(),
-                LastUpdated = DateTime.UtcNow,
+                LastUpdated = DateTime.Now,
                 IsHealthy = await IsHealthy(),
                 PoliciesFolder = _chromaOptions.PolicyFolder,
                 SupportedExtensions = _chromaOptions.SupportedExtensions.ToList(),
@@ -1333,7 +1542,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             try
             {
                 var chromaHealth = await _chromaClient.GetAsync("/api/v2/heartbeat");
-                var ollamaHealth = await _httpClient.GetAsync("/api/tags");
+                var ollamaHealth = await _ollamaClient.GetAsync("/api/tags");
                 return chromaHealth.IsSuccessStatusCode && ollamaHealth.IsSuccessStatusCode;
             }
             catch
@@ -1342,14 +1551,22 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             }
         }
         private async Task<bool> AddToChromaDBAsync(
-            string collectionId,
-            List<string> ids,
-            List<List<float>> embeddings,
-            List<string> documents,
-            List<Dictionary<string, object>> metadatas)
+    string collectionId,
+    List<string> ids,
+    List<List<float>> embeddings,
+    List<string> documents,
+    List<Dictionary<string, object>> metadatas)
         {
             try
             {
+                if (!ids.Any())
+                {
+                    _logger.LogWarning("AddToChromaDBAsync called with empty ids list");
+                    return false;
+                }
+
+                _logger.LogInformation($"💾 Adding {ids.Count} documents to ChromaDB collection: {collectionId}");
+
                 var addData = new
                 {
                     ids,
@@ -1362,14 +1579,27 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/add",
                     addData);
 
-                return response.IsSuccessStatusCode;
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    _logger.LogError($"❌ ChromaDB add failed: {response.StatusCode}");
+                    _logger.LogError($"Error details: {errorContent}");
+                    _logger.LogError($"Collection: {collectionId}, Documents: {ids.Count}");
+                    return false;
+                }
+
+                var responseContent = await response.Content.ReadAsStringAsync();
+                _logger.LogInformation($"✅ ChromaDB response: {responseContent}");
+
+                return true;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to add to ChromaDB");
+                _logger.LogError(ex, $"❌ Failed to add to ChromaDB collection: {collectionId}");
                 return false;
             }
         }
+
         // Implement other required interface methods...
         public async Task SaveCorrectionAsync(string question, string correctAnswer, string model)
         {
@@ -1382,7 +1612,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 Answer = correctAnswer,
                 Embedding = embedding,
                 Model = model,
-                Date = DateTime.UtcNow
+                Date = DateTime.Now
             };
 
             lock (_lockObject)
@@ -1577,7 +1807,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 model = modelName ?? _config.DefaultGenerationModel,
                 messages,
                 temperature = 0.7,
-                stream = false,
+                stream = true,
                 options = new Dictionary<string, object>
         {
             { "num_ctx", 4096 }, // Reduced context for faster processing
@@ -1587,7 +1817,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
             try
             {
-                var response = await _httpClient.PostAsJsonAsync("/api/chat", requestData);
+                var response = await _ollamaClient.PostAsJsonAsync("/api/chat", requestData);
                 response.EnsureSuccessStatusCode();
 
                 var json = await response.Content.ReadAsStringAsync();
@@ -1640,7 +1870,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     SessionId = sessionId,
                     Question = question,
                     Answer = answer,
-                    CreatedAt = DateTime.UtcNow,
+                    CreatedAt = DateTime.Now,
                     QuestionEmbedding = new List<float>(), // Empty for non-MEAI
                     AnswerEmbedding = new List<float>(),   // Empty for non-MEAI
                     NamedEntities = new List<string>(),    // Skip entity extraction for speed
@@ -1827,85 +2057,223 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 return new NonMeaiConversationStats();
             }
         }
-        private async Task ProcessChunkBatchForModelAsync(List<(string Text, string SourceFile, string SectionId, string Title)> chunks, ModelConfiguration model, string collectionId, DateTime lastModified, string plant)
+
+        private async Task<int> ProcessChunkBatchForModelAsync(
+    List<(string Text, string SourceFile, string SectionId, string Title)> chunks,
+    ModelConfiguration model,
+    string collectionId,
+    DateTime lastModified,
+    string plant)
         {
             try
             {
-                // Filter and prepare chunks in parallel
+                _logger.LogInformation($"🔄 Processing batch of {chunks.Count} chunks for model {model.Name}");
+
+                // Filter and prepare chunks
                 var validChunks = chunks
                     .Where(chunk => !string.IsNullOrWhiteSpace(chunk.Text))
                     .Select(chunk => new
                     {
                         Text = _stringProcessor.CleanText(chunk.Text),
                         SourceFile = chunk.SourceFile,
-                        ChunkId = GenerateChunkId(chunk.SourceFile, chunk.Text, lastModified, model.Name)
+                        ChunkId = GenerateChunkId(chunk.SourceFile, chunk.Text, lastModified, model.Name),
+                        SectionId = chunk.SectionId,
+                        Title = chunk.Title
                     })
-                    .Where(chunk => !string.IsNullOrWhiteSpace(chunk.Text))
+                    .Where(chunk => !string.IsNullOrWhiteSpace(chunk.Text) && chunk.Text.Length >= 20)
                     .ToList();
 
-                if (!validChunks.Any()) return;
+                if (!validChunks.Any())
+                {
+                    _logger.LogWarning($"⚠️ No valid chunks after filtering");
+                    return 0;
+                }
 
-                // 🔧 DEBUG: Log problematic chunks
-                _logger.LogInformation($"🔄 Processing {validChunks.Count} chunks for model {model.Name}");
+                _logger.LogInformation($"✓ {validChunks.Count} valid chunks after filtering");
 
-                // Check which chunks already exist (batch check)
+                // Check existing chunks
                 var existingChunks = await CheckExistingChunksAsync(collectionId, validChunks.Select(c => c.ChunkId).ToList());
                 var newChunks = validChunks.Where(c => !existingChunks.Contains(c.ChunkId)).ToList();
 
                 if (!newChunks.Any())
                 {
-                    _logger.LogDebug($"All chunks already exist for {model.Name}");
-                    return;
+                    _logger.LogInformation($"✓ All {validChunks.Count} chunks already exist in collection");
+                    return validChunks.Count; // Return success
                 }
 
                 _logger.LogInformation($"📝 Generating embeddings for {newChunks.Count} new chunks");
 
-                // 🔧 Process chunks individually to identify problematic ones
-                var successfulChunks = new List<(string Text, string ChunkId, List<float> Embedding)>();
+                // Process chunks with detailed error tracking
+                var successfulChunks = new List<(string Text, string ChunkId, List<float> Embedding, string SourceFile, string SectionId, string Title)>();
+                var failedChunks = new List<(string ChunkId, string Error)>();
 
                 for (int i = 0; i < newChunks.Count; i++)
                 {
+                    var chunk = newChunks[i];
                     try
                     {
-                        _logger.LogDebug($"🔤 Processing chunk {i + 1}/{newChunks.Count}: {newChunks[i].ChunkId}");
-                        var embedding = await GetEmbeddingAsync(newChunks[i].Text, model);
+                        _logger.LogDebug($"🔤 [{i + 1}/{newChunks.Count}] Generating embedding for chunk: {chunk.ChunkId}");
 
-                        if (embedding.Count > 0)
+                        var embedding = await GetEmbeddingAsync(chunk.Text, model);
+
+                        if (embedding == null || embedding.Count == 0)
                         {
-                            successfulChunks.Add((newChunks[i].Text, newChunks[i].ChunkId, embedding));
+                            var error = $"Empty embedding returned";
+                            _logger.LogWarning($"⚠️ {error} for chunk: {chunk.ChunkId}");
+                            _logger.LogWarning($"Text preview: {chunk.Text.Substring(0, Math.Min(200, chunk.Text.Length))}");
+                            failedChunks.Add((chunk.ChunkId, error));
+                            continue;
                         }
-                        else
+
+                        if (embedding.Count != model.EmbeddingDimension)
                         {
-                            _logger.LogWarning($"⚠️ Failed to generate embedding for chunk: {newChunks[i].ChunkId}");
-                            _logger.LogWarning($"⚠️ Problematic text preview: {newChunks[i].Text.Substring(0, Math.Min(100, newChunks[i].Text.Length))}");
+                            var error = $"Embedding dimension mismatch: got {embedding.Count}, expected {model.EmbeddingDimension}";
+                            _logger.LogError($"❌ {error}");
+                            failedChunks.Add((chunk.ChunkId, error));
+                            continue;
                         }
+
+                        successfulChunks.Add((chunk.Text, chunk.ChunkId, embedding, chunk.SourceFile, chunk.SectionId, chunk.Title));
+                        _logger.LogDebug($"✓ Successfully generated embedding {i + 1}/{newChunks.Count}");
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, $"❌ Failed to process individual chunk: {newChunks[i].ChunkId}");
-                        _logger.LogError($"❌ Problematic text: {newChunks[i].Text.Substring(0, Math.Min(200, newChunks[i].Text.Length))}");
+                        _logger.LogError(ex, $"❌ Failed to generate embedding for chunk {i + 1}/{newChunks.Count}: {chunk.ChunkId}");
+                        _logger.LogError($"Problematic text: {chunk.Text.Substring(0, Math.Min(200, chunk.Text.Length))}");
+                        failedChunks.Add((chunk.ChunkId, ex.Message));
+                    }
+
+                    // Add small delay to avoid overwhelming the API
+                    if (i < newChunks.Count - 1)
+                    {
+                        await Task.Delay(50);
                     }
                 }
 
-                if (successfulChunks.Any())
-                {
-                    // Prepare data for ChromaDB
-                    var documents = successfulChunks.Select(c => c.Text).ToList();
-                    var ids = successfulChunks.Select(c => c.ChunkId).ToList();
-                    var embeddings = successfulChunks.Select(c => c.Embedding).ToList();
-                    var metadatas = successfulChunks.Select(c =>
-                        CreateChunkMetadata(newChunks.First(nc => nc.ChunkId == c.ChunkId).SourceFile,
-                                          lastModified, model.Name, c.Text, plant)).ToList();
+                // Log summary
+                _logger.LogInformation($"📊 Embedding generation complete: {successfulChunks.Count} succeeded, {failedChunks.Count} failed");
 
-                    await AddToChromaDBAsync(collectionId, ids, embeddings, documents, metadatas);
-                    _logger.LogInformation($"✅ Added {successfulChunks.Count} new chunks for model {model.Name}");
+                if (failedChunks.Any())
+                {
+                    _logger.LogWarning($"⚠️ Failed chunks: {string.Join(", ", failedChunks.Select(f => f.ChunkId))}");
+                }
+
+                if (!successfulChunks.Any())
+                {
+                    _logger.LogError($"❌ No embeddings generated successfully - cannot save to ChromaDB");
+                    return 0;
+                }
+
+                // Prepare data for ChromaDB
+                var documents = successfulChunks.Select(c => c.Text).ToList();
+                var ids = successfulChunks.Select(c => c.ChunkId).ToList();
+                var embeddings = successfulChunks.Select(c => c.Embedding).ToList();
+                var metadatas = successfulChunks.Select(c =>
+                    CreateChunkMetadata(c.SourceFile, lastModified, model.Name, c.Text, plant, c.SectionId, c.Title)).ToList();
+
+                _logger.LogInformation($"💾 Saving {successfulChunks.Count} chunks to ChromaDB collection: {collectionId}");
+
+                // Save to ChromaDB with error handling
+                var saveSuccess = await AddToChromaDBAsync(collectionId, ids, embeddings, documents, metadatas);
+
+                if (saveSuccess)
+                {
+                    _logger.LogInformation($"✅ Successfully saved {successfulChunks.Count} chunks to ChromaDB");
+                    return successfulChunks.Count;
+                }
+                else
+                {
+                    _logger.LogError($"❌ Failed to save chunks to ChromaDB");
+                    return 0;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Failed to process chunk batch for model {model.Name}");
+                _logger.LogError(ex, $"❌ Failed to process chunk batch for model {model.Name}");
+                return 0;
             }
         }
+
+
+        //private async Task ProcessChunkBatchForModelAsync(List<(string Text, string SourceFile, string SectionId, string Title)> chunks, ModelConfiguration model, string collectionId, DateTime lastModified, string plant)
+        //{
+        //    try
+        //    {
+        //        // Filter and prepare chunks in parallel
+        //        var validChunks = chunks
+        //            .Where(chunk => !string.IsNullOrWhiteSpace(chunk.Text))
+        //            .Select(chunk => new
+        //            {
+        //                Text = _stringProcessor.CleanText(chunk.Text),
+        //                SourceFile = chunk.SourceFile,
+        //                ChunkId = GenerateChunkId(chunk.SourceFile, chunk.Text, lastModified, model.Name)
+        //            })
+        //            .Where(chunk => !string.IsNullOrWhiteSpace(chunk.Text))
+        //            .ToList();
+
+        //        if (!validChunks.Any()) return;
+
+        //        // 🔧 DEBUG: Log problematic chunks
+        //        _logger.LogInformation($"🔄 Processing {validChunks.Count} chunks for model {model.Name}");
+
+        //        // Check which chunks already exist (batch check)
+        //        var existingChunks = await CheckExistingChunksAsync(collectionId, validChunks.Select(c => c.ChunkId).ToList());
+        //        var newChunks = validChunks.Where(c => !existingChunks.Contains(c.ChunkId)).ToList();
+
+        //        if (!newChunks.Any())
+        //        {
+        //            _logger.LogDebug($"All chunks already exist for {model.Name}");
+        //            return;
+        //        }
+
+        //        _logger.LogInformation($"📝 Generating embeddings for {newChunks.Count} new chunks");
+
+        //        // 🔧 Process chunks individually to identify problematic ones
+        //        var successfulChunks = new List<(string Text, string ChunkId, List<float> Embedding)>();
+
+        //        for (int i = 0; i < newChunks.Count; i++)
+        //        {
+        //            try
+        //            {
+        //                _logger.LogDebug($"🔤 Processing chunk {i + 1}/{newChunks.Count}: {newChunks[i].ChunkId}");
+        //                var embedding = await GetEmbeddingAsync(newChunks[i].Text, model);
+
+        //                if (embedding.Count > 0)
+        //                {
+        //                    successfulChunks.Add((newChunks[i].Text, newChunks[i].ChunkId, embedding));
+        //                }
+        //                else
+        //                {
+        //                    _logger.LogWarning($"⚠️ Failed to generate embedding for chunk: {newChunks[i].ChunkId}");
+        //                    _logger.LogWarning($"⚠️ Problematic text preview: {newChunks[i].Text.Substring(0, Math.Min(100, newChunks[i].Text.Length))}");
+        //                }
+        //            }
+        //            catch (Exception ex)
+        //            {
+        //                _logger.LogError(ex, $"❌ Failed to process individual chunk: {newChunks[i].ChunkId}");
+        //                _logger.LogError($"❌ Problematic text: {newChunks[i].Text.Substring(0, Math.Min(200, newChunks[i].Text.Length))}");
+        //            }
+        //        }
+
+        //        if (successfulChunks.Any())
+        //        {
+        //            // Prepare data for ChromaDB
+        //            var documents = successfulChunks.Select(c => c.Text).ToList();
+        //            var ids = successfulChunks.Select(c => c.ChunkId).ToList();
+        //            var embeddings = successfulChunks.Select(c => c.Embedding).ToList();
+        //            var metadatas = successfulChunks.Select(c =>
+        //                CreateChunkMetadata(newChunks.First(nc => nc.ChunkId == c.ChunkId).SourceFile,
+        //                                  lastModified, model.Name, c.Text, plant)).ToList();
+
+        //            await AddToChromaDBAsync(collectionId, ids, embeddings, documents, metadatas);
+        //            _logger.LogInformation($"✅ Added {successfulChunks.Count} new chunks for model {model.Name}");
+        //        }
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        _logger.LogError(ex, $"Failed to process chunk batch for model {model.Name}");
+        //    }
+        //}
         private async Task<HashSet<string>> CheckExistingChunksAsync(string collectionId, List<string> chunkIds)
         {
             try
@@ -2115,7 +2483,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             {
                 Question = question,
                 Plant = plant,
-                Timestamp = DateTime.UtcNow
+                Timestamp = DateTime.Now
             };
 
             try
@@ -2704,35 +3072,253 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
         private bool isInitialized = false;
         private readonly object initLock = new object();
-
+        // Add these fields to your class
+        private readonly ConcurrentDictionary<string, bool> _plantInitialized = new();
+        private readonly ConcurrentDictionary<string, DateTime> _plantLastScan = new();
+        private bool _systemInitialized = false;
+        private readonly object _systemInitLock = new();
         public async Task InitializeAsync()
         {
-            if (isInitialized) return;
-
-            lock (initLock)
+            // ✅ Check if system is already initialized
+            lock (_systemInitLock)
             {
-                if (isInitialized) return;
-                isInitialized = true;
+                if (_systemInitialized)
+                {
+                    _logger.LogInformation("✓ System already initialized, skipping full initialization");
+                    return;
+                }
             }
 
-            _logger.LogInformation("Starting DynamicRagService Initialization...");
-
-            var models = await _modelManager.DiscoverAvailableModelsAsync();
-            var embeddingModels = models.Where(m => m.Type == "embedding" || m.Type == "both").ToList();
-
-            // Process documents for each plant configuration in parallel
-            var plantTasks = _plants.Plants.Keys.Select(async plant =>
+            try
             {
-                await ProcessDocumentsForAllModelsAsync(embeddingModels, plant);
-            });
+                _logger.LogInformation("🚀 Starting RAG system initialization");
 
-            await Task.WhenAll(plantTasks);
+                // Parallel model discovery and configuration
+                var initTasks = new List<Task>
+        {
+            Task.Run(async () =>
+            {
+                var availableModels = await _modelManager.DiscoverAvailableModelsAsync();
+                await ConfigureDefaultModelsAsync(availableModels);
+                return availableModels;
+            }),
+            Task.Run(() => EnsureDirectoriesExist()),
+            Task.Run(() => EnsureAbbreviationContext()),
+            Task.Run(() => EnsurePlantSpecificOrganizationContext()),
+            Task.Run(async () => await LoadCorrectionCacheAsync()),
+            Task.Run(async () => await LoadHistoricalAppreciatedAnswersAsync())
+        };
+
+                await Task.WhenAll(initTasks);
+
+                // ✅ ONLY process plants that haven't been initialized
+                var models = await _modelManager.DiscoverAvailableModelsAsync();
+                var embeddingModels = models.Where(m => m.Type == "embedding" || m.Type == "both").ToList();
+
+                var plantTasks = _plants.Plants.Keys.Select(async plant =>
+                {
+                    // Check if this plant was already initialized
+                    if (_plantInitialized.TryGetValue(plant, out var initialized) && initialized)
+                    {
+                        _logger.LogInformation($"✓ Plant '{plant}' already initialized, checking for changes only");
+                        await CheckForChangedFilesAsync(plant, embeddingModels);
+                        return;
+                    }
+
+                    _logger.LogInformation($"📄 Processing documents for NEW plant: {plant}");
+                    await ProcessDocumentsForAllModelsAsync(embeddingModels, plant);
+                    _plantInitialized[plant] = true;
+                    _plantLastScan[plant] = DateTime.Now;
+                });
+
+                await Task.WhenAll(plantTasks);
+
+                lock (_systemInitLock)
+                {
+                    _systemInitialized = true;
+                }
+
+                _logger.LogInformation("✅ RAG system initialization completed");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Failed to initialize RAG system");
+                throw;
+            }
         }
 
+        /// ✅ NEW: Only check and process files that have changed
+        /// </summary>
+        private async Task CheckForChangedFilesAsync(string plant, List<ModelConfiguration> embeddingModels)
+        {
+            try
+            {
+                var policyFiles = GetPolicyFiles(plant);
+                var changedFiles = new List<string>();
+
+                // Check which files have changed since last scan
+                foreach (var filePath in policyFiles)
+                {
+                    var fileInfo = new FileInfo(filePath);
+                    var lastModified = fileInfo.LastWriteTime;
+
+                    // Check if file was modified after last scan
+                    if (_plantLastScan.TryGetValue(plant, out var lastScan))
+                    {
+                        if (lastModified > lastScan)
+                        {
+                            changedFiles.Add(filePath);
+                            _logger.LogInformation($"🔄 Detected change: {Path.GetFileName(filePath)}");
+                        }
+                    }
+                    else
+                    {
+                        // No previous scan, add file
+                        changedFiles.Add(filePath);
+                    }
+                }
+
+                if (!changedFiles.Any())
+                {
+                    _logger.LogInformation($"✓ No changes detected for plant '{plant}'");
+                    return;
+                }
+
+                _logger.LogInformation($"📝 Processing {changedFiles.Count} changed files for plant '{plant}'");
+
+                // Only process changed files
+                foreach (var model in embeddingModels)
+                {
+                    var collectionId = await _collectionManager.GetOrCreateCollectionAsync(model);
+
+                    foreach (var filePath in changedFiles)
+                    {
+                        await ProcessFileForModelAsync(filePath, model, collectionId, plant);
+                    }
+                }
+
+                // Update last scan time
+                _plantLastScan[plant] = DateTime.Now;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to check for changed files in plant: {plant}");
+            }
+        }
+
+        public async Task ReinitializePlantAsync(string plant)
+        {
+            try
+            {
+                _logger.LogInformation($"🔄 Force reinitializing plant: {plant}");
+
+                // Clear plant initialization flag
+                _plantInitialized.TryRemove(plant, out _);
+                _plantLastScan.TryRemove(plant, out _);
+
+                // Clear all file caches for this plant
+                var policyFiles = GetPolicyFiles(plant);
+                foreach (var file in policyFiles)
+                {
+                    await ClearFileCacheAsync(file);
+                }
+
+                // Reprocess
+                var models = await _modelManager.DiscoverAvailableModelsAsync();
+                var embeddingModels = models.Where(m => m.Type == "embedding" || m.Type == "both").ToList();
+
+                await ProcessDocumentsForAllModelsAsync(embeddingModels, plant);
+
+                _plantInitialized[plant] = true;
+                _plantLastScan[plant] = DateTime.Now;
+
+                _logger.LogInformation($"✅ Plant reinitialized: {plant}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to reinitialize plant: {plant}");
+                throw;
+            }
+        }
+
+        public async Task LoadCachesOnlyAsync()
+        {
+            try
+            {
+                _logger.LogInformation("📂 Loading caches without reprocessing files");
+
+                // Load essential caches
+                await Task.WhenAll(
+                    LoadCorrectionCacheAsync(),
+                    LoadHistoricalAppreciatedAnswersAsync()
+                );
+
+                // Mark system as initialized (prevents full init)
+                lock (_systemInitLock)
+                {
+                    _systemInitialized = true;
+                }
+
+                // Mark all configured plants as initialized
+                foreach (var plant in _plants.Plants.Keys)
+                {
+                    _plantInitialized[plant] = true;
+                }
+
+                _logger.LogInformation($"✅ Caches loaded - {processedFilesCache.Count} files in cache");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to load caches");
+                throw;
+            }
+        }
+
+        public async Task ReprocessFileAsync(string filePath, string plant)
+        {
+            try
+            {
+                if (!File.Exists(filePath))
+                {
+                    throw new FileNotFoundException($"File not found: {filePath}");
+                }
+
+                _logger.LogInformation($"🔄 Force reprocessing file: {filePath}");
+
+                // Clear cache for this file
+                await ClearFileCacheAsync(filePath);
+
+                // Process with all embedding models
+                var models = await _modelManager.DiscoverAvailableModelsAsync();
+                var embeddingModels = models.Where(m => m.Type == "embedding" || m.Type == "both").ToList();
+
+                foreach (var model in embeddingModels)
+                {
+                    var collectionId = await _collectionManager.GetOrCreateCollectionAsync(model);
+                    await ProcessFileForModelAsync(filePath, model, collectionId, plant);
+                }
+
+                _logger.LogInformation($"✅ File reprocessed successfully: {filePath}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to reprocess file: {filePath}");
+                throw;
+            }
+        }
         private async Task<List<float>> GetEmbeddingAsync(string text, ModelConfiguration model)
         {
             if (string.IsNullOrWhiteSpace(text))
+            {
+                _logger.LogWarning("GetEmbeddingAsync called with empty text");
                 return new List<float>();
+            }
+
+            if (model == null)
+            {
+                _logger.LogError("GetEmbeddingAsync called with null model");
+                return new List<float>();
+            }
 
             var cacheKey = $"{model.Name}:{text.GetHashCode():X}";
 
@@ -2741,66 +3327,228 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             {
                 if (DateTime.Now - cached.Cached < TimeSpan.FromHours(24))
                 {
-                    cached.AccessCount++;
+                    _logger.LogDebug($"✓ Cache hit for embedding");
+                    _optimizedEmbeddingCache[cacheKey] = (cached.Embedding, cached.Cached, cached.AccessCount + 1);
                     return cached.Embedding;
                 }
             }
 
-            // Use semaphore to limit concurrent embedding requests
             await _globalEmbeddingSemaphore.WaitAsync();
             try
             {
-                var processedText = _stringProcessor.CleanTextForEmbedding(text, model);
+                // ✅ CRITICAL FIX: Aggressively clean ALL model control tokens
+                var processedText = StripAllModelTokens(text);
 
+                if (string.IsNullOrWhiteSpace(processedText) || processedText.Length < 3)
+                {
+                    _logger.LogError($"❌ Text too short after cleaning: '{processedText}'");
+                    return new List<float>();
+                }
+
+                // ✅ Limit text length (important for preventing token issues)
+                if (processedText.Length > 2000)
+                {
+                    processedText = processedText.Substring(0, 2000).Trim();
+                    _logger.LogDebug($"⚠️ Text truncated to 2000 chars");
+                }
+
+                _logger.LogDebug($"🔄 Generating embedding for text ({processedText.Length} chars)");
+
+                // ✅ Use the SIMPLEST request format possible
                 var request = new
                 {
-                    model = model.Name, // ✅ Use the embedding model specifically
-                    prompt = processedText,
-                    options = new
-                    {
-                        num_ctx = 1024,
-                        temperature = 0
-                    }
+                    model = model.Name,
+                    prompt = processedText,  // Keep "prompt" - it's standard across Ollama versions
+                    options = new Dictionary<string, object>() // Empty options to avoid conflicts
                 };
 
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                var response = await _httpClient.PostAsJsonAsync("/api/embeddings", request, cts.Token);
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+                var response = await _ollamaClient.PostAsJsonAsync("/api/embeddings", request, cts.Token);
 
                 if (!response.IsSuccessStatusCode)
                 {
                     var errorContent = await response.Content.ReadAsStringAsync();
-                    _logger.LogError($"❌ Embedding request failed: {response.StatusCode} - {errorContent}");
+                    _logger.LogError($"❌ Embedding request failed: {response.StatusCode}");
+                    _logger.LogError($"Error: {errorContent}");
+                    _logger.LogError($"Model: {model.Name}, Text preview: {processedText.Substring(0, Math.Min(100, processedText.Length))}");
                     return new List<float>();
                 }
 
                 var json = await response.Content.ReadAsStringAsync();
-                using var doc = JsonDocument.Parse(json);
 
-                if (!doc.RootElement.TryGetProperty("embedding", out var embeddingProperty))
+                if (string.IsNullOrWhiteSpace(json))
                 {
-                    _logger.LogError($"❌ No embedding property in response for model {model.Name}");
+                    _logger.LogError($"❌ Empty response from embedding API");
                     return new List<float>();
                 }
 
-                var embedding = embeddingProperty.EnumerateArray()
-                    .Select(x => x.GetSingle())
-                    .ToList();
+                // ✅ Parse response
+                using var doc = JsonDocument.Parse(json);
 
-                // Cache the result
-                _optimizedEmbeddingCache.TryAdd(cacheKey, (embedding, DateTime.UtcNow, 1));
+                // Try standard format
+                if (doc.RootElement.TryGetProperty("embedding", out var embeddingProperty))
+                {
+                    var embedding = embeddingProperty.EnumerateArray()
+                        .Select(x => x.GetSingle())
+                        .ToList();
 
-                return embedding;
+                    if (embedding.Count > 0)
+                    {
+                        // Verify dimension matches
+                        if (model.EmbeddingDimension > 0 && embedding.Count != model.EmbeddingDimension)
+                        {
+                            _logger.LogWarning($"⚠️ Dimension mismatch: got {embedding.Count}, expected {model.EmbeddingDimension}");
+                        }
+
+                        _optimizedEmbeddingCache.TryAdd(cacheKey, (embedding, DateTime.Now, 1));
+                        _logger.LogDebug($"✓ Embedding generated: {embedding.Count}D");
+                        return embedding;
+                    }
+                }
+
+                _logger.LogError($"❌ No embedding in response. JSON: {json.Substring(0, Math.Min(200, json.Length))}");
+                return new List<float>();
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogError($"❌ Embedding timeout for model: {model.Name}");
+                return new List<float>();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"❌ Embedding failed for model: {model.Name}");
+                return new List<float>();
             }
             finally
             {
                 _globalEmbeddingSemaphore.Release();
             }
         }
+
+        private string StripAllModelTokens(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return "";
+
+            var cleaned = text;
+
+            // ✅ 1. Remove ALL special token patterns (exhaustive list)
+            var specialTokenPatterns = new[]
+            {
+        // LLaMA/Mistral tokens
+        @"<\|im_start\|>", @"<\|im_end\|>", @"<\|im_sep\|>",
+        @"<\|endoftext\|>", @"<\|startoftext\|>",
+        
+        // Instruction format tokens
+        @"\[INST\]", @"\[/INST\]",
+        @"<<SYS>>", @"<</SYS>>",
+        
+        // Generic model tokens
+        @"<s>", @"</s>",
+        @"<\|user\|>", @"<\|assistant\|>", @"<\|system\|>",
+        @"<assistant>", @"</assistant>",
+        @"<user>", @"</user>",
+        @"<system>", @"</system>",
+        
+        // Chat-ML tokens
+        @"<\|begin_of_text\|>", @"<\|end_of_text\|>",
+        @"<\|start_header_id\|>", @"<\|end_header_id\|>",
+        
+        // Other potential tokens
+        @"<\|pad\|>", @"<\|eos\|>", @"<\|bos\|>",
+        
+        // Remove any remaining angle bracket tokens
+        @"<\|[^>]+\|>"
+    };
+
+            foreach (var pattern in specialTokenPatterns)
+            {
+                cleaned = Regex.Replace(cleaned, pattern, " ", RegexOptions.IgnoreCase);
+            }
+
+            // ✅ 2. Remove markdown code blocks (can contain tokens)
+            cleaned = Regex.Replace(cleaned, @"```[\w]*\n?", "", RegexOptions.Multiline);
+            cleaned = cleaned.Replace("```", "");
+
+            // ✅ 3. Remove common instruction prefixes that might trigger token detection
+            var instructionPrefixes = new[]
+            {
+        "### Instruction:", "### Response:", "### System:",
+        "Human:", "Assistant:", "AI:",
+        "Question:", "Answer:"
+    };
+
+            foreach (var prefix in instructionPrefixes)
+            {
+                cleaned = cleaned.Replace(prefix, "", StringComparison.OrdinalIgnoreCase);
+            }
+
+            // ✅ 4. Normalize whitespace
+            cleaned = Regex.Replace(cleaned, @"\s+", " ");
+            cleaned = Regex.Replace(cleaned, @"\n\s*\n", "\n");
+
+            // ✅ 5. Remove control characters (except newline and tab)
+            cleaned = Regex.Replace(cleaned, @"[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]", "");
+
+            // ✅ 6. Remove any remaining suspicious patterns
+            // Remove HTML-like tags that might be interpreted as tokens
+            cleaned = Regex.Replace(cleaned, @"</?[a-zA-Z][^>]*>", " ");
+
+            // ✅ 7. Final cleanup
+            cleaned = cleaned.Trim();
+
+            // ✅ 8. Ensure text is plain and safe
+            if (cleaned.Contains("<|") || cleaned.Contains("|>") ||
+                cleaned.Contains("[INST]") || cleaned.Contains("<<"))
+            {
+                _logger.LogWarning($"⚠️ Text still contains suspicious tokens after cleaning!");
+                _logger.LogWarning($"Text preview: {cleaned.Substring(0, Math.Min(200, cleaned.Length))}");
+            }
+
+            return cleaned;
+        }
+
+        private string StripAllModelTokensAggressive(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return "";
+
+            // ✅ NUCLEAR OPTION: Only keep safe characters
+            var result = new StringBuilder(text.Length);
+
+            foreach (char c in text)
+            {
+                // Keep alphanumeric, whitespace, and common punctuation
+                if (char.IsLetterOrDigit(c) ||
+                    char.IsWhiteSpace(c) ||
+                    c == '.' || c == ',' || c == '!' || c == '?' ||
+                    c == ';' || c == ':' || c == '-' || c == '(' ||
+                    c == ')' || c == '\'' || c == '"' || c == '/')
+                {
+                    result.Append(c);
+                }
+                else
+                {
+                    result.Append(' '); // Replace unsafe chars with space
+                }
+            }
+
+            var cleaned = result.ToString();
+
+            // Remove excessive whitespace
+            cleaned = Regex.Replace(cleaned, @"\s+", " ");
+
+            return cleaned.Trim();
+        }
+
+        /// Fallback method using old /api/embeddings endpoint
+        /// </summary>
+
         private void CleanupEmbeddingCache(object state)
         {
             try
             {
-                var cutoff = DateTime.UtcNow.AddHours(-12);
+                var cutoff = DateTime.Now.AddHours(-12);
                 var itemsToRemove = _optimizedEmbeddingCache
                     .Where(kvp => kvp.Value.Cached < cutoff || kvp.Value.AccessCount < 2) // LFU + time-based
                     .Select(kvp => kvp.Key)
@@ -2863,9 +3611,56 @@ These abbreviations are standard across all MEAI HR policies and should be inter
     [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             StreamChunk? errorChunk = null;
-
-
             var stopwatch = Stopwatch.StartNew();
+            yield return new StreamChunk { Type = "status", Content = "Processing query..." };
+
+            var sessionResult = await SafeInitializeSession(sessionId);
+            if (sessionResult.HasError)
+            {
+                yield return new StreamChunk { Type = "error", Content = sessionResult.ErrorMessage };
+                yield break;
+            }
+
+            var context = sessionResult.Context!;
+
+            QuestionType questionType = QuestionType.NewTopic;
+
+            if (context.History.Any())
+            {
+                questionType = ClassifyQuestionType(question, context);
+
+                // Provide feedback to user
+                switch (questionType)
+                {
+                    case QuestionType.FollowUp:
+                        yield return new StreamChunk
+                        {
+                            Type = "status",
+                            Content = "Continuing previous conversation..."
+                        };
+                        _logger.LogInformation($"Follow-up detected: '{question}'");
+                        break;
+
+                    case QuestionType.RelatedTopic:
+                        yield return new StreamChunk
+                        {
+                            Type = "status",
+                            Content = "Related question detected, adjusting context..."
+                        };
+                        _logger.LogInformation($"Related topic: '{question}'");
+                        break;
+
+                    case QuestionType.NewTopic:
+                        yield return new StreamChunk
+                        {
+                            Type = "status",
+                            Content = "New topic detected, starting fresh..."
+                        };
+                        _logger.LogInformation($"New topic: '{question}'");
+                        ClearContext(context); // ✅ Clear old context
+                        break;
+                }
+            }
 
             // Early validation
             if (string.IsNullOrWhiteSpace(question))
@@ -2877,22 +3672,36 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             if (cancellationToken.IsCancellationRequested)
                 yield break;
 
+            // ✅ NEW: Expand abbreviations early in the pipeline
+            yield return new StreamChunk { Type = "status", Content = "Processing query..." };
+
+            var originalQuestion = question;
+            var expandedQuestion = _abbreviationService.ExpandQuery(question);
+
+            if (expandedQuestion != originalQuestion)
+            {
+                _logger.LogInformation($"🔄 Query expanded: '{originalQuestion}' → '{expandedQuestion}'");
+                yield return new StreamChunk
+                {
+                    Type = "info",
+                    Content = $"Interpreting abbreviations in your query..."
+                };
+
+                // Use expanded question for the rest of processing
+                question = expandedQuestion;
+            }
+
             // Set defaults
             generationModel ??= _config.DefaultGenerationModel;
             embeddingModel ??= _config.DefaultEmbeddingModel;
 
             yield return new StreamChunk { Type = "status", Content = "Initializing session..." };
 
-            // Get session - handle errors safely
-            var sessionResult = await SafeInitializeSession(sessionId);
             if (sessionResult.HasError)
             {
                 yield return new StreamChunk { Type = "error", Content = sessionResult.ErrorMessage };
                 yield break;
             }
-
-            var dbSession = sessionResult.Session;
-            var context = sessionResult.Context;
 
             if (cancellationToken.IsCancellationRequested) yield break;
 
@@ -2985,7 +3794,15 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             // Search for relevant information
             yield return new StreamChunk { Type = "status", Content = "Searching knowledge base..." };
 
-            var searchResult = await SafeSearchKnowledgeBase(contextualQuery, embModel, maxResults, plant, question);
+            var searchResult = await SafeSearchKnowledgeBaseWithExpansion(
+        originalQuestion,      // Keep original for context
+        expandedQuestion,      // Use expanded for better retrieval
+        contextualQuery,
+        embModel,
+        maxResults,
+        plant,
+        useReRanking
+    );
             if (searchResult.HasError)
             {
                 yield return new StreamChunk { Type = "error", Content = "Failed to search knowledge base" };
@@ -3024,6 +3841,16 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
             yield return new StreamChunk { Type = "status", Content = "Generating response..." };
 
+            List<float> questionEmbedding = new List<float>();
+            try
+            {
+                questionEmbedding = await GetEmbeddingAsync(question, embModel);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to generate question embedding");
+            }
+
             // Generate the actual response with streaming
             var fullResponse = new StringBuilder();
             var hasError = false;
@@ -3037,6 +3864,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 relevantChunks,
                 meaiInfo,
                 plant,
+                questionType,
                 cancellationToken))
             {
                 if (cancellationToken.IsCancellationRequested)
@@ -3058,6 +3886,71 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     Content = token
                 };
             }
+
+            if (!hasError && fullResponse.Length > 0)
+            {
+                try
+                {
+                    _logger.LogInformation($"💾 Saving conversation to database...");
+
+                    // ✅ Extract entities from the answer
+                    var entities = await _entityExtraction.ExtractEntitiesAsync(fullResponse.ToString());
+
+                    // ✅ Optionally generate answer embedding (can be null if you want to skip)
+                    List<float>? answerEmbedding = null;
+                    try
+                    {
+                        answerEmbedding = await GetEmbeddingAsync(fullResponse.ToString(), embModel);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to generate answer embedding, continuing without it");
+                    }
+
+                    var conversationId = await SaveConversationToDatabaseFast(
+                        sessionResult.Session!.SessionId,
+                        question,
+                        fullResponse.ToString(),
+                        relevantChunks,
+                        genModel!,
+                        embModel!,
+                        relevantChunks.Any() ? relevantChunks.Average(c => c.Similarity) : 0.8, // confidence
+                        stopwatch.ElapsedMilliseconds,
+                        false, // isFromCorrection
+                        null, // parentId
+                        plant,
+                        questionEmbedding, // ✅ Now defined
+                        answerEmbedding, // ✅ Now defined (can be null)
+                        entities); // ✅ Now defined
+
+                    _logger.LogInformation($"✅ Saved conversation with ID: {conversationId}");
+
+                    if (conversationId > 0)
+                    {
+                        // ✅ Update conversation history in memory
+                        await UpdateConversationHistoryFast(context, question, fullResponse.ToString(), relevantChunks, entities);
+
+                        var verification = await _conversationStorage.GetSessionConversationsAsync(sessionResult.Session!.SessionId);
+                        _logger.LogInformation($"🔍 Verification: Database now has {verification.Count} conversations for this session");
+                    }
+                    else
+                    {
+                        _logger.LogError($"❌ Failed to save conversation - returned ID is {conversationId}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "❌ Failed to save conversation to database");
+                }
+            }
+            stopwatch.Stop();
+
+            yield return new StreamChunk
+            {
+                Type = "complete",
+                Content = "Done",
+                ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+            };
 
             // Handle errors after yield loop
             if (hasError)
@@ -3091,6 +3984,135 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             };
         }
 
+        private QuestionType ClassifyQuestionType(string question, ConversationContext context)
+        {
+            if (!context.History.Any())
+                return QuestionType.NewTopic;
+
+            var lastTurn = context.History.Last();
+
+            // ✅ METHOD 1: Fast pattern detection using your existing service
+            var isFollowUpPattern = _conversationAnalysis.IsQuestionPatternContinuation(question, context);
+
+            if (isFollowUpPattern)
+            {
+                _logger.LogInformation($"Pattern match: follow-up question");
+                return QuestionType.FollowUp;
+            }
+
+            // ✅ METHOD 2: Topic extraction using your existing service
+            var currentTopics = _conversationAnalysis.ExtractKeyTopics(question);
+            var previousTopics = _conversationAnalysis.ExtractKeyTopics(lastTurn.Question);
+
+            if (currentTopics.Any() && previousTopics.Any())
+            {
+                var overlap = currentTopics.Intersect(previousTopics, StringComparer.OrdinalIgnoreCase).Count();
+                var totalUnique = currentTopics.Union(previousTopics).Count();
+
+                if (totalUnique > 0)
+                {
+                    var similarityRatio = (double)overlap / totalUnique;
+
+                    if (similarityRatio >= 0.4) // 40% overlap = follow-up
+                    {
+                        _logger.LogInformation($"Topic overlap: {similarityRatio:P0} - follow-up");
+                        return QuestionType.FollowUp;
+                    }
+                    else if (similarityRatio >= 0.2) // 20-40% = related
+                    {
+                        _logger.LogInformation($"Topic overlap: {similarityRatio:P0} - related");
+                        return QuestionType.RelatedTopic;
+                    }
+                }
+            }
+
+            // ✅ METHOD 3: Named entity overlap
+            if (context.NamedEntities.Any())
+            {
+                var questionLower = question.ToLower();
+                var matchedEntities = context.NamedEntities
+                    .Where(entity => questionLower.Contains(entity.ToLower()))
+                    .ToList();
+
+                if (matchedEntities.Count >= 2)
+                {
+                    _logger.LogInformation($"Entity match: {string.Join(", ", matchedEntities)} - related");
+                    return QuestionType.RelatedTopic;
+                }
+                else if (matchedEntities.Count == 1)
+                {
+                    return QuestionType.LooselyRelated;
+                }
+            }
+
+            // ✅ Default: New topic
+            _logger.LogInformation("No relationship detected - new topic");
+            return QuestionType.NewTopic;
+        }
+
+
+        private async Task<(bool HasError, string ErrorMessage, List<RelevantChunk> Chunks)> SafeSearchKnowledgeBaseWithExpansion(
+    string originalQuery,
+    string expandedQuery,
+    string contextualQuery,
+    ModelConfiguration embModel,
+    int maxResults,
+    string plant,
+    bool useReRanking)
+        {
+            try
+            {
+                var allChunks = new List<RelevantChunk>();
+
+                // 1. Search with contextual query (conversation-aware)
+                var contextChunks = await SearchChromaDBAsync(contextualQuery, embModel, maxResults, plant);
+                allChunks.AddRange(contextChunks);
+
+                // 2. ✅ Search with expanded query (abbreviations expanded)
+                if (expandedQuery != originalQuery)
+                {
+                    _logger.LogInformation($"🔍 Searching with expanded query: {expandedQuery}");
+                    var expandedChunks = await SearchChromaDBAsync(expandedQuery, embModel, maxResults / 2, plant);
+                    allChunks.AddRange(expandedChunks);
+                }
+
+                // 3. ✅ BOOST abbreviation context chunks
+                foreach (var chunk in allChunks)
+                {
+                    if (chunk.Source.Contains("abbreviations.txt", StringComparison.OrdinalIgnoreCase))
+                    {
+                        chunk.Similarity += 0.35; // Strong boost
+                        _logger.LogInformation($"⬆️ Boosted abbreviation chunk: {chunk.Text.Substring(0, Math.Min(80, chunk.Text.Length))}...");
+                    }
+                }
+
+                // 4. Deduplicate and re-rank
+                var uniqueChunks = allChunks
+                    .GroupBy(c => c.Text.Trim())
+                    .Select(g => g.OrderByDescending(c => c.Similarity).First())
+                    .OrderByDescending(c => c.Similarity)
+                    .Take(maxResults)
+                    .ToList();
+
+                // 5. Optional: Apply re-ranking if enabled
+                if (useReRanking && uniqueChunks.Count > 0)
+                {
+                    _logger.LogInformation("🎯 Applying semantic re-ranking...");
+                    // Your existing re-ranking logic here
+                }
+
+                _logger.LogInformation($"📊 Retrieved {uniqueChunks.Count} unique chunks (from {allChunks.Count} total)");
+
+                return (false, string.Empty, uniqueChunks);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to search knowledge base with expansion");
+                return (true, "Knowledge base search failed", new List<RelevantChunk>());
+            }
+        }
+
+
         private async IAsyncEnumerable<string> GenerateStreamingResponseSafe(
     string question,
     string model,
@@ -3098,10 +4120,11 @@ These abbreviations are standard across all MEAI HR policies and should be inter
     List<RelevantChunk> relevantChunks,
     bool meaiInfo,
     string plant,
+    QuestionType questionType = QuestionType.NewTopic,
     [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             var prompt = meaiInfo ? await _systemPromptBuilder.BuildMeaiSystemPrompt(plant, relevantChunks, question) :
-                BuildEnhancedPrompt(question, relevantChunks, context, meaiInfo, plant);
+                BuildEnhancedPrompt(question, relevantChunks, context, meaiInfo, plant, questionType);
 
 
 
@@ -3142,10 +4165,11 @@ These abbreviations are standard across all MEAI HR policies and should be inter
     List<RelevantChunk> relevantChunks,
     bool meaiInfo,
     string plant,
+    QuestionType questionType = QuestionType.NewTopic,
     [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             // Build the prompt with context
-            var prompt = BuildEnhancedPrompt(question, relevantChunks, context, meaiInfo, plant);
+            var prompt = BuildEnhancedPrompt(question, relevantChunks, context, meaiInfo, plant, questionType);
 
             _logger.LogInformation("Streaming response from model: {Model}", model);
 
@@ -3187,7 +4211,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
             _logger.LogInformation("Starting streaming generation with model: {Model}", model);
 
-            using var response = await _httpClient.SendAsync(
+            using var response = await _ollamaClient.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,  // ← Don't buffer the entire response
                 cancellationToken);
@@ -3234,6 +4258,8 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
             [JsonPropertyName("response")]
             public string? Response { get; set; }
+            [JsonPropertyName("message")]
+            public MessageContent? Message { get; set; }  // ✅ For /chat endpoint
 
             [JsonPropertyName("done")]
             public bool Done { get; set; }
@@ -3241,13 +4267,29 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             [JsonPropertyName("context")]
             public int[]? Context { get; set; }
         }
+        private class MessageContent
+        {
+            [JsonPropertyName("role")]
+            public string? Role { get; set; }
+
+            [JsonPropertyName("content")]
+            public string? Content { get; set; }
+        }
         private async Task<SessionResult> SafeInitializeSession(string sessionId)
         {
             try
             {
                 var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
-                    sessionId ?? Guid.NewGuid().ToString(), _currentUser);
+                    sessionId ?? Guid.NewGuid().ToString(),
+                    _currentUser);
+
                 var context = _conversation.GetOrCreateConversationContext(dbSession.SessionId);
+
+                // ✅ CRITICAL FIX: Load conversation history from database
+                if (context.History.Count == 0)
+                {
+                    await LoadConversationHistoryFromDatabaseAsync(dbSession.SessionId, context);
+                }
 
                 return new SessionResult
                 {
@@ -3266,6 +4308,159 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 };
             }
         }
+        private async Task LoadConversationHistoryFromDatabaseAsync(string sessionId, ConversationContext context)
+        {
+            try
+            {
+                _logger.LogInformation($"Loading conversation history for session {sessionId}");
+
+                // ✅ Get conversations from database
+                var conversations = await _conversationStorage.GetSessionConversationsAsync(sessionId);
+
+                _logger.LogInformation($"Database returned {conversations.Count} conversations for session {sessionId}");
+
+                if (!conversations.Any())
+                {
+                    _logger.LogInformation($"No conversation history found in database for session {sessionId}");
+                    return;
+                }
+
+                // ✅ Convert to ConversationTurn and add to context
+                var turns = conversations
+                    .OrderBy(c => c.CreatedAt)
+                    .TakeLast(10) // Load last 10 conversations
+                    .Select(c => new ConversationTurn
+                    {
+                        Question = c.Question,
+                        Answer = c.Answer,
+                        Timestamp = c.CreatedAt,
+                        Sources = c.Sources ?? new List<string>()
+                    })
+                    .ToList();
+
+                // ✅ Add turns to context history
+                foreach (var turn in turns)
+                {
+                    context.History.Add(turn);
+                }
+
+                _logger.LogInformation($"✅ Loaded {turns.Count} conversation turns into memory for session {sessionId}");
+
+                // ✅ Load named entities from historical conversations
+                var allEntities = conversations
+                    .SelectMany(c => c.NamedEntities ?? new List<string>())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                foreach (var entity in allEntities)
+                {
+                    if (!context.NamedEntities.Contains(entity, StringComparer.OrdinalIgnoreCase))
+                    {
+                        context.NamedEntities.Add(entity);
+                    }
+                }
+
+                _logger.LogInformation($"✅ Loaded {allEntities.Count} named entities for session {sessionId}");
+
+                // ✅ Set last topic anchor from most recent conversation
+                var lastConversation = conversations
+                    .OrderByDescending(c => c.CreatedAt)
+                    .FirstOrDefault();
+
+                if (lastConversation != null && !string.IsNullOrEmpty(lastConversation.Question))
+                {
+                    context.LastTopicAnchor = lastConversation.Question;
+                    _logger.LogInformation($"✅ Set topic anchor: {lastConversation.Question}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"❌ Failed to load conversation history for session {sessionId}");
+                // Don't throw - continue with empty history
+            }
+        }
+
+
+        private async Task<List<ConversationTurn>> LoadHistoryForSession(string sessionId)
+        {
+            var conversations = await _conversationStorage.GetSessionConversationsAsync(sessionId);
+
+            return conversations
+                .OrderBy(c => c.CreatedAt)
+                .TakeLast(10)
+                .Select(c => new ConversationTurn
+                {
+                    Question = c.Question,
+                    Answer = c.Answer,
+                    Timestamp = c.CreatedAt,
+                    Sources = c.Sources ?? new List<string>()
+                })
+                .ToList();
+        }
+
+        private async Task LoadConversationHistoryAsync(string sessionId, ConversationContext context)
+        {
+            try
+            {
+                _logger.LogInformation($"Loading conversation history for session {sessionId}");
+
+                var conversations = await _conversationStorage.GetSessionConversationsAsync(sessionId);
+
+                _logger.LogInformation($"Database returned {conversations.Count} conversations");
+
+                if (!conversations.Any())
+                {
+                    _logger.LogInformation($"No conversation history found for session {sessionId}");
+                    return;
+                }
+
+                // Convert database entries to conversation turns
+                var turns = conversations
+                    .OrderBy(c => c.CreatedAt)
+                    .TakeLast(10) // Load last 10 conversations
+                    .Select(c => new ConversationTurn
+                    {
+                        Question = c.Question,
+                        Answer = c.Answer,
+                        Timestamp = c.CreatedAt,
+                        Sources = c.Sources ?? new List<string>()
+                    })
+                    .ToList();
+
+                // Populate context with loaded history
+                context.History.AddRange(turns);
+
+                // ✅ LOAD NAMED ENTITIES from historical conversations
+                var allEntities = conversations
+                    .SelectMany(c => c.NamedEntities ?? new List<string>())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                foreach (var entity in allEntities)
+                {
+                    if (!context.NamedEntities.Contains(entity, StringComparer.OrdinalIgnoreCase))
+                    {
+                        context.NamedEntities.Add(entity);
+                    }
+                }
+
+                // ✅ SET LAST TOPIC ANCHOR from most recent conversation
+                var lastConversation = conversations.OrderByDescending(c => c.CreatedAt).FirstOrDefault();
+                if (lastConversation != null && !string.IsNullOrEmpty(lastConversation.Question))
+                {
+                    context.LastTopicAnchor = lastConversation.Question;
+                }
+
+                _logger.LogInformation($"Loaded {turns.Count} conversation turns for session {sessionId}");
+                _logger.LogInformation($"Loaded {allEntities.Count} named entities for session {sessionId}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to load conversation history for session {sessionId}");
+                // Don't throw - continue with empty history
+            }
+        }
+
 
         private async Task<AnswerResult> SafeCheckAppreciatedAnswer(string question)
         {
@@ -3340,40 +4535,76 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             }
         }
 
-        private async Task<SearchResult> SafeSearchKnowledgeBase(string contextualQuery, ModelConfiguration embModel, int maxResults, string plant, string originalQuestion)
+        private async Task<(bool HasError, string ErrorMessage, List<RelevantChunk> Chunks)> SafeSearchKnowledgeBase(
+      string query,
+      ModelConfiguration embModel,
+      int maxResults,
+      string plant,
+      string originalQuestion)
         {
             try
             {
-                // Check for section queries first
-                var sectionQuery = await _policyAnalysis.DetectAndParseSection(originalQuestion);
-                List<RelevantChunk> relevantChunks;
+                // Expand query with abbreviations
+                var expandedQuery = _abbreviationService.ExpandQuery(query);
 
-                if (sectionQuery != null)
+                var searchQueries = new List<string> { query };
+                if (expandedQuery != query)
                 {
-                    relevantChunks = await SearchForSpecificSection(sectionQuery, embModel, maxResults, plant,
-                        await _collectionManager.GetOrCreateCollectionAsync(embModel));
-                }
-                else
-                {
-                    relevantChunks = await GetRelevantChunksWithExpansionAsync(contextualQuery, embModel, maxResults,
-                        true, _conversation.GetOrCreateConversationContext("temp"), true,
-                        await _modelManager.GetModelAsync(_config.DefaultGenerationModel), plant);
+                    searchQueries.Add(expandedQuery);
                 }
 
-                return new SearchResult
+                var allChunks = new List<RelevantChunk>();
+
+                // Search with all query variants
+                foreach (var q in searchQueries)
                 {
-                    HasError = false,
-                    Chunks = relevantChunks
-                };
+                    var chunks = await SearchChromaDBAsync(q, embModel, maxResults, plant);
+                    allChunks.AddRange(chunks);
+                }
+
+                // ✅ Boost context chunks (abbreviations AND organization)
+                foreach (var chunk in allChunks)
+                {
+                    var isContextFile = chunk.Source.Contains("abbreviations.txt", StringComparison.OrdinalIgnoreCase) ||
+                                       chunk.Source.Contains("organization", StringComparison.OrdinalIgnoreCase);
+
+                    if (isContextFile)
+                    {
+                        // Check if query is asking about people/roles
+                        var isPeopleQuery = query.Contains("MD", StringComparison.OrdinalIgnoreCase) ||
+                                           query.Contains("manager", StringComparison.OrdinalIgnoreCase) ||
+                                           query.Contains("head", StringComparison.OrdinalIgnoreCase) ||
+                                           query.Contains("CEO", StringComparison.OrdinalIgnoreCase) ||
+                                           query.Contains("who is", StringComparison.OrdinalIgnoreCase) ||
+                                           query.Contains("contact", StringComparison.OrdinalIgnoreCase);
+
+                        if (isPeopleQuery && chunk.Source.Contains("organization"))
+                        {
+                            chunk.Similarity += 0.50; // Very strong boost for people queries
+                            _logger.LogInformation($"⬆️ STRONG BOOST (organization): {chunk.Text.Substring(0, Math.Min(80, chunk.Text.Length))}...");
+                        }
+                        else
+                        {
+                            chunk.Similarity += 0.35; // Standard context boost
+                            _logger.LogInformation($"⬆️ Boosted context: {chunk.Text.Substring(0, Math.Min(80, chunk.Text.Length))}...");
+                        }
+                    }
+                }
+
+                // Deduplicate and take top results
+                var uniqueChunks = allChunks
+                    .GroupBy(c => c.Text.Trim())
+                    .Select(g => g.OrderByDescending(c => c.Similarity).First())
+                    .OrderByDescending(c => c.Similarity)
+                    .Take(maxResults)
+                    .ToList();
+
+                return (false, string.Empty, uniqueChunks);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to search knowledge base");
-                return new SearchResult
-                {
-                    HasError = true,
-                    ErrorMessage = "Failed to search knowledge base"
-                };
+                _logger.LogError(ex, "Failed in SafeSearchKnowledgeBase");
+                return (true, "Search failed", new List<RelevantChunk>());
             }
         }
 
@@ -3472,30 +4703,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
 
 
-        private async Task<ResponseGenerationResult> SafeGenerateResponse(
-    string prompt,
-    ModelConfiguration genModel,
-    CancellationToken cancellationToken)
-        {
-            try
-            {
-                var tokenStream = StreamGenerateAsync(prompt, genModel, cancellationToken);
-                return new ResponseGenerationResult
-                {
-                    HasError = false,
-                    TokenStream = tokenStream
-                };
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to generate streaming response");
-                return new ResponseGenerationResult
-                {
-                    HasError = true,
-                    ErrorMessage = "Failed to generate response"
-                };
-            }
-        }
+
 
         private async IAsyncEnumerable<StreamChunk> ProcessNonMeaiQueryStream(
     string question,
@@ -3503,54 +4711,245 @@ These abbreviations are standard across all MEAI HR policies and should be inter
     string generationModel,
     [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            var responseResult = await SafeGenerateSimpleResponse(question, generationModel);
-            if (responseResult.HasError)
+            yield return new StreamChunk { Type = "status", Content = "Processing general query..." };
+
+            // Get session
+            var sessionResult = await SafeInitializeSession(sessionId);
+            if (sessionResult.HasError)
             {
-                yield return new StreamChunk { Type = "error", Content = "Failed to process query" };
+                yield return new StreamChunk { Type = "error", Content = sessionResult.ErrorMessage };
                 yield break;
             }
 
-            await foreach (var chunk in StreamTextResponse(responseResult.Response, cancellationToken))
+            var context = sessionResult.Context!;
+
+            // Get model
+            var genModel = await _modelManager.GetModelAsync(generationModel ?? _config.DefaultGenerationModel);
+            if (genModel == null)
+            {
+                yield return new StreamChunk { Type = "error", Content = "Generation model not available" };
+                yield break;
+            }
+
+            // ✅ Stream directly from Ollama - NO intermediate buffering
+            var fullResponse = new StringBuilder();
+
+            await foreach (var token in GenerateNonMeaiStreamAsync(
+                question,
+                genModel.Name!,
+                context.History,
+                cancellationToken))
             {
                 if (cancellationToken.IsCancellationRequested) yield break;
-                yield return chunk;
-            }
-        }
 
-        private async Task<SimpleResponseResult> SafeGenerateSimpleResponse(string question, string generationModel)
-        {
+                fullResponse.Append(token);
+
+                // ✅ Yield each token immediately
+                yield return new StreamChunk
+                {
+                    Type = "response",  // ✅ This is what your HTML expects
+                    Content = token
+                };
+            }
+
+            // Save to database (optional - after streaming completes)
             try
             {
-                var response = await GenerateNonMeaiChatResponseAsync(question, generationModel, new List<ConversationTurn>());
-                return new SimpleResponseResult
+                if (fullResponse.Length > 0)
                 {
-                    HasError = false,
-                    Response = response
-                };
+                    await SaveNonMeaiConversationToDatabase(
+                        sessionResult.Session!.SessionId,
+                        question,
+                        fullResponse.ToString(),
+                        genModel,
+                        0.7,
+                        0,
+                        false,
+                        "");
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to process non-MEAI query");
-                return new SimpleResponseResult
+                _logger.LogWarning(ex, "Failed to save non-MEAI conversation");
+            }
+
+            yield return new StreamChunk { Type = "complete", Content = "", ProcessingTimeMs = 0 };
+        }
+
+        private async IAsyncEnumerable<string> GenerateNonMeaiStreamAsync(
+    string question,
+    string modelName,
+    List<ConversationTurn> history,
+    [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            // Build messages
+            var messages = new List<object>
+    {
+        new
+        {
+            role = "system",
+            content = @"You are an intelligent and helpful AI assistant with expertise across multiple domains.
+
+**Core Principles:**
+- Provide accurate, well-researched, and detailed responses
+- Be conversational, professional, and friendly
+- Use clear structure with appropriate formatting
+- Cite reasoning when making recommendations
+- Admit uncertainty when appropriate rather than guessing
+
+**Response Guidelines:**
+1. For factual questions: Provide direct, accurate answers with relevant context
+2. For how-to questions: Give step-by-step instructions with clear explanations
+3. For recommendations: Explain pros/cons and provide multiple options when relevant
+4. For complex topics: Break down concepts into digestible parts
+5. For opinion-based questions: Present balanced perspectives
+
+**Formatting:**
+- Use clear paragraphs for readability
+- Add bullet points for lists or multiple items
+- Include examples when they clarify concepts
+- Keep responses concise but complete
+
+Be helpful, informative, and engaging in your communication."
+        }
+    };
+
+            // Add recent history
+            foreach (var turn in history.TakeLast(6))
+            {
+                messages.Add(new { role = "user", content = turn.Question });
+                messages.Add(new { role = "assistant", content = turn.Answer });
+            }
+
+            // Add current question
+            messages.Add(new { role = "user", content = question });
+
+            var requestData = new
+            {
+                model = modelName,
+                messages,
+                temperature = 0.7,
+                stream = true,  // ✅ CRITICAL: Enable streaming
+                options = new Dictionary<string, object>
                 {
-                    HasError = true,
-                    ErrorMessage = "Failed to process query"
-                };
+                    ["num_ctx"] = 4096,
+                    ["top_p"] = 0.9
+                }
+            };
+
+            _logger.LogInformation($"Streaming non-MEAI response with model: {modelName}");
+
+            // Create streaming request
+            using var request = new HttpRequestMessage(HttpMethod.Post, "api/chat")
+            {
+                Content = JsonContent.Create(requestData)
+            };
+
+            HttpResponseMessage? response = null;
+
+            response = await _ollamaClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogError($"Ollama request failed: {response.StatusCode}");
+                yield return "I apologize, but I'm having trouble generating a response right now.";
+                yield break;
+            }
+
+            using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var reader = new StreamReader(stream);
+
+            while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+            {
+                var line = await reader.ReadLineAsync();
+                if (string.IsNullOrWhiteSpace(line)) continue;
+
+
+                var streamResponse = JsonSerializer.Deserialize<OllamaStreamResponse>(line);
+
+                // ✅ Handle chat format response
+                if (streamResponse?.Message?.Content != null &&
+                    !string.IsNullOrEmpty(streamResponse.Message.Content))
+                {
+                    yield return streamResponse.Message.Content;
+                }
+
+                if (streamResponse?.Done == true)
+                {
+                    _logger.LogInformation("Non-MEAI streaming complete");
+                    break;
+                }
             }
         }
 
         private string BuildEnhancedPrompt(
-    string question,
-    List<RelevantChunk> relevantChunks,
-    ConversationContext context,
-    bool meaiInfo,
-    string plant)
+     string question,
+     List<RelevantChunk> relevantChunks,
+     ConversationContext context,
+     bool meaiInfo,
+     string plant,
+     QuestionType questionType = QuestionType.NewTopic) // ✅ Add parameter
         {
             var promptBuilder = new StringBuilder();
 
-            // Add conversation history if available
-            if (context.History.Any())
+            // ✅ ADD CONTEXT-AWARE INSTRUCTIONS based on question type
+            if (questionType == QuestionType.FollowUp && context.History.Any())
             {
+                promptBuilder.AppendLine("=== FOLLOW-UP CONVERSATION ===");
+                promptBuilder.AppendLine("This is a follow-up question. Reference and build upon the previous discussion.");
+                promptBuilder.AppendLine();
+
+                // More history for follow-ups
+                promptBuilder.AppendLine("Previous conversation:");
+                foreach (var entry in context.History.TakeLast(5))
+                {
+                    promptBuilder.AppendLine($"Q: {entry.Question}");
+                    promptBuilder.AppendLine($"A: {entry.Answer}");
+                }
+                promptBuilder.AppendLine();
+
+                // Add topic anchor
+                if (!string.IsNullOrEmpty(context.LastTopicAnchor))
+                {
+                    promptBuilder.AppendLine($"Main topic: {context.LastTopicAnchor}");
+                    promptBuilder.AppendLine();
+                }
+
+                // Include named entities
+                if (context.NamedEntities.Any())
+                {
+                    promptBuilder.AppendLine($"Key entities: {string.Join(", ", context.NamedEntities.Take(10))}");
+                    promptBuilder.AppendLine();
+                }
+            }
+            else if (questionType == QuestionType.RelatedTopic && context.History.Any())
+            {
+                promptBuilder.AppendLine("=== RELATED CONVERSATION ===");
+                promptBuilder.AppendLine("This question is related to our previous discussion but explores a different angle.");
+                promptBuilder.AppendLine();
+
+                // Limited history for related topics
+                promptBuilder.AppendLine("Recent conversation:");
+                foreach (var entry in context.History.TakeLast(2))
+                {
+                    promptBuilder.AppendLine($"Q: {entry.Question}");
+                    promptBuilder.AppendLine($"A: {entry.Answer}");
+                }
+                promptBuilder.AppendLine();
+            }
+            else if (questionType == QuestionType.NewTopic)
+            {
+                promptBuilder.AppendLine("=== NEW CONVERSATION ===");
+                promptBuilder.AppendLine("This is a new topic. Answer independently.");
+                promptBuilder.AppendLine();
+                // NO history for new topics
+            }
+            else if (context.History.Any())
+            {
+                // Default: show limited history
                 promptBuilder.AppendLine("Previous conversation:");
                 foreach (var entry in context.History.TakeLast(3))
                 {
@@ -3560,7 +4959,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                 promptBuilder.AppendLine();
             }
 
-            // Add retrieved context
+            // Add retrieved context (unchanged)
             if (relevantChunks.Any())
             {
                 promptBuilder.AppendLine("Relevant information from company documents:");
@@ -3584,39 +4983,26 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
             promptBuilder.AppendLine(question);
 
-            // Add instructions
-            promptBuilder.AppendLine("\nProvide a clear, concise answer based on the provided context.");
+            // Enhanced instructions based on question type
+            if (questionType == QuestionType.FollowUp)
+            {
+                promptBuilder.AppendLine("\nProvide a clear answer that builds on our previous discussion. Reference relevant parts when appropriate.");
+            }
+            else if (questionType == QuestionType.RelatedTopic)
+            {
+                promptBuilder.AppendLine("\nProvide a clear answer considering the related previous discussion but treat this as a distinct aspect.");
+            }
+            else
+            {
+                promptBuilder.AppendLine("\nProvide a clear, concise answer based on the provided context.");
+            }
 
             return promptBuilder.ToString();
         }
 
-        private async IAsyncEnumerable<string> StreamGenerateAsync(
-    string prompt,
-    ModelConfiguration model,
-    [EnumeratorCancellation] CancellationToken cancellationToken = default)
-        {
-            // Validate inputs first (outside of yield context)
-            if (string.IsNullOrWhiteSpace(prompt) || model == null)
-            {
-                yield return "Invalid input parameters.";
-                yield break;
-            }
 
-            // Create the request outside try-catch
-            var requestResult = await CreateStreamingRequest(prompt, model, cancellationToken);
-            if (!requestResult.Success)
-            {
-                yield return requestResult.ErrorMessage ?? "Failed to create request.";
-                yield break;
-            }
 
-            // Stream the response
-            await foreach (var token in ProcessStreamingResponse(requestResult.Response!, cancellationToken))
-            {
-                if (cancellationToken.IsCancellationRequested) yield break;
-                yield return token;
-            }
-        }
+
 
         // Helper method to create the streaming request (handles exceptions)
         private async Task<(bool Success, HttpResponseMessage? Response, string? ErrorMessage)> CreateStreamingRequest(
@@ -3651,7 +5037,7 @@ These abbreviations are standard across all MEAI HR policies and should be inter
                     Content = JsonContent.Create(requestData)
                 };
 
-                var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                var response = await _ollamaClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -3738,6 +5124,265 @@ These abbreviations are standard across all MEAI HR policies and should be inter
 
             return "";
         }
+
+        public async Task<PolicyProcessingDiagnostics> DiagnosePolicyProcessingAsync(string plant)
+        {
+            var diagnostics = new PolicyProcessingDiagnostics
+            {
+                Plant = plant,
+                Timestamp = DateTime.Now
+            };
+
+            try
+            {
+                // Check policy files
+                var policyFiles = GetPolicyFiles(plant);
+                diagnostics.TotalPolicyFiles = policyFiles.Count;
+                diagnostics.PolicyFiles = policyFiles.Select(f => new PolicyFileInfo
+                {
+                    FileName = Path.GetFileName(f),
+                    FilePath = f,
+                    FileSize = new FileInfo(f).Length,
+                    LastModified = new FileInfo(f).LastWriteTime
+                }).ToList();
+
+                // Check models
+                var models = await _modelManager.DiscoverAvailableModelsAsync();
+                var embeddingModels = models.Where(m => m.Type == "embedding" || m.Type == "both").ToList();
+                diagnostics.EmbeddingModels = embeddingModels.Select(m => m.Name).ToList();
+
+                // Check each model's collection
+                foreach (var model in embeddingModels)
+                {
+                    try
+                    {
+                        var collectionId = await _collectionManager.GetOrCreateCollectionAsync(model);
+                        var count = await GetCollectionCountAsync(collectionId);
+
+                        diagnostics.ModelCollections.Add(new ModelCollectionInfo
+                        {
+                            ModelName = model.Name,
+                            CollectionId = collectionId,
+                            EmbeddingCount = count
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, $"Failed to check collection for model: {model.Name}");
+                    }
+                }
+
+                // Check cache status
+                diagnostics.CachedFiles = processedFilesCache.Count;
+                diagnostics.CachedEmbeddings = _optimizedEmbeddingCache.Count;
+
+                _logger.LogInformation($"📊 Policy processing diagnostics completed for {plant}");
+            }
+            catch (Exception ex)
+            {
+                diagnostics.Error = ex.Message;
+                _logger.LogError(ex, "Failed to run diagnostics");
+            }
+
+            return diagnostics;
+        }
+
+        // Add these methods to DynamicRagService class
+
+        // Clear cache for a specific file
+        public Task ClearFileCacheAsync(string filePath)
+        {
+            try
+            {
+                var keysToRemove = processedFilesCache.Keys
+                    .Where(k => k.StartsWith(filePath))
+                    .ToList();
+
+                foreach (var key in keysToRemove)
+                {
+                    processedFilesCache.TryRemove(key, out _);
+                    _logger.LogInformation($"Removed cache entry: {key}");
+                }
+
+                _logger.LogInformation($"Cleared {keysToRemove.Count} cache entries for file: {filePath}");
+                return Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to clear cache for file: {filePath}");
+                throw;
+            }
+        }
+
+        // Process a single file (useful for debugging/reprocessing)
+        public async Task ProcessSingleFileAsync(string filePath, string plant)
+        {
+            try
+            {
+                if (!File.Exists(filePath))
+                {
+                    throw new FileNotFoundException($"File not found: {filePath}");
+                }
+
+                _logger.LogInformation($"🔄 Processing single file: {filePath} for plant: {plant}");
+
+                var models = await _modelManager.DiscoverAvailableModelsAsync();
+                var embeddingModels = models.Where(m => m.Type == "embedding" || m.Type == "both").ToList();
+
+                if (!embeddingModels.Any())
+                {
+                    throw new InvalidOperationException("No embedding models available");
+                }
+
+                foreach (var model in embeddingModels)
+                {
+                    _logger.LogInformation($"Processing with model: {model.Name}");
+
+                    var collectionId = await _collectionManager.GetOrCreateCollectionAsync(model);
+                    await ProcessFileForModelAsync(filePath, model, collectionId, plant);
+                }
+
+                _logger.LogInformation($"✅ Completed processing file: {filePath}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to process single file: {filePath}");
+                throw;
+            }
+        }
+
+        // Clear all caches (nuclear option for debugging)
+        public Task ClearAllCachesAsync()
+        {
+            try
+            {
+                var filesCacheCount = processedFilesCache.Count;
+                var embeddingsCacheCount = _optimizedEmbeddingCache.Count;
+
+                processedFilesCache.Clear();
+                _optimizedEmbeddingCache.Clear();
+
+                _logger.LogInformation($"🧹 Cleared all caches: {filesCacheCount} files, {embeddingsCacheCount} embeddings");
+                return Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to clear caches");
+                throw;
+            }
+        }
+
+        // Verify embedding model is working
+        public async Task<EmbeddingTestResult> TestEmbeddingModelAsync(string modelName)
+        {
+            var result = new EmbeddingTestResult
+            {
+                ModelName = modelName,
+                Timestamp = DateTime.Now
+            };
+
+            try
+            {
+                var model = await _modelManager.GetModelAsync(modelName);
+
+                if (model == null)
+                {
+                    result.Success = false;
+                    result.Error = $"Model '{modelName}' not found";
+                    return result;
+                }
+
+                result.ModelFound = true;
+                result.ExpectedDimension = model.EmbeddingDimension;
+
+                // Test with sample text
+                var testTexts = new[]
+                {
+            "This is a test sentence for embedding generation.",
+            "HR policy regarding leave management.",
+            "Section 1: Introduction and Purpose"
+        };
+
+                var embeddings = new List<int>();
+
+                foreach (var text in testTexts)
+                {
+                    var embedding = await GetEmbeddingAsync(text, model);
+
+                    if (embedding == null || embedding.Count == 0)
+                    {
+                        result.Success = false;
+                        result.Error = $"Failed to generate embedding for text: '{text.Substring(0, Math.Min(50, text.Length))}'";
+                        return result;
+                    }
+
+                    embeddings.Add(embedding.Count);
+                }
+
+                result.Success = true;
+                result.ActualDimensions = embeddings;
+                result.Message = $"Successfully generated {embeddings.Count} embeddings with dimensions: {string.Join(", ", embeddings)}";
+
+                _logger.LogInformation($"✅ Embedding model test passed: {modelName}");
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.Error = ex.Message;
+                _logger.LogError(ex, $"Embedding model test failed: {modelName}");
+            }
+
+            return result;
+        }
+
+        // Supporting class
+        public class EmbeddingTestResult
+        {
+            public string ModelName { get; set; } = "";
+            public DateTime Timestamp { get; set; }
+            public bool Success { get; set; }
+            public bool ModelFound { get; set; }
+            public int ExpectedDimension { get; set; }
+            public List<int> ActualDimensions { get; set; } = new();
+            public string? Error { get; set; }
+            public string? Message { get; set; }
+        }
+
+        public class PolicyProcessingDiagnostics
+        {
+            public string Plant { get; set; } = "";
+            public DateTime Timestamp { get; set; }
+            public int TotalPolicyFiles { get; set; }
+            public List<PolicyFileInfo> PolicyFiles { get; set; } = new();
+            public List<string> EmbeddingModels { get; set; } = new();
+            public List<ModelCollectionInfo> ModelCollections { get; set; } = new();
+            public int CachedFiles { get; set; }
+            public int CachedEmbeddings { get; set; }
+            public string? Error { get; set; }
+        }
+
+        public class PolicyFileInfo
+        {
+            public string FileName { get; set; } = "";
+            public string FilePath { get; set; } = "";
+            public long FileSize { get; set; }
+            public DateTime LastModified { get; set; }
+        }
+
+        public class ModelCollectionInfo
+        {
+            public string ModelName { get; set; } = "";
+            public string CollectionId { get; set; } = "";
+            public int EmbeddingCount { get; set; }
+        }
+        public enum QuestionType
+        {
+            NewTopic,        // Completely new conversation
+            FollowUp,        // Direct follow-up (e.g., "what about...", "tell me more")
+            RelatedTopic,     // Related but exploring different angle
+            LooselyRelated
+        }
+
 
     }
 

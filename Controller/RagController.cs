@@ -5,10 +5,12 @@ using MEAI_GPT_API.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using System.Collections.Concurrent;
+using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using static MEAI_GPT_API.Services.DynamicRagService;
 
 namespace MEAI_GPT_API.Controller
 {
@@ -260,59 +262,107 @@ namespace MEAI_GPT_API.Controller
             await Response.WriteAsync($"{json}\n", ct);
             await Response.Body.FlushAsync(ct);
         }
-        private async IAsyncEnumerable<string> ProcessCodingQueryStreamAsync(QueryRequest request, CodingDetectionResult codingDetection)
+        private async IAsyncEnumerable<string> ProcessCodingQueryStreamAsync(
+            QueryRequest request,
+            CodingDetectionResult codingDetection)
         {
             yield return JsonSerializer.Serialize(new { type = "status", message = "Analyzing coding requirements..." });
             yield return JsonSerializer.Serialize(new { type = "status", message = $"Detected {codingDetection.DetectedLanguage} programming query" });
 
-
-            // Handle coding service call safely outside yield context
             CodingAssistanceResponse codingResponse = null;
             var hasError = false;
+            string errorMessage = "Unknown error";
 
-            var codingTask = _codingService.ProcessCodingQueryAsync(
-                request.Question,
-                null,
-                codingDetection.DetectedLanguage != "general" ? codingDetection.DetectedLanguage : null,
-                request.sessionId,
-                includeExamples: true,
-                difficulty: "intermediate"
-            );
-
-            var timeoutTask = Task.Delay(25000);
-            var completedTask = await Task.WhenAny(codingTask, timeoutTask);
-
-            if (completedTask == timeoutTask)
+            try
             {
-                hasError = true;
-            }
-            else
-            {
-                if (codingTask.IsFaulted)
+                // ✅ Add logging before calling coding service
+                _logger.LogInformation($"🔍 Calling coding service for: {request.Question}");
+                _logger.LogInformation($"   Language: {codingDetection.DetectedLanguage}");
+                _logger.LogInformation($"   SessionId: {request.sessionId}");
+
+                var codingTask = _codingService.ProcessCodingQueryAsync(
+                    request.Question,
+                    null,
+                    codingDetection.DetectedLanguage != "general" ? codingDetection.DetectedLanguage : null,
+                    request.sessionId,
+                    includeExamples: true,
+                    difficulty: "intermediate"
+                );
+
+                var timeoutTask = Task.Delay(250000); // 25 second timeout
+                var completedTask = await Task.WhenAny(codingTask, timeoutTask);
+
+                if (completedTask == timeoutTask)
                 {
                     hasError = true;
-                    _logger.LogError(codingTask.Exception, "Coding service failed");
+                    errorMessage = "Coding service timed out after 25 seconds";
+                    _logger.LogError($"❌ {errorMessage}");
                 }
                 else
                 {
-                    codingResponse = await codingTask;
+                    if (codingTask.IsFaulted)
+                    {
+                        hasError = true;
+                        var ex = codingTask.Exception?.InnerException ?? codingTask.Exception;
+                        errorMessage = $"Coding service failed: {ex?.Message}";
+                        _logger.LogError(ex, $"❌ Coding service failed");
+                    }
+                    else
+                    {
+                        codingResponse = await codingTask;
+
+                        // ✅ Validate response
+                        if (codingResponse == null)
+                        {
+                            hasError = true;
+                            errorMessage = "Coding service returned null response";
+                            _logger.LogError($"❌ {errorMessage}");
+                        }
+                        else if (string.IsNullOrEmpty(codingResponse.Solution))
+                        {
+                            hasError = true;
+                            errorMessage = "Coding service returned empty solution";
+                            _logger.LogError($"❌ {errorMessage}");
+                            _logger.LogError($"   Response object: {JsonSerializer.Serialize(codingResponse)}");
+                        }
+                        else
+                        {
+                            _logger.LogInformation($"✅ Coding service returned solution ({codingResponse.Solution.Length} chars)");
+                        }
+                    }
                 }
             }
+            catch (Exception ex)
+            {
+                hasError = true;
+                errorMessage = $"Exception calling coding service: {ex.Message}";
+                _logger.LogError(ex, $"❌ {errorMessage}");
+            }
 
+            // ✅ Return detailed error message
             if (hasError || codingResponse == null || string.IsNullOrEmpty(codingResponse.Solution))
             {
-                yield return JsonSerializer.Serialize(new { type = "error", message = "I apologize, but I couldn't generate a coding solution at this time." });
+                yield return JsonSerializer.Serialize(new
+                {
+                    type = "error",
+                    message = $"I apologize, but I couldn't generate a coding solution. Reason: {errorMessage}"
+                });
                 yield break;
             }
 
             yield return JsonSerializer.Serialize(new { type = "status", message = "Generating coding solution..." });
 
+            // ✅ Stream the solution
+            _logger.LogInformation($"🔄 Starting to stream solution...");
+
             await foreach (var chunk in StreamCodeSolution(codingResponse.Solution))
             {
                 yield return JsonSerializer.Serialize(new { type = "chunk", content = chunk });
-
             }
+
+            _logger.LogInformation($"✅ Solution streaming complete");
         }
+
         private async IAsyncEnumerable<string> StreamResponseSafely(string response)
         {
             if (string.IsNullOrWhiteSpace(response))
@@ -354,63 +404,32 @@ namespace MEAI_GPT_API.Controller
 
         private async IAsyncEnumerable<string> StreamCodeSolution(string solution)
         {
-            if (string.IsNullOrWhiteSpace(solution))
+            if (string.IsNullOrEmpty(solution))
+            {
+                _logger.LogWarning("❌ StreamCodeSolution called with empty solution");
                 yield break;
-
-            var codeBlockPattern = @"```[\w]*\n(.*?)\n```";
-            var matches = System.Text.RegularExpressions.Regex.Matches(solution, codeBlockPattern,
-                System.Text.RegularExpressions.RegexOptions.Singleline);
-
-            if (matches.Count > 0)
-            {
-                var lastIndex = 0;
-
-                foreach (System.Text.RegularExpressions.Match match in matches)
-                {
-                    // Stream text before code block
-                    var textBefore = solution.Substring(lastIndex, match.Index - lastIndex);
-                    if (!string.IsNullOrWhiteSpace(textBefore))
-                    {
-                        await foreach (var chunk in StreamResponseSafely(textBefore.Trim()))
-                        {
-                            yield return chunk;
-                        }
-                    }
-
-                    yield return "\n\n```" + GetLanguageFromCodeBlock(match.Value) + "\n";
-
-                    // Stream code line by line
-                    var code = match.Groups[1].Value;
-                    var codeLines = code.Split('\n');
-
-                    foreach (var line in codeLines)
-                    {
-                        yield return line + "\n";
-                        await Task.Delay(80);
-                    }
-
-                    yield return "```\n\n";
-                    lastIndex = match.Index + match.Length;
-                }
-
-                // Stream remaining text
-                if (lastIndex < solution.Length)
-                {
-                    var remainingText = solution.Substring(lastIndex);
-                    await foreach (var chunk in StreamResponseSafely(remainingText.Trim()))
-                    {
-                        yield return chunk;
-                    }
-                }
             }
-            else
+
+            _logger.LogInformation($"📤 Streaming solution: {solution.Length} characters");
+
+            // Option 1: Stream character by character (slower but shows progress)
+            const int chunkSize = 50; // characters per chunk
+            for (int i = 0; i < solution.Length; i += chunkSize)
             {
-                await foreach (var chunk in StreamResponseSafely(solution))
-                {
-                    yield return chunk;
-                }
+                var chunk = solution.Substring(i, Math.Min(chunkSize, solution.Length - i));
+                yield return chunk;
+                await Task.Delay(20); // Small delay for streaming effect
             }
+
+            // OR Option 2: Stream line by line (better for code)
+            // var lines = solution.Split(new[] { '\r', '\n' }, StringSplitOptions.None);
+            // foreach (var line in lines)
+            // {
+            //     yield return line + "\n";
+            //     await Task.Delay(50);
+            // }
         }
+
         private async IAsyncEnumerable<string> StreamTextByWords(string text)
         {
             if (string.IsNullOrWhiteSpace(text))
@@ -485,8 +504,6 @@ namespace MEAI_GPT_API.Controller
                 }
             }
         }
-
-
 
         private async IAsyncEnumerable<string> ProcessRAGQueryStreamAsync(
      QueryRequest request,
@@ -815,6 +832,103 @@ namespace MEAI_GPT_API.Controller
         {
             await _ragService.DeleteModelDataFromChroma(model);
             return Ok(new { message = $"Model {model} data deleted from ChromaDB" });
+        }
+        // Add this to your RAG Controller
+      
+
+        // Add endpoint to force reprocess a specific file
+        [HttpPost("diagnostics/reprocess-file")]
+        public async Task<ActionResult> ReprocessFile([FromBody] ReprocessFileRequest request)
+        {
+            try
+            {
+                _logger.LogInformation($"Forcing reprocess of file: {request.FilePath} for plant: {request.Plant}");
+
+                // Clear cache for this file
+                await _ragService.ClearFileCacheAsync(request.FilePath);
+
+                // Reprocess
+                await _ragService.ProcessSingleFileAsync(request.FilePath, request.Plant);
+
+                return Ok(new { message = "File reprocessed successfully", file = request.FilePath });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to reprocess file: {request.FilePath}");
+                return StatusCode(500, new { error = "Failed to reprocess file", details = ex.Message });
+            }
+        }
+
+        // Add endpoint to check Ollama service health
+        //[HttpGet("diagnostics/ollama-health")]
+        //public async Task<ActionResult> CheckOllamaHealth()
+        //{
+        //    try
+        //    {
+        //        var httpClient = _httpClientFactory.CreateClient("OllamaAPI");
+
+        //        // Test embeddings endpoint
+        //        var embeddingTest = await httpClient.GetAsync("/api/tags");
+        //        var embeddingHealthy = embeddingTest.IsSuccessStatusCode;
+
+        //        // Get available models
+        //        var modelsResponse = await httpClient.GetAsync("/api/tags");
+        //        var modelsContent = await modelsResponse.Content.ReadAsStringAsync();
+
+        //        return Ok(new
+        //        {
+        //            healthy = embeddingHealthy,
+        //            timestamp = DateTime.UtcNow,
+        //            modelsEndpoint = embeddingHealthy ? "✅ Available" : "❌ Unavailable",
+        //            availableModels = modelsContent
+        //        });
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        return StatusCode(500, new
+        //        {
+        //            healthy = false,
+        //            error = ex.Message,
+        //            timestamp = DateTime.UtcNow
+        //        });
+        //    }
+        //}
+
+        //// Add endpoint to check ChromaDB health
+        //[HttpGet("diagnostics/chromadb-health")]
+        //public async Task<ActionResult> CheckChromaDBHealth()
+        //{
+        //    try
+        //    {
+        //        var httpClient = _httpClientFactory.CreateClient("ChromaDB");
+        //        var response = await httpClient.GetAsync("/api/v2/heartbeat");
+
+        //        var healthy = response.IsSuccessStatusCode;
+        //        var content = await response.Content.ReadAsStringAsync();
+
+        //        return Ok(new
+        //        {
+        //            healthy,
+        //            timestamp = DateTime.UtcNow,
+        //            status = healthy ? "✅ Connected" : "❌ Disconnected",
+        //            response = content
+        //        });
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        return StatusCode(500, new
+        //        {
+        //            healthy = false,
+        //            error = ex.Message,
+        //            timestamp = DateTime.UtcNow
+        //        });
+        //    }
+        //}
+
+        public class ReprocessFileRequest
+        {
+            public string FilePath { get; set; } = "";
+            public string Plant { get; set; } = "";
         }
     }
 }

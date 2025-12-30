@@ -3,8 +3,10 @@ using MEAI_GPT_API.Service;
 using MEAI_GPT_API.Service.Interface;
 using Microsoft.Extensions.Options;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using static MEAI_GPT_API.Models.Conversation;
 
@@ -424,12 +426,30 @@ public partial class DynamicCodingAssistanceService
             //    codingPrompt, generationModel, context.History, languageConfig);
 
 
-            var solution = await GenerateCodingResponseAsync(
-    codingPrompt,
-    generationModel,
-    context.History,
-    languageConfig
-);
+            var solutionBuilder = new StringBuilder();
+
+            _logger.LogInformation("🔄 Starting streaming generation...");
+
+            await foreach (var token in GenerateCodingResponseStreamAsync(
+                codingPrompt,
+                generationModel,
+                context.History,
+                languageConfig))
+            {
+                if (token.StartsWith("ERROR:"))
+                {
+                    throw new Exception(token.Substring(6));
+                }
+
+                solutionBuilder.Append(token);
+            }
+
+            var solution = solutionBuilder.ToString();
+
+            if (string.IsNullOrWhiteSpace(solution))
+            {
+                throw new Exception("Generated solution is empty");
+            }
 
             // Extract code examples from the response
             var codeExamples = ExtractCodeExamplesFromAnswer(solution, languageConfig);
@@ -774,45 +794,141 @@ public partial class DynamicCodingAssistanceService
     /// <summary>
     /// Generates language-specific coding assistance response
     /// </summary>
-    private async Task<string> GenerateCodingResponseAsync(
+    private async IAsyncEnumerable<string> GenerateCodingResponseStreamAsync(
         string prompt,
         ModelConfiguration generationModel,
         List<ConversationTurn> history,
-        LanguageConfig languageConfig)
+        LanguageConfig languageConfig,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        try
+        _logger.LogInformation($"🔧 Streaming {languageConfig.Name} solution with model {generationModel.Name}");
+
+        var messages = new List<object>();
+
+        // System prompt for coding
+        messages.Add(new
         {
-            var messages = BuildCodingMessages(prompt, history, languageConfig);
-            var requestData = BuildCodingRequestData(generationModel, messages, languageConfig);
+            role = "system",
+            content = $@"You are an expert {languageConfig.Name} programmer. 
 
-            _logger.LogInformation(
-                $"🤖 Generating {languageConfig.Name} response | Model: {generationModel.Name} | Context: {messages.Count} messages");
+INSTRUCTIONS:
+1. Write clean, well-documented, production-ready code
+2. Include helpful comments explaining the logic
+3. Follow {languageConfig.Name} best practices and conventions
+4. Provide complete, working solutions
+5. Format code using markdown code blocks with language specification
 
-            var response = await ExecuteCodeGenerationRequestAsync(requestData, languageConfig);
+Be thorough, precise, and educational in your explanations."
+        });
 
-            if (response == null)
+        // Add conversation history (limited)
+        foreach (var turn in history.TakeLast(3))
+        {
+            messages.Add(new { role = "user", content = turn.Question });
+            messages.Add(new { role = "assistant", content = turn.Answer });
+        }
+
+        // Add current coding prompt
+        messages.Add(new { role = "user", content = prompt });
+
+        var requestData = new
+        {
+            model = generationModel.Name,
+            messages,
+            stream = true, // ✅ ENABLE STREAMING
+            temperature = 0.3,
+            options = new Dictionary<string, object>
             {
-                return BuildFallbackResponse(languageConfig, "generation failed");
+                ["num_ctx"] = 8000,
+                ["num_predict"] = 3000,
+                ["top_p"] = 0.9,
+                ["repeat_penalty"] = 1.05
+            }
+        };
+
+        _logger.LogInformation("📤 Sending streaming request to Ollama...");
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/chat")
+        {
+            Content = JsonContent.Create(requestData)
+        };
+
+        HttpResponseMessage? response = null;
+
+
+        response = await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead, // ✅ Critical for streaming
+            cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogError($"❌ Ollama request failed: {response.StatusCode}");
+            _logger.LogError($"Error details: {errorContent}");
+            yield return $"ERROR: Failed to generate coding solution: {response.StatusCode}";
+            yield break;
+        }
+
+        using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream);
+
+        _logger.LogInformation("✅ Streaming started...");
+
+        while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+        {
+            var line = await reader.ReadLineAsync();
+            if (string.IsNullOrWhiteSpace(line)) continue;
+
+
+            var streamResponse = JsonSerializer.Deserialize<OllamaStreamResponse>(line);
+
+            // Handle chat format
+            if (streamResponse?.Message?.Content != null &&
+                !string.IsNullOrEmpty(streamResponse.Message.Content))
+            {
+                yield return streamResponse.Message.Content;
             }
 
-            // Validate and enhance the response
-            var validatedResponse = await ValidateAndEnhanceCodingResponse(response, languageConfig, prompt);
+            // Check if done
+            if (streamResponse?.Done == true)
+            {
+                _logger.LogInformation("✅ Streaming complete");
+                break;
+            }
 
-            _logger.LogInformation($"✅ Successfully generated {languageConfig.Name} response ({validatedResponse.Length} chars)");
-
-            return validatedResponse;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"❌ Critical error in {languageConfig.Name} response generation");
-            return BuildFallbackResponse(languageConfig, "unexpected error", ex.Message);
         }
     }
 
+
+    private class OllamaStreamResponse
+    {
+        [JsonPropertyName("model")]
+        public string? Model { get; set; }
+
+        [JsonPropertyName("response")]
+        public string? Response { get; set; }
+        [JsonPropertyName("message")]
+        public MessageContent? Message { get; set; }  // ✅ For /chat endpoint
+
+        [JsonPropertyName("done")]
+        public bool Done { get; set; }
+
+        [JsonPropertyName("context")]
+        public int[]? Context { get; set; }
+    }
+    private class MessageContent
+    {
+        [JsonPropertyName("role")]
+        public string? Role { get; set; }
+
+        [JsonPropertyName("content")]
+        public string? Content { get; set; }
+    }
     private List<object> BuildCodingMessages(
-        string prompt,
-        List<ConversationTurn> history,
-        LanguageConfig languageConfig)
+            string prompt,
+            List<ConversationTurn> history,
+            LanguageConfig languageConfig)
     {
         var messages = new List<object>();
 

@@ -5,6 +5,8 @@ using MEAI_GPT_API.Service;
 using MEAI_GPT_API.Service.Interface;
 using MEAI_GPT_API.Service.Models;
 using MEAI_GPT_API.Services;
+using MEAIGPTAPI.Models;
+using MEAIGPTAPI.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.StackExchangeRedis;
 using Microsoft.Extensions.DependencyInjection;
@@ -43,14 +45,28 @@ builder.Services.AddHttpClient("ChromaDB", client =>
     client.Timeout = TimeSpan.FromMinutes(timeoutMinutes);
 });
 
+// Add configuration binding
+builder.Services.Configure<OllamaLoadBalancerOptions>(
+    builder.Configuration.GetSection("OllamaLoadBalancer"));
+
+// Configure HttpClient (remove BaseAddress)
 builder.Services.AddHttpClient("OllamaAPI", client =>
 {
-    var baseUrl = builder.Configuration["Ollama:BaseUrl"] ?? "http://localhost:11434";
-    var timeoutMinutes = builder.Configuration.GetValue<int>("Ollama:TimeoutMinutes", 10);
-
-    client.BaseAddress = new Uri(baseUrl);
-    client.Timeout = TimeSpan.FromMinutes(timeoutMinutes);
+    // Note: No BaseAddress set - handled by OllamaHttpClient
+    var timeout = builder.Configuration.GetValue<int>("OllamaLoadBalancer:TimeoutMinutes", 10);
+    client.Timeout = TimeSpan.FromMinutes(timeout);
+    client.DefaultRequestHeaders.Add("Connection", "keep-alive");
+})
+.ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+{
+    MaxConnectionsPerServer = 10,
+    UseCookies = false
 });
+
+// Register the wrapper as a singleton
+builder.Services.AddSingleton<OllamaHttpClient>();
+
+
 
 // Add Redis Cache with fallback to in-memory cache
 if (builder.Configuration.GetConnectionString("Redis") != null)

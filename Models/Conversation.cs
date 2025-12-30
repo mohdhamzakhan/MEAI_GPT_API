@@ -6,7 +6,9 @@ namespace MEAI_GPT_API.Models
     {
         private readonly ConcurrentDictionary<string, ConversationContext> _sessionContexts = new();
 
-        public ConversationContext GetOrCreateConversationContext(string? sessionId)
+        public ConversationContext GetOrCreateConversationContext(
+    string? sessionId,
+    Func<string, Task<List<ConversationTurn>>>? historyLoader = null)
         {
             if (string.IsNullOrEmpty(sessionId))
             {
@@ -21,6 +23,14 @@ namespace MEAI_GPT_API.Models
             });
 
             context.LastAccessed = DateTime.Now;
+
+            // ✅ Load history if provided and not already loaded
+            if (historyLoader != null && context.History.Count == 0)
+            {
+                var history = historyLoader(sessionId).GetAwaiter().GetResult();
+                context.History.AddRange(history);
+            }
+
             return context;
         }
 

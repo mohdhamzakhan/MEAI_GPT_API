@@ -19,76 +19,87 @@ namespace MEAI_GPT_API.Service.Models
         }
         public async Task<List<string>> ExtractEntitiesAsync(string text)
         {
-            var prompt = $"Extract all named entities (people, organizations, titles, etc.) from the following text:\n\n\"{text}\"\n\nEntities:";
-
-            var request = new
-            {
-                model = _config.DefaultGenerationModel ?? "mistral:latest",
-                messages = new[]
-                {
-            new { role = "user", content = prompt }
-        },
-                temperature = 0.1,
-                stream = false // Ensure non-streaming response
-            };
+            // ✅ Fast regex-based extraction (no LLM call needed)
+            var entities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             try
             {
-                var response = await _httpClient.PostAsJsonAsync("/api/chat", request);
-
-                if (!response.IsSuccessStatusCode)
+                // 1. Extract capitalized words/phrases (proper nouns)
+                var capitalizedPattern = @"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b";
+                var capitalizedMatches = Regex.Matches(text, capitalizedPattern);
+                foreach (Match match in capitalizedMatches)
                 {
-                    _logger.LogWarning($"Entity extraction failed: {response.StatusCode}");
-                    return new List<string>();
-                }
-
-                var json = await response.Content.ReadAsStringAsync();
-
-                // Log the raw response for debugging
-                _logger.LogDebug($"Entity extraction response: {json}");
-
-                // Handle potential streaming response format
-                if (json.Contains("}\n{"))
-                {
-                    // Split by newlines and take the last valid JSON object
-                    var lines = json.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-                    var lastValidJson = lines.LastOrDefault(line => line.Trim().StartsWith("{") && line.Trim().EndsWith("}"));
-
-                    if (lastValidJson != null)
+                    var entity = match.Value.Trim();
+                    if (entity.Length > 2 && !IsCommonWord(entity))
                     {
-                        json = lastValidJson;
+                        entities.Add(entity);
                     }
                 }
 
-                using var doc = JsonDocument.Parse(json);
-
-                if (!doc.RootElement.TryGetProperty("message", out var messageElement) ||
-                    !messageElement.TryGetProperty("content", out var contentElement))
+                // 2. Extract all-caps words (acronyms, organizations)
+                var acronymPattern = @"\b[A-Z]{2,}\b";
+                var acronymMatches = Regex.Matches(text, acronymPattern);
+                foreach (Match match in acronymMatches)
                 {
-                    _logger.LogWarning("Unexpected response format from entity extraction");
-                    return new List<string>();
+                    entities.Add(match.Value);
                 }
 
-                var content = contentElement.GetString() ?? "";
+                // 3. Extract titles + names (e.g., "CEO John Smith", "Dr. Jane Doe")
+                var titlePattern = @"\b(Mr|Ms|Mrs|Dr|Prof|CEO|CTO|CFO|President|Director|Manager|Engineer)\b\.?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*";
+                var titleMatches = Regex.Matches(text, titlePattern, RegexOptions.IgnoreCase);
+                foreach (Match match in titleMatches)
+                {
+                    entities.Add(match.Value.Trim());
+                }
 
-                return content.Split(new[] { ',', '\n', ';' }, StringSplitOptions.RemoveEmptyEntries)
-                             .Select(e => e.Trim().Trim('"', '\'', '-', '*'))
-                             .Where(e => e.Length > 1 && !string.IsNullOrWhiteSpace(e))
-                             .Distinct(StringComparer.OrdinalIgnoreCase)
-                             .Take(10) // Limit to prevent excessive entities
-                             .ToList();
-            }
-            catch (JsonException ex)
-            {
-                _logger.LogError(ex, $"JSON parsing failed in entity extraction. Raw response might be malformed.");
-                return new List<string>();
+                // 4. Extract company suffixes (e.g., "Acme Corp", "XYZ Inc")
+                var companyPattern = @"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(Corp|Inc|Ltd|LLC|Company|Corporation|Industries|Systems|Technologies|Solutions)\b";
+                var companyMatches = Regex.Matches(text, companyPattern);
+                foreach (Match match in companyMatches)
+                {
+                    entities.Add(match.Value.Trim());
+                }
+
+                // 5. Extract quoted names/terms
+                var quotedPattern = @"""([^""]+)""|'([^']+)'";
+                var quotedMatches = Regex.Matches(text, quotedPattern);
+                foreach (Match match in quotedMatches)
+                {
+                    var quoted = match.Groups[1].Value.Length > 0 ? match.Groups[1].Value : match.Groups[2].Value;
+                    if (quoted.Length > 2)
+                    {
+                        entities.Add(quoted.Trim());
+                    }
+                }
+
+                _logger.LogDebug($"✅ Fast entity extraction found {entities.Count} entities");
+
+                return entities
+                    .Where(e => e.Length > 1)
+                    .Take(15) // Limit to prevent excessive entities
+                    .ToList();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to extract entities");
+                _logger.LogError(ex, "Failed to extract entities with regex");
                 return new List<string>();
             }
         }
+
+        // Helper method to filter common words
+        private bool IsCommonWord(string word)
+        {
+            var commonWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "The", "This", "That", "These", "Those", "When", "Where", "What", "Which",
+        "Who", "Why", "How", "Can", "Could", "Would", "Should", "May", "Might",
+        "Must", "Will", "Shall", "Have", "Has", "Had", "Does", "Did", "Done",
+        "Here", "There", "About", "After", "Before", "During", "Since", "Until"
+    };
+
+            return commonWords.Contains(word);
+        }
+
         public List<string> ExtractTopicsFromQuery(string query)
         {
             var topics = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

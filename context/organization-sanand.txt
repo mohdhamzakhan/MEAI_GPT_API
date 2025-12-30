@@ -1,0 +1,32 @@
+﻿PLANT LEADERSHIP:
+Managing Director  === Yoshinori Shigemi
+Vice President Operations  == Kosuke Hirai
+Chief Operating Officer == Mukesh Kumar Gupta
+Section Incharge F&A === Manish Wadhwa
+Functional Head Production == Ashok Kumar Tripathi
+Section Incharge IT  == Manish Wadhwa
+Section Incharge HR&Admin == Shiva kumar Achari
+Section Incharge Sales == Ramesh bagri
+Section Incharge QA == Atul Kumar Gupta
+Section Incharge Materials == Lalit Kumar
+
+
+SHIFT SUPERVISORS:
+- Day Shift Supervisor: [Name]
+- Night Shift Supervisor: [Name]
+
+PLANT-SPECIFIC CONTACTS:
+- Reception: +91-XXX-XXXX-XXXX
+- Security: Ext: 100
+- Medical Room: Ext: 101
+- Canteen: Ext: 102
+
+REPORTING TO HEAD OFFICE:
+- Plant Manager reports to: COO at Head Office
+- HR Manager reports to: CHRO at Head Office
+
+PLANT INFORMATION:
+- Location: [Full Address]
+- Operational Since: [Year]
+- Working Hours: [Timings]
+- Employee Strength: [Count]

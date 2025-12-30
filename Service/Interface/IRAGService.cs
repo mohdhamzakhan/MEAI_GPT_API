@@ -24,4 +24,10 @@ public interface IRAGService
     Task DeleteModelDataFromChroma(string modelName);
     Task WarmUpEmbeddingsAsync();
     IAsyncEnumerable<StreamChunk> ProcessQueryStreamAsync(string question, string plant, string? generationModel = null, string? embeddingModel = null, int maxResults = 10, bool meaiInfo = true, string? sessionId = null, bool useReRanking = true, CancellationToken cancellationToken = default);
+    Task ClearFileCacheAsync(string filePath);
+
+    Task ProcessSingleFileAsync(string filePath, string plant);
+    Task ClearAllCachesAsync();
+    Task<EmbeddingTestResult> TestEmbeddingModelAsync(string modelName);
+
 }

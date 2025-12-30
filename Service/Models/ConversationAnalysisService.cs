@@ -265,8 +265,11 @@ namespace MEAI_GPT_API.Service.Models
             if (!context.History.Any()) return false;
 
             var lowerQ = question.ToLowerInvariant().Trim();
+            var lastTurn = context.History.Last();
+            var previousQuestion = lastTurn.Question.ToLowerInvariant();
+            var previousAnswer = lastTurn.Answer.ToLowerInvariant();
 
-            // Patterns that usually indicate continuation
+            // ✅ METHOD 1: Pattern-based continuation detection (existing)
             string[] continuationPatterns = new[]
             {
         // Request patterns
@@ -296,8 +299,190 @@ namespace MEAI_GPT_API.Service.Models
                 }
             }
 
+            // ✅ METHOD 2: Pronoun reference detection (NEW)
+            if (ContainsPronounReference(lowerQ))
+            {
+                _logger.LogDebug($"Pronoun reference detected in question: '{question}'");
+                return true;
+            }
+
+            // ✅ METHOD 3: Possessive pronoun detection (NEW)
+            if (ContainsPossessivePronoun(lowerQ))
+            {
+                _logger.LogDebug($"Possessive pronoun detected in question: '{question}'");
+                return true;
+            }
+
+            // ✅ METHOD 4: Incomplete question detection (NEW)
+            // Questions that start with verbs often refer back to previous context
+            if (StartsWithVerb(lowerQ))
+            {
+                _logger.LogDebug($"Incomplete question (verb start) detected: '{question}'");
+                return true;
+            }
+
+            // ✅ METHOD 5: Entity continuity check (NEW)
+            if (HasSharedEntities(question, previousQuestion, previousAnswer, context))
+            {
+                _logger.LogDebug($"Shared entity detected with previous conversation");
+                return true;
+            }
+
             return false;
         }
+
+        // ✅ Detect pronouns that reference previous context
+        private bool ContainsPronounReference(string question)
+        {
+            // Subject pronouns
+            var subjectPronouns = new[]
+{
+    // Personal
+    "i","me","you","he","him","she","her","it","we","us","they","them",
+    
+    // Possessive
+    "my","mine","your","yours","his","her","hers","its","our","ours","their","theirs",
+    
+    // Reflexive / Intensive
+    "myself","yourself","himself","herself","itself","ourselves","yourselves","themselves",
+    
+    // Demonstrative
+    "this","that","these","those",
+    
+    // Interrogative / Relative
+    "who","whom","whose","which","what","that",
+    
+    // Indefinite
+    "anyone","anybody","anything","someone","somebody","something",
+    "everyone","everybody","everything","no one","nobody","nothing",
+    "each","either","neither","few","several","many","all","some","any","most","none","one","both",
+    
+    // Reciprocal
+    "each other","one another"
+};
+
+
+            // Check if question starts with pronoun or contains pronoun in key position
+            var words = question.Split(new[] { ' ', '?', ',' }, StringSplitOptions.RemoveEmptyEntries);
+
+            if (words.Length == 0) return false;
+
+            // Check first few words for pronouns
+            var startWords = words;
+
+            foreach (var word in startWords)
+            {
+                if (subjectPronouns.Contains(word))
+                {
+                    return true;
+                }
+            }
+
+            // Check for "what about him/her/them/it"
+            if (question.Contains("what about") && subjectPronouns.Any(p => question.Contains(p)))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        // ✅ Detect possessive pronouns (his, her, their, its)
+        private bool ContainsPossessivePronoun(string question)
+        {
+            var possessivePronouns = new[]
+            {
+        "his", "her", "their", "its",
+        "his role", "her role", "their role",
+        "his position", "her position", "their position",
+        "his responsibility", "her responsibility", "their responsibility"
+    };
+
+            foreach (var pronoun in possessivePronouns)
+            {
+                if (question.Contains(pronoun))
+                {
+                    _logger.LogDebug($"Found possessive pronoun: '{pronoun}'");
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // ✅ Detect questions starting with verbs (incomplete questions)
+        private bool StartsWithVerb(string question)
+        {
+            var verbStarts = new[]
+            {
+        "is ", "are ", "was ", "were ", "has ", "have ", "had ",
+        "does ", "do ", "did ", "can ", "could ", "will ", "would ",
+        "should ", "might ", "may "
+    };
+
+            foreach (var verb in verbStarts)
+            {
+                if (question.StartsWith(verb))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // ✅ Check if current question shares entities with previous conversation
+        private bool HasSharedEntities(string currentQuestion, string previousQuestion, string previousAnswer, ConversationContext context)
+        {
+            // Check named entities from context
+            if (context.NamedEntities.Any())
+            {
+                var currentLower = currentQuestion.ToLowerInvariant();
+
+                foreach (var entity in context.NamedEntities)
+                {
+                    // Check if entity appears in current question
+                    if (currentLower.Contains(entity.ToLowerInvariant()))
+                    {
+                        _logger.LogDebug($"Shared entity found: '{entity}'");
+                        return true;
+                    }
+                }
+            }
+
+            // Check for significant word overlap (nouns/proper nouns)
+            var previousWords = ExtractSignificantWords(previousQuestion + " " + previousAnswer);
+            var currentWords = ExtractSignificantWords(currentQuestion);
+
+            var overlap = previousWords.Intersect(currentWords, StringComparer.OrdinalIgnoreCase).ToList();
+
+            if (overlap.Count >= 2) // At least 2 significant words in common
+            {
+                _logger.LogDebug($"Word overlap detected: {string.Join(", ", overlap)}");
+                return true;
+            }
+
+            return false;
+        }
+
+        // ✅ Extract significant words (filter out stop words)
+        private HashSet<string> ExtractSignificantWords(string text)
+        {
+            var stopWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "the", "is", "are", "was", "were", "a", "an", "and", "or", "but",
+        "in", "on", "at", "to", "for", "of", "with", "by", "from", "what",
+        "who", "where", "when", "why", "how", "can", "could", "would", "should"
+    };
+
+            var words = text.Split(new[] { ' ', '?', ',', '.', '!', ';', ':' }, StringSplitOptions.RemoveEmptyEntries);
+
+            return words
+                .Where(w => w.Length > 2 && !stopWords.Contains(w))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+
+
         public string DetermineTopicTag(string question, string answer)
         {
             var lowerQuestion = question.ToLowerInvariant();
