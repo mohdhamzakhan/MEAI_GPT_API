@@ -3,7 +3,9 @@ using MEAI_GPT_API.Data;
 using MEAI_GPT_API.Models;
 using MEAI_GPT_API.Service.Interface;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using System.Text.Json;
+using static MEAI_GPT_API.Controller.RagController;
 
 namespace MEAI_GPT_API.Services
 {
@@ -33,7 +35,7 @@ namespace MEAI_GPT_API.Services
                 // Update session statistics
                 var session = await GetOrCreateSessionAsync(entry.SessionId);
                 session.ConversationCount++;
-                session.LastAccessedAt = DateTime.UtcNow;
+                session.LastAccessedAt = DateTime.Now;
                 session.LastTopicTag = entry.TopicTag;
 
                 await UpdateSessionAsync(session);
@@ -364,6 +366,69 @@ namespace MEAI_GPT_API.Services
             }
 
             return dot / (Math.Sqrt(normA) * Math.Sqrt(normB));
+        }
+
+        // ✅ FIXED: Use injected _context instead of creating new scope
+        public async Task<List<SessionSummary>> GetConversationSessionsAsync(string? userId = null)
+        {
+            var query = _context.ConversationSessions
+                .Include(s => s.Conversations)
+                .AsQueryable();
+
+            if (!string.IsNullOrEmpty(userId))
+            {
+                query = query.Where(s => s.UserId == userId);
+            }
+
+            var sessions = await query
+                .OrderByDescending(s => s.LastAccessedAt)
+                .Select(s => new SessionSummary
+                {
+                    SessionId = s.SessionId,
+                    CreatedAt = s.CreatedAt,
+                    LastAccessedAt = s.LastAccessedAt,
+                    MessageCount = s.ConversationCount,
+                    LastMessage = s.Conversations
+                        .OrderByDescending(c => c.CreatedAt)
+                        .Select(c => c.Question)
+                        .FirstOrDefault() ?? "No messages",
+                    UserId = s.UserId
+                })
+                .ToListAsync();
+
+            return sessions;
+        }
+
+        // ✅ FIXED: Use injected _context
+        public async Task<List<ConversationMessage>> GetSessionMessagesAsync(string sessionId)
+        {
+            var messages = await _context.ConversationEntries
+                .Where(e => e.SessionId == sessionId)
+                .OrderBy(e => e.CreatedAt)
+                .Select(e => new ConversationMessage
+                {
+                    Question = e.Question,
+                    Answer = e.Answer,
+                    CreatedAt = e.CreatedAt
+                })
+                .ToListAsync();
+
+            return messages;
+        }
+
+        // ✅ FIXED: Use injected _context
+        public async Task DeleteSessionAsync(string sessionId)
+        {
+            var session = await _context.ConversationSessions
+                .FirstOrDefaultAsync(s => s.SessionId == sessionId);
+
+            if (session != null)
+            {
+                _context.ConversationSessions.Remove(session);
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation($"🗑️ Deleted session: {sessionId}");
+            }
         }
     }
 }

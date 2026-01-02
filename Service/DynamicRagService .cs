@@ -365,29 +365,29 @@ These are the fixed organizational details for {plant} plant.";
                 var lastWriteTime = fileInfo.LastWriteTime;
                 var cacheKey = $"{filePath}:{model.Name}";
 
+
                 // ✅ CHECK 1: In-memory cache
                 if (processedFilesCache.TryGetValue(cacheKey, out var cachedWriteTime))
                 {
                     if (cachedWriteTime >= lastWriteTime)
                     {
-                        _logger.LogDebug($"✓ [CACHE HIT] Skipping '{Path.GetFileName(filePath)}' for model '{model.Name}'");
-                        return; // ← EARLY EXIT
+                        _logger.LogDebug($"✓ Skipping unchanged file: {Path.GetFileName(filePath)}");
+                        return; // Early exit - file hasn't changed
                     }
                 }
 
                 // ✅ CHECK 2: ChromaDB existence (in case cache was cleared but embeddings exist)
                 var embeddingsExist = await FileEmbeddingsExistAsync(filePath, model.Name, collectionId);
 
-                if (embeddingsExist && cachedWriteTime >= lastWriteTime)
+                if (embeddingsExist)
                 {
-                    _logger.LogInformation($"✓ [DB HIT] Embeddings exist for '{Path.GetFileName(filePath)}', skipping reprocessing");
-
-                    // Update cache
+                    // ✅ FIX 3: Add to cache to prevent future DB checks
                     processedFilesCache[cacheKey] = lastWriteTime;
-                    return; // ← EARLY EXIT
+                    _logger.LogDebug($"✓ File already in DB, adding to cache: {Path.GetFileName(filePath)}");
+                    return;
                 }
 
-                _logger.LogInformation($"📄 Processing NEW/MODIFIED file: {Path.GetFileName(filePath)} for model: {model.Name}");
+                _logger.LogInformation($"📄 Processing NEW/MODIFIED file: {Path.GetFileName(filePath)}");
 
                 // Only delete if we're reprocessing a changed file
                 if (embeddingsExist)
@@ -532,6 +532,25 @@ These are the fixed organizational details for {plant} plant.";
         }
 
 
+        private string CleanupContextReferences(string response)
+        {
+            // Replace [Context 1], [Context 2], etc. with just the source document
+            var pattern = @"\[Context \d+\]:\s*([^\]]+\.docx)";
+            var cleaned = System.Text.RegularExpressions.Regex.Replace(
+                response,
+                pattern,
+                "[Source: $1]"
+            );
+
+            // Remove standalone [Context X] references
+            cleaned = System.Text.RegularExpressions.Regex.Replace(
+                cleaned,
+                @"\[Context \d+\]",
+                ""
+            );
+
+            return cleaned;
+        }
 
         public async Task<QueryResponse> ProcessQueryAsync(
     string question,
@@ -695,6 +714,8 @@ These are the fixed organizational details for {plant} plant.";
 
                 var answer = await GenerateChatResponseAsync(
                     question, genModel, context.History, relevantChunks, context, meaiInfo, plant);
+
+                answer = CleanupContextReferences(answer);
 
                 var answerEmbedding = await GetPerRequestEmbeddingAsync(answer);
 
@@ -1131,16 +1152,16 @@ These are the fixed organizational details for {plant} plant.";
             {
                 model = generationModel.Name,
                 messages,
-                temperature = 0.1, // Lower temperature for more factual responses
+                temperature = 0.1,
                 stream = false,
                 options = new Dictionary<string, object>
-                        {
-                            { "num_ctx", 4000 }, // Increased context window
-                            { "num_predict", 2000 }, // Allow longer responses
-                            { "top_p", 0.9 },
-                            { "repeat_penalty", 1.05 },
-                            { "stop", new string[] {} } // Don't stop early
-                        }
+    {
+        { "num_ctx", 16384  },       // ✅ Increased from 4000
+        { "num_predict", 16000 },   // ✅ Increased from 2000
+        { "top_p", 0.9 },
+        { "repeat_penalty", 1.05 },
+        { "stop", new string[] {} }
+    }
             };
 
             try
@@ -3079,28 +3100,28 @@ These are the fixed organizational details for {plant} plant.";
         private readonly object _systemInitLock = new();
         public async Task InitializeAsync()
         {
-            // ✅ Check if system is already initialized
+            // ✅ FIX: Check if already initialized at the start
             lock (_systemInitLock)
             {
                 if (_systemInitialized)
                 {
-                    _logger.LogInformation("✓ System already initialized, skipping full initialization");
+                    _logger.LogInformation("✅ System already initialized, skipping");
                     return;
                 }
             }
 
             try
             {
-                _logger.LogInformation("🚀 Starting RAG system initialization");
+                _logger.LogInformation("🚀 Starting RAG initialization");
 
-                // Parallel model discovery and configuration
+                // Load configurations in parallel
                 var initTasks = new List<Task>
         {
             Task.Run(async () =>
             {
-                var availableModels = await _modelManager.DiscoverAvailableModelsAsync();
-                await ConfigureDefaultModelsAsync(availableModels);
-                return availableModels;
+                var models = await _modelManager.DiscoverAvailableModelsAsync();
+                await ConfigureDefaultModelsAsync(models);
+                return models;
             }),
             Task.Run(() => EnsureDirectoriesExist()),
             Task.Run(() => EnsureAbbreviationContext()),
@@ -3111,22 +3132,22 @@ These are the fixed organizational details for {plant} plant.";
 
                 await Task.WhenAll(initTasks);
 
-                // ✅ ONLY process plants that haven't been initialized
+                // ✅ FIX: Only process NEW plants
                 var models = await _modelManager.DiscoverAvailableModelsAsync();
                 var embeddingModels = models.Where(m => m.Type == "embedding" || m.Type == "both").ToList();
 
                 var plantTasks = _plants.Plants.Keys.Select(async plant =>
                 {
-                    // Check if this plant was already initialized
+                    // Check if already initialized
                     if (_plantInitialized.TryGetValue(plant, out var initialized) && initialized)
                     {
-                        _logger.LogInformation($"✓ Plant '{plant}' already initialized, checking for changes only");
-                        await CheckForChangedFilesAsync(plant, embeddingModels);
+                        _logger.LogInformation($"✓ Plant '{plant}' already initialized");
                         return;
                     }
 
-                    _logger.LogInformation($"📄 Processing documents for NEW plant: {plant}");
+                    _logger.LogInformation($"📄 Processing NEW plant: {plant}");
                     await ProcessDocumentsForAllModelsAsync(embeddingModels, plant);
+
                     _plantInitialized[plant] = true;
                     _plantLastScan[plant] = DateTime.Now;
                 });
@@ -3138,11 +3159,11 @@ These are the fixed organizational details for {plant} plant.";
                     _systemInitialized = true;
                 }
 
-                _logger.LogInformation("✅ RAG system initialization completed");
+                _logger.LogInformation("✅ RAG initialization complete");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "❌ Failed to initialize RAG system");
+                _logger.LogError(ex, "❌ Initialization failed");
                 throw;
             }
         }
@@ -3612,9 +3633,17 @@ These are the fixed organizational details for {plant} plant.";
         {
             StreamChunk? errorChunk = null;
             var stopwatch = Stopwatch.StartNew();
+
+            _logger.LogInformation("=".PadRight(80, '='));
+            _logger.LogInformation("🚀 STREAMING QUERY START");
+            _logger.LogInformation($"   Question: {question}");
+            _logger.LogInformation($"   Plant: {plant}");
+            _logger.LogInformation($"   Model: {generationModel}");
+            _logger.LogInformation("=".PadRight(80, '='));
+
             yield return new StreamChunk { Type = "status", Content = "Processing query..." };
 
-            var sessionResult = await SafeInitializeSession(sessionId);
+            var sessionResult = await SafeInitializeSession(sessionId, cancellationToken);
             if (sessionResult.HasError)
             {
                 yield return new StreamChunk { Type = "error", Content = sessionResult.ErrorMessage };
@@ -3856,6 +3885,8 @@ These are the fixed organizational details for {plant} plant.";
             var hasError = false;
             string? errorMessage = null;
 
+            _logger.LogInformation("📝 About to call GenerateStreamingResponseSafe...");
+            int responseChunkCount = 0;
             // ✅ Generate response without try-catch around yield
             await foreach (var token in GenerateStreamingResponseSafe(
                 question,
@@ -3870,15 +3901,28 @@ These are the fixed organizational details for {plant} plant.";
                 if (cancellationToken.IsCancellationRequested)
                     yield break;
 
+                responseChunkCount++;
+
+                if (responseChunkCount <= 10)
+                {
+                    _logger.LogInformation($"✅ Response chunk {responseChunkCount}: '{token?.Substring(0, Math.Min(30, token?.Length ?? 0))}'");
+                }
+
+                _logger.LogInformation($"🎯 Received token from GenerateStreamingResponseSafe: '{token?.Substring(0, Math.Min(50, token?.Length ?? 0))}'");
+
                 // Check if this is an error token
                 if (token.StartsWith("__ERROR__:"))
                 {
+                    var errorMsg = token.Substring(10);
                     hasError = true;
                     errorMessage = token.Substring(10);
+                    _logger.LogError($"❌ Error token received: {errorMsg}");
                     break;
                 }
 
                 fullResponse.Append(token);
+                _logger.LogInformation($"✅ Yielding response chunk: '{token?.Substring(0, Math.Min(20, token?.Length ?? 0))}'");
+
 
                 yield return new StreamChunk
                 {
@@ -3891,22 +3935,14 @@ These are the fixed organizational details for {plant} plant.";
             {
                 try
                 {
-                    _logger.LogInformation($"💾 Saving conversation to database...");
+                    _logger.LogInformation("Saving conversation to database...");
 
-                    // ✅ Extract entities from the answer
+                    // Extract entities from the answer
                     var entities = await _entityExtraction.ExtractEntitiesAsync(fullResponse.ToString());
 
-                    // ✅ Optionally generate answer embedding (can be null if you want to skip)
-                    List<float>? answerEmbedding = null;
-                    try
-                    {
-                        answerEmbedding = await GetEmbeddingAsync(fullResponse.ToString(), embModel);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to generate answer embedding, continuing without it");
-                    }
+                   var answerEmbedding = await GetEmbeddingAsync(fullResponse.ToString(), embModel);
 
+                    // ✅ CRITICAL: Save to database FIRST
                     var conversationId = await SaveConversationToDatabaseFast(
                         sessionResult.Session!.SessionId,
                         question,
@@ -3914,24 +3950,35 @@ These are the fixed organizational details for {plant} plant.";
                         relevantChunks,
                         genModel!,
                         embModel!,
-                        relevantChunks.Any() ? relevantChunks.Average(c => c.Similarity) : 0.8, // confidence
+                        relevantChunks.Any() ? relevantChunks.Average(c => c.Similarity) : 0.8,
                         stopwatch.ElapsedMilliseconds,
-                        false, // isFromCorrection
-                        null, // parentId
+                        false,
+                        null,
                         plant,
-                        questionEmbedding, // ✅ Now defined
-                        answerEmbedding, // ✅ Now defined (can be null)
-                        entities); // ✅ Now defined
+                        questionEmbedding,
+                        answerEmbedding,
+                        entities
+                    );
 
-                    _logger.LogInformation($"✅ Saved conversation with ID: {conversationId}");
+                    _logger.LogInformation($"✅ Saved conversation with ID {conversationId}");
 
                     if (conversationId > 0)
                     {
-                        // ✅ Update conversation history in memory
-                        await UpdateConversationHistoryFast(context, question, fullResponse.ToString(), relevantChunks, entities);
+                        // ✅ NOW update in-memory context (this is just a cache)
+                        await UpdateConversationHistoryFast(
+                            context,
+                            question,
+                            fullResponse.ToString(),
+                            relevantChunks,
+                            entities
+                        );
 
-                        var verification = await _conversationStorage.GetSessionConversationsAsync(sessionResult.Session!.SessionId);
-                        _logger.LogInformation($"🔍 Verification: Database now has {verification.Count} conversations for this session");
+                        // ✅ VERIFY: Check if database has the conversation
+                        var verification = await _conversationStorage.GetSessionConversationsAsync(
+                            sessionResult.Session!.SessionId
+                        );
+
+                        _logger.LogInformation($"✅ Verification: Database now has {verification.Count} conversations");
                     }
                     else
                     {
@@ -3940,7 +3987,7 @@ These are the fixed organizational details for {plant} plant.";
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "❌ Failed to save conversation to database");
+                    _logger.LogError(ex, "Failed to save conversation to database");
                 }
             }
             stopwatch.Stop();
@@ -4114,47 +4161,78 @@ These are the fixed organizational details for {plant} plant.";
 
 
         private async IAsyncEnumerable<string> GenerateStreamingResponseSafe(
-    string question,
-    string model,
-    ConversationContext context,
-    List<RelevantChunk> relevantChunks,
-    bool meaiInfo,
-    string plant,
-    QuestionType questionType = QuestionType.NewTopic,
-    [EnumeratorCancellation] CancellationToken cancellationToken = default)
+     string question,
+     string model,
+     ConversationContext context,
+     List<RelevantChunk> relevantChunks,
+     bool meaiInfo,
+     string plant,
+     QuestionType questionType = QuestionType.NewTopic,
+     [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            var prompt = meaiInfo ? await _systemPromptBuilder.BuildMeaiSystemPrompt(plant, relevantChunks, question) :
-                BuildEnhancedPrompt(question, relevantChunks, context, meaiInfo, plant, questionType);
+            _logger.LogInformation("🚀 GenerateStreamingResponseSafe called");
 
+            var prompt = meaiInfo
+                ? await _systemPromptBuilder.BuildMeaiSystemPrompt(plant, relevantChunks, question)
+                : BuildEnhancedPrompt(question, relevantChunks, context, meaiInfo, plant, questionType);
 
+            _logger.LogInformation($"📝 Prompt built, length: {prompt?.Length ?? 0} chars");
 
-            _logger.LogInformation("Streaming response from model: {Model}", model);
-
-            IAsyncEnumerable<string>? stream = null;
-
-            try
-            {
-                stream = StreamGenerateAsync(model, prompt, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to start streaming: {Message}", ex.Message);
-                yield break;
-            }
+            var stream = await SafeCreateStream(model, prompt, cancellationToken);
 
             if (stream == null)
             {
-                yield return "__ERROR__:Stream was null";
+                _logger.LogError("❌ SafeCreateStream returned null");
+                yield return "__ERROR__:Failed to create response stream";
                 yield break;
             }
 
-            // Now stream tokens - errors here will propagate up naturally
+            _logger.LogInformation("✅ Stream created successfully, starting enumeration...");
+
+            int tokenCount = 0;
             await foreach (var token in stream.WithCancellation(cancellationToken))
             {
                 if (cancellationToken.IsCancellationRequested)
                     yield break;
 
+                tokenCount++;
+
+                if (tokenCount <= 5)
+                {
+                    _logger.LogInformation($"📤 Token {tokenCount}: '{token?.Substring(0, Math.Min(30, token?.Length ?? 0))}'");
+                }
+
                 yield return token;
+            }
+
+            _logger.LogInformation($"✅ Stream enumeration complete. Total tokens: {tokenCount}");
+
+            if (tokenCount == 0)
+            {
+                _logger.LogWarning("⚠️ WARNING: Zero tokens yielded from stream!");
+            }
+        }
+
+        // ✅ NEW: Safe stream creation wrapper
+        private async Task<IAsyncEnumerable<string>?> SafeCreateStream(
+     string model,
+     string prompt,
+     CancellationToken cancellationToken)
+        {
+            try
+            {
+                _logger.LogInformation($"🔧 Creating stream for model: {model}");
+
+                var stream = StreamGenerateAsync(model, prompt, cancellationToken);
+
+                _logger.LogInformation("✅ StreamGenerateAsync returned");
+
+                return stream;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Failed to create stream in SafeCreateStream");
+                return null;
             }
         }
 
@@ -4186,68 +4264,200 @@ These are the fixed organizational details for {plant} plant.";
 
 
         public async IAsyncEnumerable<string> StreamGenerateAsync(
-        string model,
-        string prompt,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+     string model,
+     string prompt,
+     [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            var requestBody = new
+            _logger.LogInformation("🌐 StreamGenerateAsync started");
+
+            var requestSetup = await SafeSetupStreamRequest(model, prompt, cancellationToken);
+
+            if (!requestSetup.Success)
             {
-                model = model,
-                prompt = prompt,
-                stream = true,  // ← CRITICAL: Enable streaming
-                options = new
-                {
-                    temperature = 0.7,
-                    num_predict = 2000,
-                    top_k = 40,
-                    top_p = 0.9
-                }
-            };
+                _logger.LogError($"❌ Stream setup failed: {requestSetup.ErrorMessage}");
+                yield break; // ← This exits early without tokens!
+            }
 
-            var request = new HttpRequestMessage(HttpMethod.Post, "/api/generate")
-            {
-                Content = JsonContent.Create(requestBody)
-            };
+            _logger.LogInformation("📡 HTTP response received, starting to read stream...");
 
-            _logger.LogInformation("Starting streaming generation with model: {Model}", model);
-
-            using var response = await _ollamaClient.SendAsync(
-                request,
-                HttpCompletionOption.ResponseHeadersRead,  // ← Don't buffer the entire response
-                cancellationToken);
-
-            response.EnsureSuccessStatusCode();
-
+            using var response = requestSetup.Response!;
             using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
             using var reader = new StreamReader(stream);
 
             int tokenCount = 0;
+            int lineCount = 0;
+
             while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
             {
                 var line = await reader.ReadLineAsync();
+                lineCount++;
 
                 if (string.IsNullOrWhiteSpace(line))
                     continue;
 
+                if (lineCount <= 3)
+                {
+                    _logger.LogInformation($"📄 Line {lineCount}: {line.Substring(0, Math.Min(100, line.Length))}");
+                }
 
-                var streamResponse = JsonSerializer.Deserialize<OllamaStreamResponse>(line);
+                var streamResponse = ParseStreamLine(line);
 
-                if (streamResponse?.Response != null && !string.IsNullOrEmpty(streamResponse.Response))
+                if (streamResponse == null)
+                {
+                    _logger.LogWarning($"⚠️ Failed to parse line: {line.Substring(0, Math.Min(100, line.Length))}");
+                    continue;
+                }
+
+                // ✅ Check if we're getting the response field
+                if (streamResponse.Response != null && !string.IsNullOrEmpty(streamResponse.Response))
                 {
                     tokenCount++;
-                    yield return streamResponse.Response;
+
+                    if (tokenCount <= 5)
+                    {
+                        _logger.LogInformation($"✅ Token {tokenCount}: '{streamResponse.Response}'");
+                    }
+
+                    yield return streamResponse.Response; // ← This MUST execute!
+                }
+                else if (streamResponse.Message?.Content != null && !string.IsNullOrEmpty(streamResponse.Message.Content))
+                {
+                    // ✅ ADD: Handle /api/chat format
+                    tokenCount++;
+
+                    if (tokenCount <= 5)
+                    {
+                        _logger.LogInformation($"✅ Chat token {tokenCount}: '{streamResponse.Message.Content}'");
+                    }
+
+                    yield return streamResponse.Message.Content;
                 }
 
-                // Check if streaming is complete
-                if (streamResponse?.Done == true)
+                if (streamResponse.Done == true)
                 {
-                    _logger.LogInformation("Streaming complete. Total tokens: {Count}", tokenCount);
+                    _logger.LogInformation($"🏁 Stream marked as done. Total tokens yielded: {tokenCount}");
                     break;
                 }
-
-                _logger.LogWarning("Failed to parse Ollama stream response");
-                continue;
             }
+
+            _logger.LogInformation($"🏁 StreamGenerateAsync complete. Lines read: {lineCount}, Tokens yielded: {tokenCount}");
+
+            if (tokenCount == 0)
+            {
+                _logger.LogError("❌ CRITICAL: StreamGenerateAsync yielded ZERO tokens!");
+            }
+        }
+
+        private bool IsMetadataQuery(string question)
+        {
+            var metadataKeywords = new[]
+            {
+        "which policy", "what policy", "list policy", "policy information",
+        "what policies", "available policies", "policy documents",
+        "what do you know", "what information", "which documents"
+    };
+
+            return metadataKeywords.Any(keyword =>
+                question.ToLowerInvariant().Contains(keyword));
+        }
+
+        private async Task<StreamSetupResult> SafeSetupStreamRequest(
+    string model,
+    string prompt,
+    CancellationToken cancellationToken)
+        {
+            try
+            {
+                // ✅ FIX: Use /api/chat instead of /api/generate for conversation context
+                var messages = new List<object>
+        {
+            new { role = "system", content = "You are a helpful AI assistant." },
+            new { role = "user", content = prompt }
+        };
+
+                var requestBody = new
+                {
+                    model = model,
+                    messages = messages,  // ✅ Use messages format
+                    stream = true,
+                    options = new
+                    {
+                        temperature = 0.7,
+                        num_predict = 16000,        // ✅ Increased from 2000
+                        top_k = 40,
+                        top_p = 0.9,
+                        num_ctx = 16384,            // ✅ Increased from 4096
+                        repeat_penalty = 1.1       // ✅ Prevent premature stopping
+                    }
+                };
+
+                var request = new HttpRequestMessage(HttpMethod.Post, "/api/chat")  // ✅ Changed from /api/generate
+                {
+                    Content = JsonContent.Create(requestBody)
+                };
+
+                var response = await _ollamaClient.SendAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    _logger.LogError($"❌ Ollama error: {response.StatusCode} - {errorContent}");
+
+                    return new StreamSetupResult
+                    {
+                        Success = false,
+                        ErrorMessage = $"HTTP {response.StatusCode}: {errorContent}"
+                    };
+                }
+
+                return new StreamSetupResult
+                {
+                    Success = true,
+                    Response = response
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to setup stream");
+                return new StreamSetupResult
+                {
+                    Success = false,
+                    ErrorMessage = ex.Message
+                };
+            }
+        }
+
+        private OllamaStreamResponse? ParseStreamLine(string line)
+        {
+            try
+            {
+                var response = JsonSerializer.Deserialize<OllamaStreamResponse>(line);
+
+                // ✅ FIX: Handle both /api/generate and /api/chat formats
+                if (response?.Message?.Content != null)
+                {
+                    // Convert chat format to generate format for consistency
+                    response.Response = response.Message.Content;
+                }
+
+                return response;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse stream line");
+                return null;
+            }
+        }
+
+        // ✅ NEW: Result wrapper classes
+        private class StreamSetupResult
+        {
+            public bool Success { get; set; }
+            public string ErrorMessage { get; set; } = "";
+            public HttpResponseMessage? Response { get; set; }
         }
 
         // Response model for Ollama streaming
@@ -4275,21 +4485,23 @@ These are the fixed organizational details for {plant} plant.";
             [JsonPropertyName("content")]
             public string? Content { get; set; }
         }
-        private async Task<SessionResult> SafeInitializeSession(string sessionId)
+        private async Task<SessionResult> SafeInitializeSession(string? sessionId, CancellationToken ct = default)
         {
             try
             {
+                _logger.LogInformation($"Initializing session: {sessionId}");
+
                 var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
                     sessionId ?? Guid.NewGuid().ToString(),
-                    _currentUser);
+                    _currentUser
+                );
 
                 var context = _conversation.GetOrCreateConversationContext(dbSession.SessionId);
 
-                // ✅ CRITICAL FIX: Load conversation history from database
-                if (context.History.Count == 0)
-                {
-                    await LoadConversationHistoryFromDatabaseAsync(dbSession.SessionId, context);
-                }
+                // ✅ FIX: ALWAYS refresh history from database, not just when empty
+                await RefreshConversationHistoryFromDatabase(dbSession.SessionId, context, ct);
+
+                _logger.LogInformation($"Session initialized with {context.History.Count} history items");
 
                 return new SessionResult
                 {
@@ -4300,35 +4512,44 @@ These are the fixed organizational details for {plant} plant.";
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to initialize session {SessionId}", sessionId);
+                _logger.LogError(ex, "Failed to initialize session");
                 return new SessionResult
                 {
                     HasError = true,
-                    ErrorMessage = "Failed to initialize session"
+                    ErrorMessage = "Session initialization failed"
                 };
             }
         }
-        private async Task LoadConversationHistoryFromDatabaseAsync(string sessionId, ConversationContext context)
+
+        // ✅ NEW METHOD: Always refresh history from database
+        private async Task RefreshConversationHistoryFromDatabase(
+            string sessionId,
+            ConversationContext context,
+            CancellationToken ct = default)
         {
             try
             {
-                _logger.LogInformation($"Loading conversation history for session {sessionId}");
+                _logger.LogInformation($"Refreshing conversation history for session {sessionId}");
 
-                // ✅ Get conversations from database
+                // Get latest conversations from database
                 var conversations = await _conversationStorage.GetSessionConversationsAsync(sessionId);
-
-                _logger.LogInformation($"Database returned {conversations.Count} conversations for session {sessionId}");
 
                 if (!conversations.Any())
                 {
-                    _logger.LogInformation($"No conversation history found in database for session {sessionId}");
+                    _logger.LogInformation($"No conversation history found for session {sessionId}");
                     return;
                 }
 
-                // ✅ Convert to ConversationTurn and add to context
+                _logger.LogInformation($"Found {conversations.Count} conversations in database");
+
+                // ✅ CRITICAL: Clear existing in-memory history to avoid stale data
+                context.History.Clear();
+                context.NamedEntities.Clear();
+
+                // Load fresh history from database (last 10 conversations)
                 var turns = conversations
                     .OrderBy(c => c.CreatedAt)
-                    .TakeLast(10) // Load last 10 conversations
+                    .TakeLast(10)
                     .Select(c => new ConversationTurn
                     {
                         Question = c.Question,
@@ -4338,15 +4559,14 @@ These are the fixed organizational details for {plant} plant.";
                     })
                     .ToList();
 
-                // ✅ Add turns to context history
+                // Add fresh turns to context
                 foreach (var turn in turns)
                 {
                     context.History.Add(turn);
+                    _logger.LogDebug($"Loaded turn: Q={turn.Question.Substring(0, Math.Min(50, turn.Question.Length))}...");
                 }
 
-                _logger.LogInformation($"✅ Loaded {turns.Count} conversation turns into memory for session {sessionId}");
-
-                // ✅ Load named entities from historical conversations
+                // Load named entities from all conversations
                 var allEntities = conversations
                     .SelectMany(c => c.NamedEntities ?? new List<string>())
                     .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -4360,9 +4580,7 @@ These are the fixed organizational details for {plant} plant.";
                     }
                 }
 
-                _logger.LogInformation($"✅ Loaded {allEntities.Count} named entities for session {sessionId}");
-
-                // ✅ Set last topic anchor from most recent conversation
+                // Set last topic anchor from most recent conversation
                 var lastConversation = conversations
                     .OrderByDescending(c => c.CreatedAt)
                     .FirstOrDefault();
@@ -4370,12 +4588,69 @@ These are the fixed organizational details for {plant} plant.";
                 if (lastConversation != null && !string.IsNullOrEmpty(lastConversation.Question))
                 {
                     context.LastTopicAnchor = lastConversation.Question;
-                    _logger.LogInformation($"✅ Set topic anchor: {lastConversation.Question}");
                 }
+
+                context.LastAccessed = DateTime.Now;
+
+                _logger.LogInformation($"✅ Refreshed history: {turns.Count} turns, {allEntities.Count} entities");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"❌ Failed to load conversation history for session {sessionId}");
+                _logger.LogError(ex, $"Failed to refresh conversation history for session {sessionId}");
+                // Don't throw - continue with existing history
+            }
+        }
+
+
+        private async Task LoadConversationHistoryFromDatabaseAsync(string sessionId, ConversationContext context)
+        {
+            try
+            {
+                _logger.LogInformation($"Refreshing conversation history for session {sessionId}");
+
+                var conversations = await _conversationStorage.GetSessionConversationsAsync(sessionId);
+
+                // CLEAR existing history first to avoid duplicates
+                context.History.Clear();
+                context.NamedEntities.Clear();
+
+                if (!conversations.Any())
+                {
+                    _logger.LogInformation($"No conversation history found for session {sessionId}");
+                    return;
+                }
+
+                // Load fresh history
+                var turns = conversations
+                    .OrderBy(c => c.CreatedAt)
+                    .TakeLast(10)
+                    .Select(c => new ConversationTurn
+                    {
+                        Question = c.Question,
+                        Answer = c.Answer,
+                        Timestamp = c.CreatedAt,
+                        Sources = c.Sources ?? new List<string>()
+                    })
+                    .ToList();
+
+                context.History.AddRange(turns);
+
+                // Load entities
+                var allEntities = conversations
+                    .SelectMany(c => c.NamedEntities ?? new List<string>())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                foreach (var entity in allEntities)
+                {
+                    context.NamedEntities.Add(entity);
+                }
+
+                _logger.LogInformation($"Loaded {turns.Count} turns, {allEntities.Count} entities for session {sessionId}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to load conversation history for session {sessionId}");
                 // Don't throw - continue with empty history
             }
         }
@@ -4714,7 +4989,7 @@ These are the fixed organizational details for {plant} plant.";
             yield return new StreamChunk { Type = "status", Content = "Processing general query..." };
 
             // Get session
-            var sessionResult = await SafeInitializeSession(sessionId);
+            var sessionResult = await SafeInitializeSession(sessionId, cancellationToken);
             if (sessionResult.HasError)
             {
                 yield return new StreamChunk { Type = "error", Content = sessionResult.ErrorMessage };
@@ -4829,10 +5104,11 @@ Be helpful, informative, and engaging in your communication."
                 model = modelName,
                 messages,
                 temperature = 0.7,
-                stream = true,  // ✅ CRITICAL: Enable streaming
+                stream = true,
                 options = new Dictionary<string, object>
                 {
-                    ["num_ctx"] = 4096,
+                    ["num_ctx"] = 16384,        // ✅ Increased from 4096
+                    ["num_predict"] = 16000,    // ✅ Increased
                     ["top_p"] = 0.9
                 }
             };
@@ -4894,6 +5170,21 @@ Be helpful, informative, and engaging in your communication."
      QuestionType questionType = QuestionType.NewTopic) // ✅ Add parameter
         {
             var promptBuilder = new StringBuilder();
+
+            if (context.History.Any())
+            {
+                promptBuilder.AppendLine("=== CONVERSATION HISTORY ===");
+
+                // Include more history for follow-ups
+                int historyCount = questionType == QuestionType.FollowUp ? 5 : 3;
+
+                foreach (var turn in context.History.TakeLast(historyCount))
+                {
+                    promptBuilder.AppendLine($"Q: {turn.Question}");
+                    promptBuilder.AppendLine($"A: {turn.Answer}");
+                    promptBuilder.AppendLine();
+                }
+            }
 
             // ✅ ADD CONTEXT-AWARE INSTRUCTIONS based on question type
             if (questionType == QuestionType.FollowUp && context.History.Any())
@@ -5334,6 +5625,7 @@ Be helpful, informative, and engaging in your communication."
 
             return result;
         }
+
 
         // Supporting class
         public class EmbeddingTestResult

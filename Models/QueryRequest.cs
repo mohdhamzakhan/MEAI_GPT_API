@@ -16,6 +16,7 @@ namespace MEAI_GPT_API.Models
         public string? EmbeddingModel { get; set; }   // New parameter
         public bool? useReRanking { get; set; } = true;
         public string Plant { get; set; }
+
     }
 
     public record EmbeddingData(string Text, List<float> Vector, string SourceFile, DateTime LastModified, string model)

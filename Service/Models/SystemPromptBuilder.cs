@@ -14,8 +14,160 @@ namespace MEAI_GPT_API.Service.Models
             _policyAnalysis = policyAnalysis;
             _entityExtraction = entityExtraction;
         }
+
+        // Add these helper methods to SystemPromptBuilder class
+
+        private bool IsMetadataQuery(string question)
+        {
+            var metadataKeywords = new[]
+            {
+        "which policy", "what policy", "list policy", "policy information",
+        "what policies", "available policies", "policy documents",
+        "what do you know", "what information", "which documents",
+        "show me policies", "tell me about policies"
+    };
+
+            return metadataKeywords.Any(keyword =>
+                question.ToLowerInvariant().Contains(keyword));
+        }
+
+        public string BuildMetadataSystemPrompt(string plant, List<RelevantChunk> chunks)
+        {
+            var prompt = new StringBuilder();
+
+            prompt.AppendLine($"You are MEAI Policy Assistant for {plant}.");
+            prompt.AppendLine();
+            prompt.AppendLine("═══════════════════════════════════════════════════════════════");
+            prompt.AppendLine();
+            prompt.AppendLine("🎯 METADATA QUERY DETECTED");
+            prompt.AppendLine();
+            prompt.AppendLine("The user is asking about available policies. Provide a clean, organized overview:");
+            prompt.AppendLine();
+
+            prompt.AppendLine("**YOUR TASK:**");
+            prompt.AppendLine("1. Extract unique policy names from the context");
+            prompt.AppendLine("2. Group policies by category (HR, IT Security, Operations, Safety, etc.)");
+            prompt.AppendLine("3. Provide brief descriptions based on the context content");
+            prompt.AppendLine("4. DO NOT repeat source file names multiple times");
+            prompt.AppendLine("5. Make it human-readable and informative");
+            prompt.AppendLine();
+
+            prompt.AppendLine("**FORMATTING EXAMPLE:**");
+            prompt.AppendLine(@"
+I have access to the following policies for [Plant] plant:
+
+**Information Security:**
+- ISMS Policy (Technical) - Covers technical security controls, access management, and system hardening
+- ISMS Policy (General Baseline) - Outlines general security principles and employee responsibilities
+
+**Governance & Compliance:**
+- Whistle Blower Policy - Provides guidelines for reporting concerns and protections for whistleblowers
+
+**Human Resources:**
+- Leave Policy - Details leave types, entitlements, and application procedures
+
+Would you like detailed information about any specific policy?
+");
+
+            prompt.AppendLine("═══════════════════════════════════════════════════════════════");
+            prompt.AppendLine();
+
+            // Extract unique policies from chunks
+            var uniquePolicies = chunks
+                .Select(c => new
+                {
+                    FileName = CleanPolicyName(c.Source),
+                    Content = c.Text,
+                    Source = c.Source
+                })
+                .GroupBy(p => p.FileName)
+                .Select(g => g.First())
+                .ToList();
+
+            prompt.AppendLine("📚 AVAILABLE POLICY DOCUMENTS:");
+            prompt.AppendLine();
+
+            foreach (var policy in uniquePolicies)
+            {
+                prompt.AppendLine($"**{policy.FileName}**");
+
+                // Extract a brief description
+                var description = ExtractPolicyDescription(policy.Content);
+                if (!string.IsNullOrEmpty(description))
+                {
+                    prompt.AppendLine($"Description: {description}");
+                }
+                prompt.AppendLine($"Source: {policy.Source}");
+                prompt.AppendLine();
+            }
+
+            prompt.AppendLine("═══════════════════════════════════════════════════════════════");
+            prompt.AppendLine();
+            prompt.AppendLine("Now, create a well-organized summary of available policies grouped by category.");
+
+            return prompt.ToString();
+        }
+
+        private string CleanPolicyName(string source)
+        {
+            var fileName = Path.GetFileNameWithoutExtension(source);
+
+            // Remove common prefixes and suffixes
+            fileName = fileName
+                .Replace("46SP_", "")
+                .Replace("23A", "")
+                .Replace("(Sanand Plant)", "")
+                .Replace("(Manesar Plant)", "")
+                .Replace("_", " ")
+                .Trim();
+
+            return fileName;
+        }
+
+        private string ExtractPolicyDescription(string content)
+        {
+            var lines = content.Split('\n')
+                .Select(l => l.Trim())
+                .Where(l => !string.IsNullOrWhiteSpace(l))
+                .ToList();
+
+            // Look for purpose/objective sections
+            var descriptionKeywords = new[] { "purpose", "objective", "scope", "introduction", "about", "policy statement" };
+
+            for (int i = 0; i < Math.Min(lines.Count, 15); i++)
+            {
+                var line = lines[i].ToLowerInvariant();
+
+                // Check if line contains description keywords
+                if (descriptionKeywords.Any(keyword => line.Contains(keyword)))
+                {
+                    // Get the next non-empty line as description
+                    for (int j = i + 1; j < Math.Min(i + 5, lines.Count); j++)
+                    {
+                        if (lines[j].Length > 30 && !lines[j].All(char.IsUpper))
+                        {
+                            var description = lines[j];
+                            return description.Length > 200
+                                ? description.Substring(0, 197) + "..."
+                                : description;
+                        }
+                    }
+                }
+            }
+
+            // Fallback: return first substantive line
+            var firstLine = lines.FirstOrDefault(l => l.Length > 50 && !l.All(char.IsUpper));
+            return firstLine?.Length > 150
+                ? firstLine.Substring(0, 147) + "..."
+                : firstLine ?? "Policy document";
+        }
+
         public async Task<string> BuildMeaiSystemPrompt(string plant, List<RelevantChunk> chunks, string query)
         {
+            if (IsMetadataQuery(query))
+            {
+                return BuildMetadataSystemPrompt(plant, chunks);
+            }
             // Check if this is a section query first
             if (HasSectionReference(query))
             {
@@ -387,13 +539,20 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
             // Add the actual context content
             prompt.AppendLine("📄 POLICY CONTEXT (USE THIS TO ANSWER):");
             prompt.AppendLine();
+            prompt.AppendLine("**CITATION INSTRUCTIONS:**");
+            prompt.AppendLine("- When citing sources, use the document name directly");
+            prompt.AppendLine("- Format: [Source: Document Name]");
+            prompt.AppendLine("- DO NOT use [Context 1], [Context 2] format in your response");
+            prompt.AppendLine("- Use meaningful document names that users can understand");
+            prompt.AppendLine();
 
             int contextNumber = 1;
             foreach (var chunk in chunks)
             {
-                prompt.AppendLine($"[Context {contextNumber}] Source: {chunk.Source}");
-                prompt.AppendLine($"Relevance Score: {chunk.Similarity:F3}");
-                prompt.AppendLine("---");
+                prompt.AppendLine($"--- Internal Reference {contextNumber} ---");
+                prompt.AppendLine($"Document: {chunk.Source}");
+                prompt.AppendLine($"Relevance: {chunk.Similarity:F3}");
+                prompt.AppendLine("Content:");
                 prompt.AppendLine(chunk.Text);
                 prompt.AppendLine();
                 prompt.AppendLine("═══════════════════════════════════════════════════════════════");
@@ -428,6 +587,27 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
 
             return prompt.ToString();
         }
+
+        private string CleanupContextReferences(string response)
+        {
+            // Replace [Context 1], [Context 2], etc. with just the source document
+            var pattern = @"\[Context \d+\]:\s*([^\]]+\.docx)";
+            var cleaned = System.Text.RegularExpressions.Regex.Replace(
+                response,
+                pattern,
+                "[Source: $1]"
+            );
+
+            // Remove standalone [Context X] references
+            cleaned = System.Text.RegularExpressions.Regex.Replace(
+                cleaned,
+                @"\[Context \d+\]",
+                ""
+            );
+
+            return cleaned;
+        }
+
 
         // Helper method to extract topics from chunks
         private List<string> ExtractTopicsFromChunks(List<RelevantChunk> chunks)

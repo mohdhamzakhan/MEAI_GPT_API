@@ -1,4 +1,5 @@
 ﻿using MEAI_GPT_API.Models;
+using static MEAI_GPT_API.Controller.RagController;
 
 namespace MEAI_GPT_API.Service.Interface
 {
@@ -23,5 +24,10 @@ namespace MEAI_GPT_API.Service.Interface
         Task<Dictionary<string, List<ConversationEntry>>> GroupConversationsByTopicAsync(string sessionId);
         Task<ConversationEntry?> TryGetAppreciatedMatchAsync(List<float> inputEmbedding);
         double CosineSimilarity(List<float> a, List<float> b);
+
+        Task<List<SessionSummary>> GetConversationSessionsAsync(string? userId = null);
+        Task<List<ConversationMessage>> GetSessionMessagesAsync(string sessionId);
+        Task DeleteSessionAsync(string sessionId);
+
     }
 }

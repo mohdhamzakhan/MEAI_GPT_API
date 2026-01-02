@@ -245,9 +245,9 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
     app.UseSwaggerUI();
 }
 
+app.UseCors("AllowAll");
 // Add Prometheus metrics endpoint
 app.UseOpenTelemetryPrometheusScrapingEndpoint();
-app.UseCors("AllowAll");
 app.UseRouting();
 app.MapControllers();
 app.UseMetrics();

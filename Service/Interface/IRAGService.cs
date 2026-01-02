@@ -30,4 +30,5 @@ public interface IRAGService
     Task ClearAllCachesAsync();
     Task<EmbeddingTestResult> TestEmbeddingModelAsync(string modelName);
 
+
 }

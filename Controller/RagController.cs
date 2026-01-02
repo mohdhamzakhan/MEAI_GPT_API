@@ -23,6 +23,7 @@ namespace MEAI_GPT_API.Controller
         private readonly DynamicCodingAssistanceService _codingService; // Add this
         private readonly CodingDetectionService _codingDetection;
         private readonly DynamicRAGInitializationService _initService;
+        private readonly IConversationStorageService _conversationStorage;
 
 
         [ActivatorUtilitiesConstructor]
@@ -31,6 +32,7 @@ namespace MEAI_GPT_API.Controller
         DynamicCodingAssistanceService codingService, // Inject coding service
         CodingDetectionService codingDetection,
         DynamicRAGInitializationService initService,
+         IConversationStorageService conversationStorage,
         ILogger<RagController> logger)
         {
             _ragService = ragService;
@@ -38,6 +40,7 @@ namespace MEAI_GPT_API.Controller
             _logger = logger;
             _codingDetection = codingDetection;
             _initService = initService;
+            _conversationStorage = conversationStorage;
         }
         [HttpPost("query")]
         public async Task<IActionResult> Query([FromBody] QueryRequest request, [FromServices] IBackgroundTaskQueue taskQueue)
@@ -125,7 +128,6 @@ namespace MEAI_GPT_API.Controller
                 return;
             }
 
-            // Set correct headers
             Response.Headers["Content-Type"] = "text/event-stream; charset=utf-8";
             Response.Headers["Cache-Control"] = "no-cache";
             Response.Headers["Connection"] = "keep-alive";
@@ -133,38 +135,48 @@ namespace MEAI_GPT_API.Controller
 
             var ct = HttpContext.RequestAborted;
 
+            // ✅ FIX: Pre-detect coding query (with error handling)
+            // var codingDetection = SafeDetectCoding(request.Question);
+
+            // ✅ Stream without wrapping the entire block in try-catch
+            await foreach (var chunk in ProcessQueryStreamAsync(request).WithCancellation(ct))
+            {
+                if (ct.IsCancellationRequested) break;
+
+                await WriteSSEData(chunk, ct);
+            }
+        }
+
+        // ✅ NEW: Safe helper methods
+        private CodingDetectionResult SafeDetectCoding(string question)
+        {
             try
             {
-                var codingDetection = _codingDetection.DetectCodingQuery(request.Question);
-
-                // Stream all chunks from the service
-                await foreach (var chunk in ProcessQueryStreamAsync(request, codingDetection).WithCancellation(ct))
-                {
-                    if (ct.IsCancellationRequested) break;
-
-                    await Response.WriteAsync($"data: {chunk}\n\n", ct);
-                    await Response.Body.FlushAsync(ct);
-                }
-            }
-            catch (HttpRequestException ex)
-            {
-                _logger.LogError(ex, "HTTP error during streaming");
-                var errorJson = JsonSerializer.Serialize(new { Type = "error", Content = $"Connection error: {ex.Message}" });
-                await Response.WriteAsync($"data: {errorJson}\n\n", CancellationToken.None);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger.LogInformation("Client disconnected");
+                return _codingDetection.DetectCodingQuery(question);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during streaming: {Message}\n{Stack}", ex.Message, ex.StackTrace);
-                try
+                _logger.LogWarning(ex, "Coding detection failed, treating as non-coding query");
+                return new CodingDetectionResult
                 {
-                    var errorJson = JsonSerializer.Serialize(new { Type = "error", Content = $"Server error: {ex.Message}" });
-                    await Response.WriteAsync($"data: {errorJson}\n\n", CancellationToken.None);
-                }
-                catch { }
+                    IsCodingRelated = false,
+                    Confidence = 0,
+                    DetectedLanguage = "general"
+                };
+            }
+        }
+
+        private async Task WriteSSEData(string data, CancellationToken ct)
+        {
+            try
+            {
+                await Response.WriteAsync($"data: {data}\n\n", ct);
+                await Response.Body.FlushAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to write SSE data");
+                // Don't throw - client may have disconnected
             }
         }
 
@@ -184,77 +196,77 @@ namespace MEAI_GPT_API.Controller
             await Response.Body.FlushAsync(ct);
         }
 
-    //    private async IAsyncEnumerable<string> ProcessRAGQueryStreamAsync(
-    //QueryRequest request,
-    //[EnumeratorCancellation] CancellationToken ct = default)
-    //    {
-    //        await foreach (var streamChunk in _ragService.ProcessQueryStreamAsync(
-    //            request.Question,
-    //            request.Plant,
-    //            request.GenerationModel,
-    //            request.EmbeddingModel,
-    //            request.MaxResults,
-    //            request.meai_info,
-    //            request.sessionId,
-    //            useReRanking: true,
-    //            ct))
-    //        {
-    //            if (ct.IsCancellationRequested) yield break;
+        //    private async IAsyncEnumerable<string> ProcessRAGQueryStreamAsync(
+        //QueryRequest request,
+        //[EnumeratorCancellation] CancellationToken ct = default)
+        //    {
+        //        await foreach (var streamChunk in _ragService.ProcessQueryStreamAsync(
+        //            request.Question,
+        //            request.Plant,
+        //            request.GenerationModel,
+        //            request.EmbeddingModel,
+        //            request.MaxResults,
+        //            request.meai_info,
+        //            request.sessionId,
+        //            useReRanking: true,
+        //            ct))
+        //        {
+        //            if (ct.IsCancellationRequested) yield break;
 
-    //            // Convert StreamChunk to JSON string based on type
-    //            var jsonPayload = streamChunk.Type?.ToLower() switch
-    //            {
-    //                "status" => JsonSerializer.Serialize(new
-    //                {
-    //                    Type = "status",
-    //                    Content = streamChunk.Content
-    //                }),
+        //            // Convert StreamChunk to JSON string based on type
+        //            var jsonPayload = streamChunk.Type?.ToLower() switch
+        //            {
+        //                "status" => JsonSerializer.Serialize(new
+        //                {
+        //                    Type = "status",
+        //                    Content = streamChunk.Content
+        //                }),
 
-    //                "chunk" => JsonSerializer.Serialize(new
-    //                {
-    //                    Type = "chunk",
-    //                    Content = streamChunk.Content,
-    //                    TextPreview = streamChunk.TextPreview,
-    //                    Source = streamChunk.Source,
-    //                    Similarity = streamChunk.Similarity
-    //                }),
+        //                "chunk" => JsonSerializer.Serialize(new
+        //                {
+        //                    Type = "chunk",
+        //                    Content = streamChunk.Content,
+        //                    TextPreview = streamChunk.TextPreview,
+        //                    Source = streamChunk.Source,
+        //                    Similarity = streamChunk.Similarity
+        //                }),
 
-    //                "sources" => JsonSerializer.Serialize(new
-    //                {
-    //                    Type = "sources",
-    //                    Content = streamChunk.Content,
-    //                    Sources = streamChunk.Sources
-    //                }),
+        //                "sources" => JsonSerializer.Serialize(new
+        //                {
+        //                    Type = "sources",
+        //                    Content = streamChunk.Content,
+        //                    Sources = streamChunk.Sources
+        //                }),
 
-    //                "response" => JsonSerializer.Serialize(new
-    //                {
-    //                    Type = "response",
-    //                    Content = streamChunk.Content
-    //                }),
+        //                "response" => JsonSerializer.Serialize(new
+        //                {
+        //                    Type = "response",
+        //                    Content = streamChunk.Content
+        //                }),
 
-    //                "error" => JsonSerializer.Serialize(new
-    //                {
-    //                    Type = "error",
-    //                    Content = streamChunk.Content
-    //                }),
+        //                "error" => JsonSerializer.Serialize(new
+        //                {
+        //                    Type = "error",
+        //                    Content = streamChunk.Content
+        //                }),
 
-    //                "complete" => JsonSerializer.Serialize(new
-    //                {
-    //                    Type = "complete",
-    //                    Content = streamChunk.Content,
-    //                    ProcessingTimeMs = streamChunk.ProcessingTimeMs
-    //                }),
+        //                "complete" => JsonSerializer.Serialize(new
+        //                {
+        //                    Type = "complete",
+        //                    Content = streamChunk.Content,
+        //                    ProcessingTimeMs = streamChunk.ProcessingTimeMs
+        //                }),
 
-    //                _ => JsonSerializer.Serialize(new
-    //                {
-    //                    Type = streamChunk.Type,
-    //                    Content = streamChunk.Content
-    //                })
-    //            };
+        //                _ => JsonSerializer.Serialize(new
+        //                {
+        //                    Type = streamChunk.Type,
+        //                    Content = streamChunk.Content
+        //                })
+        //            };
 
-    //            yield return jsonPayload;
-    //        }
-    //    }
+        //            yield return jsonPayload;
+        //        }
+        //    }
 
         private async Task SendStreamEvent(object payload, CancellationToken ct)
         {
@@ -263,22 +275,51 @@ namespace MEAI_GPT_API.Controller
             await Response.Body.FlushAsync(ct);
         }
         private async IAsyncEnumerable<string> ProcessCodingQueryStreamAsync(
-            QueryRequest request,
-            CodingDetectionResult codingDetection)
+    QueryRequest request,
+    CodingDetectionResult codingDetection)
         {
             yield return JsonSerializer.Serialize(new { type = "status", message = "Analyzing coding requirements..." });
             yield return JsonSerializer.Serialize(new { type = "status", message = $"Detected {codingDetection.DetectedLanguage} programming query" });
 
-            CodingAssistanceResponse codingResponse = null;
-            var hasError = false;
-            string errorMessage = "Unknown error";
+            // ✅ FIX: Separate the risky operation from the yielding part
+            var codingResult = await SafeGetCodingResponse(request, codingDetection);
 
+            if (!codingResult.Success)
+            {
+                yield return JsonSerializer.Serialize(new { type = "error", message = codingResult.ErrorMessage });
+                yield break;
+            }
+
+            yield return JsonSerializer.Serialize(new { type = "status", message = "Streaming solution..." });
+
+            // ✅ Now safely stream the solution
+            await foreach (var chunk in StreamCodeSolutionSafely(codingResult.Response!.Solution))
+            {
+                yield return JsonSerializer.Serialize(new { type = "response", content = chunk });
+            }
+
+            // Send metadata
+            if (codingResult.Response!.CodeExamples?.Any() == true)
+            {
+                yield return JsonSerializer.Serialize(new
+                {
+                    type = "metadata",
+                    examples = codingResult.Response.CodeExamples,
+                    language = codingResult.Response.Language
+                });
+            }
+
+            yield return JsonSerializer.Serialize(new { type = "complete", message = "Done" });
+        }
+
+        // ✅ NEW: Safe wrapper method (can use try-catch)
+        private async Task<CodingServiceResult> SafeGetCodingResponse(
+            QueryRequest request,
+            CodingDetectionResult codingDetection)
+        {
             try
             {
-                // ✅ Add logging before calling coding service
                 _logger.LogInformation($"🔍 Calling coding service for: {request.Question}");
-                _logger.LogInformation($"   Language: {codingDetection.DetectedLanguage}");
-                _logger.LogInformation($"   SessionId: {request.sessionId}");
 
                 var codingTask = _codingService.ProcessCodingQueryAsync(
                     request.Question,
@@ -289,78 +330,84 @@ namespace MEAI_GPT_API.Controller
                     difficulty: "intermediate"
                 );
 
-                var timeoutTask = Task.Delay(250000); // 25 second timeout
+                var timeoutTask = Task.Delay(25000);
                 var completedTask = await Task.WhenAny(codingTask, timeoutTask);
 
                 if (completedTask == timeoutTask)
                 {
-                    hasError = true;
-                    errorMessage = "Coding service timed out after 25 seconds";
-                    _logger.LogError($"❌ {errorMessage}");
+                    _logger.LogError("❌ Coding service timeout");
+                    return new CodingServiceResult
+                    {
+                        Success = false,
+                        ErrorMessage = "Coding service timed out after 25 seconds"
+                    };
                 }
-                else
-                {
-                    if (codingTask.IsFaulted)
-                    {
-                        hasError = true;
-                        var ex = codingTask.Exception?.InnerException ?? codingTask.Exception;
-                        errorMessage = $"Coding service failed: {ex?.Message}";
-                        _logger.LogError(ex, $"❌ Coding service failed");
-                    }
-                    else
-                    {
-                        codingResponse = await codingTask;
 
-                        // ✅ Validate response
-                        if (codingResponse == null)
-                        {
-                            hasError = true;
-                            errorMessage = "Coding service returned null response";
-                            _logger.LogError($"❌ {errorMessage}");
-                        }
-                        else if (string.IsNullOrEmpty(codingResponse.Solution))
-                        {
-                            hasError = true;
-                            errorMessage = "Coding service returned empty solution";
-                            _logger.LogError($"❌ {errorMessage}");
-                            _logger.LogError($"   Response object: {JsonSerializer.Serialize(codingResponse)}");
-                        }
-                        else
-                        {
-                            _logger.LogInformation($"✅ Coding service returned solution ({codingResponse.Solution.Length} chars)");
-                        }
-                    }
+                if (codingTask.IsFaulted)
+                {
+                    var ex = codingTask.Exception?.InnerException ?? codingTask.Exception;
+                    _logger.LogError(ex, "❌ Coding service failed");
+                    return new CodingServiceResult
+                    {
+                        Success = false,
+                        ErrorMessage = $"Coding service error: {ex?.Message}"
+                    };
                 }
+
+                var response = await codingTask;
+
+                if (response == null || string.IsNullOrEmpty(response.Solution))
+                {
+                    _logger.LogError("❌ Empty response from coding service");
+                    return new CodingServiceResult
+                    {
+                        Success = false,
+                        ErrorMessage = "Coding service returned empty solution"
+                    };
+                }
+
+                _logger.LogInformation($"✅ Got solution ({response.Solution.Length} chars)");
+                return new CodingServiceResult
+                {
+                    Success = true,
+                    Response = response
+                };
             }
             catch (Exception ex)
             {
-                hasError = true;
-                errorMessage = $"Exception calling coding service: {ex.Message}";
-                _logger.LogError(ex, $"❌ {errorMessage}");
-            }
-
-            // ✅ Return detailed error message
-            if (hasError || codingResponse == null || string.IsNullOrEmpty(codingResponse.Solution))
-            {
-                yield return JsonSerializer.Serialize(new
+                _logger.LogError(ex, "❌ Exception in coding service");
+                return new CodingServiceResult
                 {
-                    type = "error",
-                    message = $"I apologize, but I couldn't generate a coding solution. Reason: {errorMessage}"
-                });
+                    Success = false,
+                    ErrorMessage = $"Unexpected error: {ex.Message}"
+                };
+            }
+        }
+
+        // ✅ NEW: Safe streaming method (no try-catch)
+        private async IAsyncEnumerable<string> StreamCodeSolutionSafely(string solution)
+        {
+            if (string.IsNullOrEmpty(solution))
+            {
+                _logger.LogWarning("❌ Empty solution provided");
                 yield break;
             }
 
-            yield return JsonSerializer.Serialize(new { type = "status", message = "Generating coding solution..." });
+            var lines = solution.Split(new[] { '\r', '\n' }, StringSplitOptions.None);
 
-            // ✅ Stream the solution
-            _logger.LogInformation($"🔄 Starting to stream solution...");
-
-            await foreach (var chunk in StreamCodeSolution(codingResponse.Solution))
+            foreach (var line in lines)
             {
-                yield return JsonSerializer.Serialize(new { type = "chunk", content = chunk });
+                yield return line + "\n";
+                await Task.Delay(30);
             }
+        }
 
-            _logger.LogInformation($"✅ Solution streaming complete");
+        // ✅ NEW: Result wrapper class
+        private class CodingServiceResult
+        {
+            public bool Success { get; set; }
+            public string ErrorMessage { get; set; } = "";
+            public CodingAssistanceResponse? Response { get; set; }
         }
 
         private async IAsyncEnumerable<string> StreamResponseSafely(string response)
@@ -487,6 +534,15 @@ namespace MEAI_GPT_API.Controller
             }
             return "";
         }
+
+        private async IAsyncEnumerable<string> ProcessQueryStreamAsync(QueryRequest request)
+        {
+            await foreach (var chunk in ProcessRAGQueryStreamAsync(request))
+            {
+                yield return chunk;
+            }
+        }
+
         private async IAsyncEnumerable<string> ProcessQueryStreamAsync(QueryRequest request, CodingDetectionResult codingDetection)
         {
             if (codingDetection.IsCodingRelated && codingDetection.Confidence > 0.5)
@@ -506,9 +562,10 @@ namespace MEAI_GPT_API.Controller
         }
 
         private async IAsyncEnumerable<string> ProcessRAGQueryStreamAsync(
-     QueryRequest request,
-     [EnumeratorCancellation] CancellationToken ct = default)
+    QueryRequest request,
+    [EnumeratorCancellation] CancellationToken ct = default)
         {
+            // ✅ FIX: Don't wrap the entire method in try-catch
             await foreach (var streamChunk in _ragService.ProcessQueryStreamAsync(
                 request.Question,
                 request.Plant,
@@ -522,31 +579,136 @@ namespace MEAI_GPT_API.Controller
             {
                 if (ct.IsCancellationRequested) yield break;
 
-                // ✅ FIXED: Convert StreamChunk to proper JSON string
-                var jsonPayload = streamChunk.Type switch
-                {
-                    "status" => JsonSerializer.Serialize(new { type = "status", message = streamChunk.Content }),
-                    "chunk" => JsonSerializer.Serialize(new
-                    {
-                        type = "chunk",
-                        text_preview = streamChunk.TextPreview ?? streamChunk.Content,
-                        source = streamChunk.Source,
-                        similarity = streamChunk.Similarity
-                    }),
-                    "sources" => JsonSerializer.Serialize(new
-                    {
-                        type = "sources",
-                        message = streamChunk.Content,
-                        sources = streamChunk.Sources
-                    }),
-                    "response" => JsonSerializer.Serialize(new { type = "response", content = streamChunk.Content }),
-                    "error" => JsonSerializer.Serialize(new { type = "error", message = streamChunk.Content }),
-                    "complete" => JsonSerializer.Serialize(new { type = "complete", message = "Processing complete" }),
-                    _ => JsonSerializer.Serialize(new { type = streamChunk.Type, content = streamChunk.Content })
-                };
-
+                // Convert StreamChunk to JSON
+                var jsonPayload = ConvertChunkToJson(streamChunk);
                 yield return jsonPayload;
             }
+        }
+
+        // ✅ FIXED: Use explicit DTO classes instead of anonymous types
+        private string ConvertChunkToJson(StreamChunk streamChunk)
+        {
+            try
+            {
+                // Use JsonNamingPolicy to ensure lowercase property names
+                var options = new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                    WriteIndented = false
+                };
+
+                return streamChunk.Type switch
+                {
+                    "status" => JsonSerializer.Serialize(new StatusEventDto
+                    {
+                        Type = "status",
+                        Message = streamChunk.Content
+                    }, options),
+
+                    "chunk" => JsonSerializer.Serialize(new ChunkEventDto
+                    {
+                        Type = "chunk",
+                        TextPreview = streamChunk.TextPreview ?? streamChunk.Content,
+                        Source = streamChunk.Source,
+                        Similarity = streamChunk.Similarity
+                    }, options),
+
+                    "sources" => JsonSerializer.Serialize(new SourcesEventDto
+                    {
+                        Type = "sources",
+                        Message = streamChunk.Content,
+                        Sources = streamChunk.Sources ?? new List<string>()
+                    }, options),
+
+                    "response" => JsonSerializer.Serialize(new ResponseEventDto
+                    {
+                        Type = "response",
+                        Content = streamChunk.Content
+                    }, options),
+
+                    "error" => JsonSerializer.Serialize(new ErrorEventDto
+                    {
+                        Type = "error",
+                        Message = streamChunk.Content
+                    }, options),
+
+                    "complete" => JsonSerializer.Serialize(new CompleteEventDto
+                    {
+                        Type = "complete",
+                        Message = "Processing complete",
+                        ProcessingTimeMs = streamChunk.ProcessingTimeMs
+                    }, options),
+
+                    _ => JsonSerializer.Serialize(new GenericEventDto
+                    {
+                        Type = streamChunk.Type,
+                        Content = streamChunk.Content
+                    }, options)
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to serialize chunk");
+
+                var options = new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                };
+
+                return JsonSerializer.Serialize(new ErrorEventDto
+                {
+                    Type = "error",
+                    Message = "Serialization error"
+                }, options);
+            }
+        }
+
+        // ✅ ADD: DTO classes at the end of your RagController.cs file (before the closing brace)
+
+        public class StatusEventDto
+        {
+            public string Type { get; set; } = "";
+            public string Message { get; set; } = "";
+        }
+
+        public class ChunkEventDto
+        {
+            public string Type { get; set; } = "";
+            public string? TextPreview { get; set; }
+            public string? Source { get; set; }
+            public double? Similarity { get; set; }
+        }
+
+        public class SourcesEventDto
+        {
+            public string Type { get; set; } = "";
+            public string Message { get; set; } = "";
+            public List<string> Sources { get; set; } = new();
+        }
+
+        public class ResponseEventDto
+        {
+            public string Type { get; set; } = "";
+            public string? Content { get; set; }
+        }
+
+        public class ErrorEventDto
+        {
+            public string Type { get; set; } = "";
+            public string Message { get; set; } = "";
+        }
+
+        public class CompleteEventDto
+        {
+            public string Type { get; set; } = "";
+            public string Message { get; set; } = "";
+            public long? ProcessingTimeMs { get; set; }
+        }
+
+        public class GenericEventDto
+        {
+            public string Type { get; set; } = "";
+            public string? Content { get; set; }
         }
 
 
@@ -834,7 +996,7 @@ namespace MEAI_GPT_API.Controller
             return Ok(new { message = $"Model {model} data deleted from ChromaDB" });
         }
         // Add this to your RAG Controller
-      
+
 
         // Add endpoint to force reprocess a specific file
         [HttpPost("diagnostics/reprocess-file")]
@@ -859,71 +1021,69 @@ namespace MEAI_GPT_API.Controller
             }
         }
 
-        // Add endpoint to check Ollama service health
-        //[HttpGet("diagnostics/ollama-health")]
-        //public async Task<ActionResult> CheckOllamaHealth()
-        //{
-        //    try
-        //    {
-        //        var httpClient = _httpClientFactory.CreateClient("OllamaAPI");
+        [HttpGet("sessions")]
+        public async Task<ActionResult<List<SessionSummary>>> GetAllSessions([FromQuery] string? userId = null)
+        {
+            try
+            {
+                var sessions = await _conversationStorage.GetConversationSessionsAsync(userId);
+                return Ok(sessions);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to retrieve sessions");
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
 
-        //        // Test embeddings endpoint
-        //        var embeddingTest = await httpClient.GetAsync("/api/tags");
-        //        var embeddingHealthy = embeddingTest.IsSuccessStatusCode;
+        [HttpGet("sessions/{sessionId}/messages")]
+        public async Task<ActionResult<List<ConversationMessage>>> GetSessionMessages(string sessionId)
+        {
+            try
+            {
+                var messages = await _conversationStorage.GetSessionMessagesAsync(sessionId);
+                return Ok(messages);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to retrieve session messages");
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
 
-        //        // Get available models
-        //        var modelsResponse = await httpClient.GetAsync("/api/tags");
-        //        var modelsContent = await modelsResponse.Content.ReadAsStringAsync();
+        [HttpDelete("sessions/{sessionId}")]
+        public async Task<IActionResult> DeleteSession(string sessionId)
+        {
+            try
+            {
+                await _conversationStorage.DeleteSessionAsync(sessionId);
+                return Ok(new { message = "Session deleted successfully" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to delete session");
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
 
-        //        return Ok(new
-        //        {
-        //            healthy = embeddingHealthy,
-        //            timestamp = DateTime.UtcNow,
-        //            modelsEndpoint = embeddingHealthy ? "✅ Available" : "❌ Unavailable",
-        //            availableModels = modelsContent
-        //        });
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        return StatusCode(500, new
-        //        {
-        //            healthy = false,
-        //            error = ex.Message,
-        //            timestamp = DateTime.UtcNow
-        //        });
-        //    }
-        //}
+        // Add these DTOs at the end of the file
+        public class SessionSummary
+        {
+            public string SessionId { get; set; } = string.Empty;
+            public DateTime CreatedAt { get; set; }
+            public DateTime LastAccessedAt { get; set; }
+            public int MessageCount { get; set; }
+            public string LastMessage { get; set; } = string.Empty;
+            public string? UserId { get; set; }
+        }
 
-        //// Add endpoint to check ChromaDB health
-        //[HttpGet("diagnostics/chromadb-health")]
-        //public async Task<ActionResult> CheckChromaDBHealth()
-        //{
-        //    try
-        //    {
-        //        var httpClient = _httpClientFactory.CreateClient("ChromaDB");
-        //        var response = await httpClient.GetAsync("/api/v2/heartbeat");
+        public class ConversationMessage
+        {
+            public string Question { get; set; } = string.Empty;
+            public string Answer { get; set; } = string.Empty;
+            public DateTime CreatedAt { get; set; }
+        }
 
-        //        var healthy = response.IsSuccessStatusCode;
-        //        var content = await response.Content.ReadAsStringAsync();
-
-        //        return Ok(new
-        //        {
-        //            healthy,
-        //            timestamp = DateTime.UtcNow,
-        //            status = healthy ? "✅ Connected" : "❌ Disconnected",
-        //            response = content
-        //        });
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        return StatusCode(500, new
-        //        {
-        //            healthy = false,
-        //            error = ex.Message,
-        //            timestamp = DateTime.UtcNow
-        //        });
-        //    }
-        //}
 
         public class ReprocessFileRequest
         {
