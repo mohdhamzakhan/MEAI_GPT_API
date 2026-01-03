@@ -560,6 +560,7 @@ These are the fixed organizational details for {plant} plant.";
     int maxResults = 10,
     bool meaiInfo = true,
     string? sessionId = null,
+    string? userId = null,
     bool useReRanking = true)
         {
             var stopwatch = Stopwatch.StartNew();
@@ -580,9 +581,11 @@ These are the fixed organizational details for {plant} plant.";
                         ?? throw new InvalidOperationException("Default embedding model not configured.");
 
                 // Create or load conversation context
+                var actualUserId = userId ?? "system";  // Fallback to "system" if not provided
                 var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
                     sessionId ?? Guid.NewGuid().ToString(),
-                    _currentUser);
+                    actualUserId,  // Use the passed userId
+                    plant);
 
                 var context = _conversation.GetOrCreateConversationContext(dbSession.SessionId);
 
@@ -612,7 +615,7 @@ These are the fixed organizational details for {plant} plant.";
 
                 // 3️⃣ Fast path: non-MEAI queries skip embeddings entirely
                 if (!meaiInfo)
-                    return await ProcessNonMeaiQueryFast(question, sessionId, generationModel, stopwatch);
+                    return await ProcessNonMeaiQueryFast(question, sessionId, generationModel,actualUserId, stopwatch);
 
                 // Load models
                 var genModel = await _modelManager.GetModelAsync(generationModel!);
@@ -1667,6 +1670,7 @@ These are the fixed organizational details for {plant} plant.";
             string question,
             string? sessionId,
             string? generationModel,
+            string userId,
             Stopwatch stopwatch)
         {
             try
@@ -1675,7 +1679,7 @@ These are the fixed organizational details for {plant} plant.";
 
                 // Get session (lightweight)
                 var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
-                    sessionId ?? Guid.NewGuid().ToString(), _currentUser);
+                    sessionId ?? Guid.NewGuid().ToString(), userId);
 
                 var context = _conversation.GetOrCreateConversationContext(dbSession.SessionId);
 
@@ -3629,6 +3633,7 @@ These are the fixed organizational details for {plant} plant.";
     bool meaiInfo = true,
     string? sessionId = null,
     bool useReRanking = true,
+    string userId = null,
     [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             StreamChunk? errorChunk = null;
@@ -3643,7 +3648,7 @@ These are the fixed organizational details for {plant} plant.";
 
             yield return new StreamChunk { Type = "status", Content = "Processing query..." };
 
-            var sessionResult = await SafeInitializeSession(sessionId, cancellationToken);
+            var sessionResult = await SafeInitializeSession(sessionId, userId, cancellationToken);
             if (sessionResult.HasError)
             {
                 yield return new StreamChunk { Type = "error", Content = sessionResult.ErrorMessage };
@@ -3651,6 +3656,12 @@ These are the fixed organizational details for {plant} plant.";
             }
 
             var context = sessionResult.Context!;
+
+            var actualUserId = userId ?? "system";
+            var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
+                sessionId ?? Guid.NewGuid().ToString(),
+                actualUserId,
+                plant);
 
             QuestionType questionType = QuestionType.NewTopic;
 
@@ -3782,7 +3793,7 @@ These are the fixed organizational details for {plant} plant.";
             if (!meaiInfo)
             {
                 yield return new StreamChunk { Type = "status", Content = "Processing general query..." };
-                await foreach (var chunk in ProcessNonMeaiQueryStream(question, sessionId, generationModel, cancellationToken))
+                await foreach (var chunk in ProcessNonMeaiQueryStream(question, sessionId, generationModel, actualUserId, cancellationToken))
                 {
                     if (cancellationToken.IsCancellationRequested) yield break;
                     yield return chunk;
@@ -4485,7 +4496,7 @@ These are the fixed organizational details for {plant} plant.";
             [JsonPropertyName("content")]
             public string? Content { get; set; }
         }
-        private async Task<SessionResult> SafeInitializeSession(string? sessionId, CancellationToken ct = default)
+        private async Task<SessionResult> SafeInitializeSession(string? sessionId, string? userId, CancellationToken ct = default)
         {
             try
             {
@@ -4493,7 +4504,7 @@ These are the fixed organizational details for {plant} plant.";
 
                 var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
                     sessionId ?? Guid.NewGuid().ToString(),
-                    _currentUser
+                    userId
                 );
 
                 var context = _conversation.GetOrCreateConversationContext(dbSession.SessionId);
@@ -4984,12 +4995,13 @@ These are the fixed organizational details for {plant} plant.";
     string question,
     string? sessionId,
     string generationModel,
+    string userId,
     [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             yield return new StreamChunk { Type = "status", Content = "Processing general query..." };
 
             // Get session
-            var sessionResult = await SafeInitializeSession(sessionId, cancellationToken);
+            var sessionResult = await SafeInitializeSession(sessionId, userId, cancellationToken);
             if (sessionResult.HasError)
             {
                 yield return new StreamChunk { Type = "error", Content = sessionResult.ErrorMessage };

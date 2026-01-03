@@ -16,14 +16,14 @@ public interface IRAGService
     Task<bool> IsHealthy();
     Task LoadHistoricalAppreciatedAnswersAsync();
     Task MarkAppreciatedAsync(string sessionId, string question);
-    Task<QueryResponse> ProcessQueryAsync(string question, string plant, string? generationModel = null, string? embeddingModel = null, int maxResults = 15, bool meaiInfo = true, string? sessionId = null, bool useReRanking = true);
+    Task<QueryResponse> ProcessQueryAsync(string question, string plant, string? generationModel = null, string? embeddingModel = null, int maxResults = 15, bool meaiInfo = true, string? sessionId = null,string? userId=null, bool useReRanking = true);
     Task ProcessUploadedPolicyAsync(Stream fileStream, string fileName, string model);
     Task RefreshEmbeddingsAsync(string model = "mistral:latest");
     Task SaveCorrectionAsync(string question, string correctAnswer, string model);
     Task SaveCorrectionToDatabase(string sessionId, string question, string correctedAnswer);
     Task DeleteModelDataFromChroma(string modelName);
     Task WarmUpEmbeddingsAsync();
-    IAsyncEnumerable<StreamChunk> ProcessQueryStreamAsync(string question, string plant, string? generationModel = null, string? embeddingModel = null, int maxResults = 10, bool meaiInfo = true, string? sessionId = null, bool useReRanking = true, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<StreamChunk> ProcessQueryStreamAsync(string question, string plant, string? generationModel = null, string? embeddingModel = null, int maxResults = 10, bool meaiInfo = true, string? sessionId = null, bool useReRanking = true, string userId = null, CancellationToken cancellationToken = default);
     Task ClearFileCacheAsync(string filePath);
 
     Task ProcessSingleFileAsync(string filePath, string plant);

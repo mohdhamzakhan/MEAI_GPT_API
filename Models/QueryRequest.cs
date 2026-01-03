@@ -16,6 +16,7 @@ namespace MEAI_GPT_API.Models
         public string? EmbeddingModel { get; set; }   // New parameter
         public bool? useReRanking { get; set; } = true;
         public string Plant { get; set; }
+        public string UserId { get; set; }
 
     }
 

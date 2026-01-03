@@ -67,7 +67,8 @@ namespace MEAI_GPT_API.Controller
                             codingDetection.DetectedLanguage != "general" ? codingDetection.DetectedLanguage : null,
                             request.sessionId,
                             includeExamples: true,
-                            difficulty: "intermediate"
+                            difficulty: "intermediate",
+                            userId: request.UserId
                         );
 
                         finalResponse = new QueryResponse
@@ -100,6 +101,7 @@ namespace MEAI_GPT_API.Controller
                             request.MaxResults,
                             request.meai_info,
                             request.sessionId,
+                            request.UserId,
                             useReRanking: true
                         );
                     }
@@ -327,7 +329,8 @@ namespace MEAI_GPT_API.Controller
                     codingDetection.DetectedLanguage != "general" ? codingDetection.DetectedLanguage : null,
                     request.sessionId,
                     includeExamples: true,
-                    difficulty: "intermediate"
+                    difficulty: "intermediate",
+                    userId: request.UserId
                 );
 
                 var timeoutTask = Task.Delay(25000);
@@ -410,154 +413,13 @@ namespace MEAI_GPT_API.Controller
             public CodingAssistanceResponse? Response { get; set; }
         }
 
-        private async IAsyncEnumerable<string> StreamResponseSafely(string response)
-        {
-            if (string.IsNullOrWhiteSpace(response))
-                yield break;
-
-            var sentences = response.Split(new[] { ". ", "! ", "? " }, StringSplitOptions.RemoveEmptyEntries);
-
-            foreach (var sentence in sentences)
-            {
-                var words = sentence.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                var currentChunk = new StringBuilder();
-
-                for (int i = 0; i < words.Length; i++)
-                {
-                    currentChunk.Append(words[i] + " ");
-
-                    // Send chunk every 8-10 words or at sentence end
-                    if ((i + 1) % 9 == 0 || i == words.Length - 1)
-                    {
-                        var chunk = currentChunk.ToString().Trim();
-                        if (!string.IsNullOrEmpty(chunk))
-                        {
-                            yield return chunk + " ";
-                            currentChunk.Clear();
-                            await Task.Delay(70);
-                        }
-                    }
-                }
-
-                // Add sentence ending if not present
-                if (!sentence.EndsWith(".") && !sentence.EndsWith("!") && !sentence.EndsWith("?"))
-                {
-                    yield return ". ";
-                }
-
-                await Task.Delay(100);
-            }
-        }
-
-        private async IAsyncEnumerable<string> StreamCodeSolution(string solution)
-        {
-            if (string.IsNullOrEmpty(solution))
-            {
-                _logger.LogWarning("❌ StreamCodeSolution called with empty solution");
-                yield break;
-            }
-
-            _logger.LogInformation($"📤 Streaming solution: {solution.Length} characters");
-
-            // Option 1: Stream character by character (slower but shows progress)
-            const int chunkSize = 50; // characters per chunk
-            for (int i = 0; i < solution.Length; i += chunkSize)
-            {
-                var chunk = solution.Substring(i, Math.Min(chunkSize, solution.Length - i));
-                yield return chunk;
-                await Task.Delay(20); // Small delay for streaming effect
-            }
-
-            // OR Option 2: Stream line by line (better for code)
-            // var lines = solution.Split(new[] { '\r', '\n' }, StringSplitOptions.None);
-            // foreach (var line in lines)
-            // {
-            //     yield return line + "\n";
-            //     await Task.Delay(50);
-            // }
-        }
-
-        private async IAsyncEnumerable<string> StreamTextByWords(string text)
-        {
-            if (string.IsNullOrWhiteSpace(text))
-                yield break;
-
-            var sentences = text.Split(new[] { ". ", "! ", "? ", "\n" }, StringSplitOptions.RemoveEmptyEntries);
-
-            foreach (var sentence in sentences)
-            {
-                var words = sentence.Split(' ');
-                var currentChunk = new StringBuilder();
-
-                for (int i = 0; i < words.Length; i++)
-                {
-                    currentChunk.Append(words[i] + " ");
-
-                    // Send chunk every 8-12 words or at punctuation
-                    if ((i + 1) % 10 == 0 ||
-                        words[i].EndsWith(".") ||
-                        words[i].EndsWith("!") ||
-                        words[i].EndsWith("?") ||
-                        words[i].EndsWith(":"))
-                    {
-                        yield return currentChunk.ToString();
-                        currentChunk.Clear();
-                        await Task.Delay(60);
-                    }
-                }
-
-                // Send any remaining content
-                if (currentChunk.Length > 0)
-                {
-                    yield return currentChunk.ToString();
-                }
-
-                // Add sentence ending if not already there
-                if (!sentence.EndsWith(".") && !sentence.EndsWith("!") && !sentence.EndsWith("?"))
-                {
-                    yield return ". ";
-                }
-
-                await Task.Delay(120); // Pause between sentences
-            }
-        }
-        private string GetLanguageFromCodeBlock(string codeBlock)
-        {
-            var lines = codeBlock.Split('\n');
-            if (lines.Length > 0)
-            {
-                var firstLine = lines[0].Trim();
-                if (firstLine.StartsWith("```"))
-                {
-                    return firstLine.Substring(3).Trim();
-                }
-            }
-            return "";
-        }
+     
 
         private async IAsyncEnumerable<string> ProcessQueryStreamAsync(QueryRequest request)
         {
             await foreach (var chunk in ProcessRAGQueryStreamAsync(request))
             {
                 yield return chunk;
-            }
-        }
-
-        private async IAsyncEnumerable<string> ProcessQueryStreamAsync(QueryRequest request, CodingDetectionResult codingDetection)
-        {
-            if (codingDetection.IsCodingRelated && codingDetection.Confidence > 0.5)
-            {
-                await foreach (var chunk in ProcessCodingQueryStreamAsync(request, codingDetection))
-                {
-                    yield return chunk;
-                }
-            }
-            else
-            {
-                await foreach (var chunk in ProcessRAGQueryStreamAsync(request))
-                {
-                    yield return chunk;
-                }
             }
         }
 
@@ -575,6 +437,7 @@ namespace MEAI_GPT_API.Controller
                 request.meai_info,
                 request.sessionId,
                 useReRanking: true,
+                request.UserId,
                 ct))
             {
                 if (ct.IsCancellationRequested) yield break;
@@ -1100,6 +963,7 @@ public class CodingQueryRequest
     public string? SessionId { get; set; }
     public bool IncludeExamples { get; set; } = true;
     public string? Difficulty { get; set; } = "intermediate";
+    public string? UserId { get; set; }
 }
 
 

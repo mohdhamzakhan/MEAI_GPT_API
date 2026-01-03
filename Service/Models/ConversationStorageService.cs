@@ -33,12 +33,25 @@ namespace MEAI_GPT_API.Services
                 await _context.SaveChangesAsync();
 
                 // Update session statistics
-                var session = await GetOrCreateSessionAsync(entry.SessionId);
-                session.ConversationCount++;
-                session.LastAccessedAt = DateTime.Now;
-                session.LastTopicTag = entry.TopicTag;
+                var session = await _context.ConversationSessions
+                           .FirstOrDefaultAsync(s => s.SessionId == entry.SessionId);
+                if (session != null)
+                {
+                    // Update existing session (preserves UserId)
+                    session.ConversationCount++;
+                    session.LastAccessedAt = DateTime.Now;
+                    session.LastTopicTag = entry.TopicTag;
+                    await UpdateSessionAsync(session);
+                }
+                else
+                {
+                    // This shouldn't happen if session was created properly before
+                    _logger.LogWarning($"Session {entry.SessionId} not found when saving conversation");
+                }
 
-                await UpdateSessionAsync(session);
+                //_logger.LogInformation($"💾 Saved conversation {entry.Id} for session {entry.SessionId}");
+
+                //await UpdateSessionAsync(session);
 
                 _logger.LogInformation($"💾 Saved conversation {entry.Id} for session {entry.SessionId}");
             }

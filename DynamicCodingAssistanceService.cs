@@ -317,7 +317,6 @@ public partial class DynamicCodingAssistanceService
     private readonly IModelManager _modelManager;
     private readonly DynamicRAGConfiguration _config;
     private readonly Conversation _conversation;
-    private readonly string _currentUser;
     private readonly OllamaQueueService _ollama;
     private readonly LanguageDetectionService _languageDetection;
 
@@ -328,7 +327,8 @@ public partial class DynamicCodingAssistanceService
     IModelManager modelManager,
     IOptions<DynamicRAGConfiguration> config,
     OllamaQueueService ollama,
-    Conversation conversation)
+    Conversation conversation
+        )
     {
         _logger = logger;
         _httpClient = httpClientFactory.CreateClient("OllamaAPI"); // Get the named client
@@ -336,7 +336,6 @@ public partial class DynamicCodingAssistanceService
         _modelManager = modelManager;
         _config = config.Value;
         _conversation = conversation;
-        _currentUser = "system"; // Set a default value
         _languageDetection = new LanguageDetectionService();
         _ollama = ollama;
     }
@@ -358,7 +357,8 @@ public partial class DynamicCodingAssistanceService
         string? language = null,
         string? sessionId = null,
         bool includeExamples = true,
-        string difficulty = "intermediate")
+        string difficulty = "intermediate",
+        string? userId = null)
     {
         var stopwatch = Stopwatch.StartNew();
 
@@ -373,9 +373,15 @@ public partial class DynamicCodingAssistanceService
 
             _logger.LogInformation($"🖥️ Processing {languageConfig.Name} coding query: {codingQuestion}");
 
+            var actualUserId = userId ?? "system";
+
+            _logger.LogInformation($"🔍 Using userId: {actualUserId}");
+
             // Get or create session for coding assistance
             var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
-                sessionId ?? Guid.NewGuid().ToString(), _currentUser);
+                sessionId ?? Guid.NewGuid().ToString(), actualUserId);
+
+            _logger.LogInformation($"✅ Session created/retrieved with userId: {dbSession.UserId}");
 
             var context = _conversation.GetOrCreateConversationContext(dbSession.SessionId);
 
@@ -462,7 +468,7 @@ public partial class DynamicCodingAssistanceService
                 dbSession.SessionId, codingQuestion, solution, codeContext,
                 generationModel, embeddingModel, questionEmbedding,
                 await GetEmbeddingAsync(solution, embeddingModel),
-                stopwatch.ElapsedMilliseconds, difficulty, detectedLanguage);
+                stopwatch.ElapsedMilliseconds, difficulty, detectedLanguage, actualUserId);
 
             // Update conversation context
             await UpdateCodingConversationHistory(context, codingQuestion, solution, codeExamples, languageConfig);
@@ -1382,11 +1388,13 @@ Please try again with a more specific question, and I'll do my best to assist yo
         string sessionId, string question, string answer, string? codeContext,
         ModelConfiguration generationModel, ModelConfiguration embeddingModel,
         List<float> questionEmbedding, List<float> answerEmbedding,
-        long processingTimeMs, string difficulty, string language)
+        long processingTimeMs, string difficulty, string language, string? userId = null)
     {
         try
         {
             var languageConfig = LanguageConfigFactory.GetConfig(language);
+
+            await _conversationStorage.GetOrCreateSessionAsync(sessionId, userId);
 
             var entry = new ConversationEntry
             {

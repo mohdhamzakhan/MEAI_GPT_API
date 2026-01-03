@@ -7,14 +7,18 @@ using MEAI_GPT_API.Service.Models;
 using MEAI_GPT_API.Services;
 using MEAIGPTAPI.Models;
 using MEAIGPTAPI.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.StackExchangeRedis;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Serilog;
+using System.Text;
+using static MEAI_GPT_API.Controller.LoginController;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
@@ -165,6 +169,23 @@ builder.Services.Configure<PlantSettings>(options =>
 {
     options.Plants = builder.Configuration.GetSection("Plant").Get<Dictionary<string, string>>()!;
 });
+
+builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("JwtSettings"));
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        var jwtSettings = builder.Configuration.GetSection("JwtSettings").Get<JwtSettings>();
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = jwtSettings.Issuer,
+            ValidAudience = jwtSettings.Audience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.SecretKey))
+        };
+    });
 
 // Keep ModelManager as scoped
 builder.Services.AddScoped<IModelManager>(provider =>
