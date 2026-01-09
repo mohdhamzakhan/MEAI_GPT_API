@@ -64,7 +64,9 @@ namespace MEAI_GPT_API.Services
         private readonly ConversationAnalysisService _conversationAnalysis;
         private readonly EntityExtractionService _entityExtraction;
         private readonly SystemPromptBuilder _systemPromptBuilder;
-
+        private readonly OracleEBSQuery _oracleEBSQuery;
+        private readonly RerankerService _rerankerService;
+        private readonly Bm25Service _bm25Service =new();
         // NEW: Single embedding cache with better management
         //private readonly ConcurrentDictionary<string, (List<float> Embedding, DateTime Cached)> _optimizedEmbeddingCache = new();
         //private readonly SemaphoreSlim _globalEmbeddingSemaphore = new(3, 3); // Allow 3 concurrent embedding requests
@@ -100,7 +102,9 @@ namespace MEAI_GPT_API.Services
             EntityExtractionService entityExtraction,
             SystemPromptBuilder systemPromptBuilder,
             HelperMethods helperMethods,
-            OllamaHttpClient ollamaClient)
+            OllamaHttpClient ollamaClient,
+            OracleEBSQuery oracleEBSQuery,
+            RerankerService rerankerService)
         {
             _modelManager = modelManager;
             _collectionManager = collectionManager;
@@ -129,6 +133,8 @@ namespace MEAI_GPT_API.Services
 
             InitializeSessionCleanup();
             _helperMethods = helperMethods;
+            _oracleEBSQuery = oracleEBSQuery;
+            _rerankerService = rerankerService;
         }
         private void EnsureDirectoriesExist()
         {
@@ -197,7 +203,7 @@ These are the fixed organizational details for {plant} plant.";
             if (string.IsNullOrEmpty(_config.DefaultEmbeddingModel))
             {
                 var embeddingModel = availableModels.FirstOrDefault(m =>
-                    m.Type == "embedding" || m.Type == "both");
+                    m.Type == "embedding");
 
                 if (embeddingModel != null)
                 {
@@ -209,7 +215,7 @@ These are the fixed organizational details for {plant} plant.";
             if (string.IsNullOrEmpty(_config.DefaultGenerationModel))
             {
                 var generationModel = availableModels.FirstOrDefault(m =>
-                    m.Type == "generation" || m.Type == "both");
+                     m.Type == "generation");
 
                 if (generationModel != null)
                 {
@@ -622,8 +628,12 @@ These are the fixed organizational details for {plant} plant.";
                 var embModel = await _modelManager.GetModelAsync(embeddingModel!);
                 if (genModel == null) throw new ArgumentException($"Generation model {generationModel} not available");
                 if (embModel == null) throw new ArgumentException($"Embedding model {embeddingModel} not available");
-                if (embModel.EmbeddingDimension == 0)
+                if (embModel.Type != "embedding")
+                {
+                    _logger.LogWarning($"⚠️ {embeddingModel} is not an embedding model. Falling back.");
                     embModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
+                }
+
 
                 _logger.LogInformation($"Processing MEAI query with models - Gen: {generationModel}, Emb: {embeddingModel}");
 
@@ -706,6 +716,15 @@ These are the fixed organizational details for {plant} plant.";
                     relevantChunks = await GetRelevantChunksWithExpansionAsync(
                         contextualQuery, embModel, maxResults,
                         meaiInfo, context, useReRanking, genModel, plant);
+
+                    if (useReRanking && relevantChunks.Count > 3)
+                    {
+                        relevantChunks = await _rerankerService.RerankAsync(
+                            question,
+                            relevantChunks,
+                            "qllama/bge-reranker-v2-m3:f16",
+                            topK: 5);
+                    }
                 }
 
                 // Generate final answer
@@ -1378,8 +1397,8 @@ These are the fixed organizational details for {plant} plant.";
         public async Task<SystemStatus> GetSystemStatusAsync()
         {
             var models = await GetAvailableModelsAsync();
-            var embeddingModels = models.Where(m => m.Type == "embedding" || m.Type == "both").ToList();
-            var generationModels = models.Where(m => m.Type == "generation" || m.Type == "both").ToList();
+            var embeddingModels = models.Where(m => m.Type == "embedding").ToList();
+            var generationModels = models.Where(m => m.Type == "generation").ToList();
 
             return new SystemStatus
             {
@@ -2379,7 +2398,7 @@ These are the fixed organizational details for {plant} plant.";
                 _logger.LogInformation("🔥 Starting embedding warm-up");
 
                 var models = await _modelManager.DiscoverAvailableModelsAsync();
-                var embeddingModels = models.Where(m => m.Type == "embedding" || m.Type == "both").ToList();
+                var embeddingModels = models.Where(m => m.Type == "embedding").ToList();
 
                 var warmUpTexts = new[]
                 {
@@ -2933,6 +2952,130 @@ These are the fixed organizational details for {plant} plant.";
                 return await SearchChromaDBAsync(query, embeddingModel, maxResults, plant); // Fallback
             }
         }
+        private async Task<List<RelevantChunk>> GetRelevantChunksWithExpansionAsync(
+    string originalQuery,
+    string expandedQuery,
+    string contextualQuery,
+    ModelConfiguration embeddingModel,
+    int maxResults,
+    string plant,
+    bool useReRanking,
+    ConversationContext? context = null)
+        {
+            try
+            {
+                _logger.LogInformation("🔍 Starting knowledge base retrieval");
+
+                // ----------------------------
+                // 1️⃣ Choose best query variant
+                // ----------------------------
+                var effectiveQuery = !string.IsNullOrWhiteSpace(contextualQuery)
+                    ? contextualQuery
+                    : expandedQuery;
+
+                // ----------------------------
+                // 2️⃣ Generate embedding
+                // ----------------------------
+                var queryEmbedding = await GetEmbeddingAsync(effectiveQuery, embeddingModel);
+
+                if (queryEmbedding == null || queryEmbedding.Count == 0)
+                {
+                    _logger.LogWarning("⚠️ Empty embedding generated, skipping retrieval");
+                    return new List<RelevantChunk>();
+                }
+
+                // ----------------------------
+                // 3️⃣ Get Chroma collection
+                // ----------------------------
+                var collectionId = await _collectionManager.GetOrCreateCollectionAsync(embeddingModel);
+
+                // ----------------------------
+                // 4️⃣ Vector search (ChromaDB)
+                // ----------------------------
+                var searchPayload = new
+                {
+                    query_embeddings = new[] { queryEmbedding },
+                    n_results = maxResults * 2,
+                    include = new[] { "documents", "metadatas", "distances" },
+                    where = new Dictionary<string, object>
+            {
+                { "plant", plant }
+            }
+                };
+
+                var response = await _chromaClient.PostAsJsonAsync(
+                    $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+                    searchPayload);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogError($"❌ Chroma query failed: {response.StatusCode}");
+                    return new List<RelevantChunk>();
+                }
+
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+
+                // ----------------------------
+                // 5️⃣ Parse results
+                // ----------------------------
+                var chunks = new List<RelevantChunk>();
+
+                var documents = doc.RootElement.GetProperty("documents")[0];
+                var metadatas = doc.RootElement.GetProperty("metadatas")[0];
+                var distances = doc.RootElement.GetProperty("distances")[0];
+
+                for (int i = 0; i < documents.GetArrayLength(); i++)
+                {
+                    var text = documents[i].GetString();
+                    if (string.IsNullOrWhiteSpace(text)) continue;
+
+                    var metadata = metadatas[i];
+                    var distance = distances[i].GetDouble();
+
+                    chunks.Add(new RelevantChunk
+                    {
+                        Id = metadata.TryGetProperty("chunk_id", out var idProp)
+                                ? idProp.GetString() ?? Guid.NewGuid().ToString()
+                                : Guid.NewGuid().ToString(),
+
+                        Text = text,
+                        Source = metadata.TryGetProperty("source_file", out var src)
+                                ? src.GetString() ?? "Unknown"
+                                : "Unknown",
+
+                        Similarity = 1.0 - distance, // convert distance → similarity
+                        Bm25Score = 0
+                    });
+                }
+
+                if (!chunks.Any())
+                {
+                    _logger.LogInformation("⚠️ No vector results found");
+                    return chunks;
+                }
+
+                // ----------------------------
+                // 6️⃣ Deduplicate & trim
+                // ----------------------------
+                chunks = chunks
+                    .GroupBy(c => c.Id)
+                    .Select(g => g.First())
+                    .OrderByDescending(c => c.Similarity)
+                    .Take(maxResults)
+                    .ToList();
+
+                _logger.LogInformation($"✅ Retrieved {chunks.Count} relevant chunks");
+
+                return chunks;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Failed in GetRelevantChunksWithExpansionAsync");
+                return new List<RelevantChunk>();
+            }
+        }
+
         private async Task<List<RelevantChunk>> PerformChromaSearch(string query, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId)
         {
             try
@@ -3079,7 +3222,7 @@ These are the fixed organizational details for {plant} plant.";
         //        {
         //            _logger.LogInformation($"Processing documents for plant: {plant}");
         //            var models = await _modelManager.DiscoverAvailableModelsAsync();
-        //            var embeddingModels = models.Where(m => m.Type == "embedding" || m.Type == "both").ToList();
+        //            var embeddingModels = models.Where(m => m.Type == "embedding").ToList();
         //            await ProcessDocumentsForAllModelsAsync(embeddingModels, plant);
         //        });
 
@@ -3138,7 +3281,7 @@ These are the fixed organizational details for {plant} plant.";
 
                 // ✅ FIX: Only process NEW plants
                 var models = await _modelManager.DiscoverAvailableModelsAsync();
-                var embeddingModels = models.Where(m => m.Type == "embedding" || m.Type == "both").ToList();
+                var embeddingModels = models.Where(m => m.Type == "embedding").ToList();
 
                 var plantTasks = _plants.Plants.Keys.Select(async plant =>
                 {
@@ -3250,7 +3393,7 @@ These are the fixed organizational details for {plant} plant.";
 
                 // Reprocess
                 var models = await _modelManager.DiscoverAvailableModelsAsync();
-                var embeddingModels = models.Where(m => m.Type == "embedding" || m.Type == "both").ToList();
+                var embeddingModels = models.Where(m => m.Type == "embedding").ToList();
 
                 await ProcessDocumentsForAllModelsAsync(embeddingModels, plant);
 
@@ -3315,7 +3458,7 @@ These are the fixed organizational details for {plant} plant.";
 
                 // Process with all embedding models
                 var models = await _modelManager.DiscoverAvailableModelsAsync();
-                var embeddingModels = models.Where(m => m.Type == "embedding" || m.Type == "both").ToList();
+                var embeddingModels = models.Where(m => m.Type == "embedding").ToList();
 
                 foreach (var model in embeddingModels)
                 {
@@ -3622,32 +3765,41 @@ These are the fixed organizational details for {plant} plant.";
         }
 
 
+        private string AutoSelectGenerationModel(string question)
+        {
+            var wc = question.Split(' ').Length;
+
+            if (wc <= 12) return "llama3.2:1b";
+            if (wc <= 40) return "llama3.1:8b";
+            return "qwen3:8b";
+        }
 
 
         public async IAsyncEnumerable<StreamChunk> ProcessQueryStreamAsync(
-    string question,
-    string plant,
-    string? generationModel = null,
-    string? embeddingModel = null,
-    int maxResults = 10,
-    bool meaiInfo = true,
-    string? sessionId = null,
-    bool useReRanking = true,
-    string userId = null,
-    [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            string question,
+            string plant,
+            string? generationModel = null,
+            string? embeddingModel = null,
+            int maxResults = 10,
+            bool meaiInfo = true,
+            string? sessionId = null,
+            bool useReRanking = true,
+            string? userId = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            StreamChunk? errorChunk = null;
             var stopwatch = Stopwatch.StartNew();
 
-            _logger.LogInformation("=".PadRight(80, '='));
-            _logger.LogInformation("🚀 STREAMING QUERY START");
-            _logger.LogInformation($"   Question: {question}");
-            _logger.LogInformation($"   Plant: {plant}");
-            _logger.LogInformation($"   Model: {generationModel}");
-            _logger.LogInformation("=".PadRight(80, '='));
+            // ============================
+            // 1️⃣ AUTO MODEL SELECTION
+            // ============================
+            generationModel ??= AutoSelectGenerationModel(question);
+            embeddingModel ??= _config.DefaultEmbeddingModel;
 
-            yield return new StreamChunk { Type = "status", Content = "Processing query..." };
+            yield return new StreamChunk { Type = "status", Content = "Initializing..." };
 
+            // ============================
+            // 2️⃣ SESSION & CONTEXT
+            // ============================
             var sessionResult = await SafeInitializeSession(sessionId, userId, cancellationToken);
             if (sessionResult.HasError)
             {
@@ -3656,391 +3808,189 @@ These are the fixed organizational details for {plant} plant.";
             }
 
             var context = sessionResult.Context!;
-
             var actualUserId = userId ?? "system";
+
             var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
                 sessionId ?? Guid.NewGuid().ToString(),
                 actualUserId,
                 plant);
 
-            QuestionType questionType = QuestionType.NewTopic;
-
-            if (context.History.Any())
-            {
-                questionType = ClassifyQuestionType(question, context);
-
-                // Provide feedback to user
-                switch (questionType)
-                {
-                    case QuestionType.FollowUp:
-                        yield return new StreamChunk
-                        {
-                            Type = "status",
-                            Content = "Continuing previous conversation..."
-                        };
-                        _logger.LogInformation($"Follow-up detected: '{question}'");
-                        break;
-
-                    case QuestionType.RelatedTopic:
-                        yield return new StreamChunk
-                        {
-                            Type = "status",
-                            Content = "Related question detected, adjusting context..."
-                        };
-                        _logger.LogInformation($"Related topic: '{question}'");
-                        break;
-
-                    case QuestionType.NewTopic:
-                        yield return new StreamChunk
-                        {
-                            Type = "status",
-                            Content = "New topic detected, starting fresh..."
-                        };
-                        _logger.LogInformation($"New topic: '{question}'");
-                        ClearContext(context); // ✅ Clear old context
-                        break;
-                }
-            }
-
-            // Early validation
             if (string.IsNullOrWhiteSpace(question))
             {
                 yield return new StreamChunk { Type = "error", Content = "Question cannot be empty" };
                 yield break;
             }
 
-            if (cancellationToken.IsCancellationRequested)
-                yield break;
-
-            // ✅ NEW: Expand abbreviations early in the pipeline
-            yield return new StreamChunk { Type = "status", Content = "Processing query..." };
-
+            // ============================
+            // 3️⃣ ABBREVIATION EXPANSION
+            // ============================
             var originalQuestion = question;
             var expandedQuestion = _abbreviationService.ExpandQuery(question);
+            question = expandedQuestion;
 
-            if (expandedQuestion != originalQuestion)
+            // ============================
+            // 4️⃣ FAST EXIT: APPRECIATED / CORRECTIONS
+            // ============================
+            var appreciated = await SafeCheckAppreciatedAnswer(question);
+            if (appreciated.Answer.Any())
             {
-                _logger.LogInformation($"🔄 Query expanded: '{originalQuestion}' → '{expandedQuestion}'");
-                yield return new StreamChunk
-                {
-                    Type = "info",
-                    Content = $"Interpreting abbreviations in your query..."
-                };
+                await foreach (var c in StreamTextResponse(appreciated.Answer, cancellationToken))
+                    yield return c;
 
-                // Use expanded question for the rest of processing
-                question = expandedQuestion;
-            }
-
-            // Set defaults
-            generationModel ??= _config.DefaultGenerationModel;
-            embeddingModel ??= _config.DefaultEmbeddingModel;
-
-            yield return new StreamChunk { Type = "status", Content = "Initializing session..." };
-
-            if (sessionResult.HasError)
-            {
-                yield return new StreamChunk { Type = "error", Content = sessionResult.ErrorMessage };
+                yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
                 yield break;
             }
 
-            if (cancellationToken.IsCancellationRequested) yield break;
-
-            // Check appreciated answers first (fastest path)
-            yield return new StreamChunk { Type = "status", Content = "Checking knowledge cache..." };
-
-            var appreciatedResult = await SafeCheckAppreciatedAnswer(question);
-            if (appreciatedResult.Answer.Any())
+            var correction = await SafeCheckCorrections(question);
+            if (correction.Answer.Any())
             {
-                yield return new StreamChunk { Type = "status", Content = "Found cached answer!" };
-                await foreach (var chunk in StreamTextResponse(appreciatedResult.Answer, cancellationToken))
-                {
-                    if (cancellationToken.IsCancellationRequested) yield break;
-                    yield return chunk;
-                }
-                yield return new StreamChunk { Type = "complete", Content = "", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+                var fixedAnswer = await SafeRephraseWithLLM(correction.Answer, generationModel)
+                                  ?? correction.Answer;
+
+                await foreach (var c in StreamTextResponse(fixedAnswer, cancellationToken))
+                    yield return c;
+
+                yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
                 yield break;
             }
 
-            // Check corrections
-            var correctionResult = await SafeCheckCorrections(question);
-            if (correctionResult.Answer.Any())
-            {
-                yield return new StreamChunk { Type = "status", Content = "Applying user correction..." };
-
-                var rephrasedAnswer = await SafeRephraseWithLLM(correctionResult.Answer, generationModel);
-                var finalAnswer = rephrasedAnswer ?? correctionResult.Answer;
-
-                await foreach (var chunk in StreamTextResponse(finalAnswer, cancellationToken))
-                {
-                    if (cancellationToken.IsCancellationRequested) yield break;
-                    yield return chunk;
-                }
-                yield return new StreamChunk { Type = "complete", Content = "", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
-                yield break;
-            }
-
-            // Handle history clear
-            if (IsHistoryClearRequest(question))
-            {
-                yield return new StreamChunk { Type = "status", Content = "Clearing conversation history..." };
-                ClearContext(context);
-                yield return new StreamChunk { Type = "response", Content = "Conversation history cleared. How can I help you?" };
-                yield return new StreamChunk { Type = "complete", Content = "", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
-                yield break;
-            }
-
-            // Fast path for non-MEAI queries
-            if (!meaiInfo)
-            {
-                yield return new StreamChunk { Type = "status", Content = "Processing general query..." };
-                await foreach (var chunk in ProcessNonMeaiQueryStream(question, sessionId, generationModel, actualUserId, cancellationToken))
-                {
-                    if (cancellationToken.IsCancellationRequested) yield break;
-                    yield return chunk;
-                }
-                yield return new StreamChunk { Type = "complete", Content = "", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
-                yield break;
-            }
-
-            // Full MEAI processing
-            yield return new StreamChunk { Type = "status", Content = "Loading AI models..." };
-
-            // Validate models - handle safely
+            // ============================
+            // 5️⃣ MODEL VALIDATION
+            // ============================
             var modelResult = await SafeValidateModels(generationModel, embeddingModel);
             if (modelResult.HasError)
             {
-                yield return new StreamChunk { Type = "error", Content = "Required AI models are not available" };
+                yield return new StreamChunk { Type = "error", Content = "Model validation failed" };
                 yield break;
             }
 
-            var genModel = modelResult.GenerationModel;
-            var embModel = modelResult.EmbeddingModel;
+            var genModel = modelResult.GenerationModel!;
+            var embModel = modelResult.EmbeddingModel!;
 
-            if (cancellationToken.IsCancellationRequested) yield break;
-
-            yield return new StreamChunk { Type = "status", Content = "Processing your question..." };
-
-            // Check for topic changes
-            if (_conversationAnalysis.IsTopicChanged(question, context))
-            {
-                yield return new StreamChunk { Type = "status", Content = "New topic detected, refreshing context..." };
-                ClearContext(context);
-            }
-
-            var contextualQuery = _conversationAnalysis.BuildContextualQuery(question, context.History);
-
-            if (cancellationToken.IsCancellationRequested) yield break;
-
-            // Search for relevant information
             yield return new StreamChunk { Type = "status", Content = "Searching knowledge base..." };
 
-            var searchResult = await SafeSearchKnowledgeBaseWithExpansion(
-        originalQuestion,      // Keep original for context
-        expandedQuestion,      // Use expanded for better retrieval
-        contextualQuery,
-        embModel,
-        maxResults,
-        plant,
-        useReRanking
-    );
-            if (searchResult.HasError)
+            // ============================
+            // 6️⃣ VECTOR RETRIEVAL
+            // ============================
+            var vectorChunks = await GetRelevantChunksWithExpansionAsync(
+    originalQuestion,
+    expandedQuestion,
+    _conversationAnalysis.BuildContextualQuery(question, context.History),
+    embModel,
+    maxResults,
+    plant,
+    useReRanking: false,   // ⛔ disable internal reranking
+    context               // pass conversation context
+);
+
+
+            // ============================
+            // 7️⃣ BM25 RETRIEVAL (HYBRID)
+            // ============================
+            var bm25Chunks = _bm25Service.Rank(question, vectorChunks, maxResults * 2);
+
+            var hybridChunks = vectorChunks
+                .Concat(bm25Chunks)
+                .GroupBy(c => c.Id)
+                .Select(g => g.First())
+                .OrderByDescending(c => c.Similarity + (c.Bm25Score * 0.1))
+                .Take(maxResults)
+                .ToList();
+
+            // ============================
+            // 8️⃣ RERANKING (CROSS-ENCODER)
+            // ============================
+            if (useReRanking && hybridChunks.Count > 3)
             {
-                yield return new StreamChunk { Type = "error", Content = "Failed to search knowledge base" };
-                yield break;
+                hybridChunks = await _rerankerService.RerankAsync(
+                    question,
+                    hybridChunks,
+                    "qllama/bge-reranker-v2-m3:f16",
+                    topK: 5);
             }
 
-            var relevantChunks = searchResult.Chunks;
+            // 🔒 FREEZE CONTEXT FOR STREAMING
+            var finalChunks = hybridChunks.Take(5).ToList();
 
-            if (cancellationToken.IsCancellationRequested) yield break;
-
-            // Show found sources - THIS MATCHES HTML EXPECTATIONS
-            if (relevantChunks.Any())
+            // ============================
+            // 9️⃣ STREAM SOURCES
+            // ============================
+            if (finalChunks.Any())
             {
                 yield return new StreamChunk
                 {
                     Type = "sources",
-                    Content = $"Found {relevantChunks.Count} relevant sources",
-                    Sources = relevantChunks.Select(c => c.Source).Distinct().ToList()
+                    Sources = finalChunks.Select(c => c.Source).Distinct().ToList()
                 };
-
-                // Stream preview of top chunks - MATCHING HTML FORMAT
-                for (int i = 0; i < Math.Min(10, relevantChunks.Count); i++)
-                {
-                    var chunk = relevantChunks[i];
-                    var preview = chunk.Text;
-                    yield return new StreamChunk
-                    {
-                        Type = "chunk",
-                        Content = preview,
-                        Source = chunk.Source,
-                        Similarity = chunk.Similarity,
-                        TextPreview = preview  // HTML expects this property
-                    };
-                }
             }
 
             yield return new StreamChunk { Type = "status", Content = "Generating response..." };
 
-            List<float> questionEmbedding = new List<float>();
-            try
-            {
-                questionEmbedding = await GetEmbeddingAsync(question, embModel);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to generate question embedding");
-            }
-
-            // Generate the actual response with streaming
+            // ============================
+            // 🔟 STREAM GENERATION
+            // ============================
             var fullResponse = new StringBuilder();
-            var hasError = false;
-            string? errorMessage = null;
+            var questionEmbedding = await GetEmbeddingAsync(question, embModel);
 
-            _logger.LogInformation("📝 About to call GenerateStreamingResponseSafe...");
-            int responseChunkCount = 0;
-            // ✅ Generate response without try-catch around yield
             await foreach (var token in GenerateStreamingResponseSafe(
                 question,
                 genModel.Name!,
                 context,
-                relevantChunks,
+                finalChunks,
                 meaiInfo,
                 plant,
-                questionType,
+                QuestionType.NewTopic,
+                false,
                 cancellationToken))
             {
-                if (cancellationToken.IsCancellationRequested)
-                    yield break;
-
-                responseChunkCount++;
-
-                if (responseChunkCount <= 10)
-                {
-                    _logger.LogInformation($"✅ Response chunk {responseChunkCount}: '{token?.Substring(0, Math.Min(30, token?.Length ?? 0))}'");
-                }
-
-                _logger.LogInformation($"🎯 Received token from GenerateStreamingResponseSafe: '{token?.Substring(0, Math.Min(50, token?.Length ?? 0))}'");
-
-                // Check if this is an error token
                 if (token.StartsWith("__ERROR__:"))
                 {
-                    var errorMsg = token.Substring(10);
-                    hasError = true;
-                    errorMessage = token.Substring(10);
-                    _logger.LogError($"❌ Error token received: {errorMsg}");
-                    break;
+                    yield return new StreamChunk { Type = "error", Content = token[10..] };
+                    yield break;
                 }
 
                 fullResponse.Append(token);
-                _logger.LogInformation($"✅ Yielding response chunk: '{token?.Substring(0, Math.Min(20, token?.Length ?? 0))}'");
-
-
-                yield return new StreamChunk
-                {
-                    Type = "response",
-                    Content = token
-                };
+                yield return new StreamChunk { Type = "response", Content = token };
             }
 
-            if (!hasError && fullResponse.Length > 0)
-            {
-                try
-                {
-                    _logger.LogInformation("Saving conversation to database...");
+            // ============================
+            // 1️⃣1️⃣ SAVE & UPDATE CONTEXT
+            // ============================
+            var answerEmbedding = await GetEmbeddingAsync(fullResponse.ToString(), embModel);
+            var entities = await _entityExtraction.ExtractEntitiesAsync(fullResponse.ToString());
 
-                    // Extract entities from the answer
-                    var entities = await _entityExtraction.ExtractEntitiesAsync(fullResponse.ToString());
+            await SaveConversationToDatabaseFast(
+                dbSession.SessionId,
+                question,
+                fullResponse.ToString(),
+                finalChunks,
+                genModel,
+                embModel,
+                finalChunks.Any() ? finalChunks.Average(c => c.Similarity) : 0.8,
+                stopwatch.ElapsedMilliseconds,
+                false,
+                null,
+                plant,
+                questionEmbedding,
+                answerEmbedding,
+                entities);
 
-                   var answerEmbedding = await GetEmbeddingAsync(fullResponse.ToString(), embModel);
+            await UpdateConversationHistoryFast(
+                context,
+                question,
+                fullResponse.ToString(),
+                finalChunks,
+                entities);
 
-                    // ✅ CRITICAL: Save to database FIRST
-                    var conversationId = await SaveConversationToDatabaseFast(
-                        sessionResult.Session!.SessionId,
-                        question,
-                        fullResponse.ToString(),
-                        relevantChunks,
-                        genModel!,
-                        embModel!,
-                        relevantChunks.Any() ? relevantChunks.Average(c => c.Similarity) : 0.8,
-                        stopwatch.ElapsedMilliseconds,
-                        false,
-                        null,
-                        plant,
-                        questionEmbedding,
-                        answerEmbedding,
-                        entities
-                    );
-
-                    _logger.LogInformation($"✅ Saved conversation with ID {conversationId}");
-
-                    if (conversationId > 0)
-                    {
-                        // ✅ NOW update in-memory context (this is just a cache)
-                        await UpdateConversationHistoryFast(
-                            context,
-                            question,
-                            fullResponse.ToString(),
-                            relevantChunks,
-                            entities
-                        );
-
-                        // ✅ VERIFY: Check if database has the conversation
-                        var verification = await _conversationStorage.GetSessionConversationsAsync(
-                            sessionResult.Session!.SessionId
-                        );
-
-                        _logger.LogInformation($"✅ Verification: Database now has {verification.Count} conversations");
-                    }
-                    else
-                    {
-                        _logger.LogError($"❌ Failed to save conversation - returned ID is {conversationId}");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to save conversation to database");
-                }
-            }
             stopwatch.Stop();
 
             yield return new StreamChunk
             {
                 Type = "complete",
-                Content = "Done",
-                ProcessingTimeMs = stopwatch.ElapsedMilliseconds
-            };
-
-            // Handle errors after yield loop
-            if (hasError)
-            {
-                yield return new StreamChunk
-                {
-                    Type = "error",
-                    Content = errorMessage ?? "Unknown error occurred"
-                };
-                yield break;
-            }
-
-            // Update context (outside yield loop, so we can use try-catch)
-            try
-            {
-                if (fullResponse.Length > 0)
-                {
-
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to update conversation context (non-critical)");
-            }
-
-            yield return new StreamChunk
-            {
-                Type = "complete",
-                Content = "Done",
                 ProcessingTimeMs = stopwatch.ElapsedMilliseconds
             };
         }
+
 
         private QuestionType ClassifyQuestionType(string question, ConversationContext context)
         {
@@ -4179,14 +4129,31 @@ These are the fixed organizational details for {plant} plant.";
      bool meaiInfo,
      string plant,
      QuestionType questionType = QuestionType.NewTopic,
+     bool isOracleEbsQuery = false,
      [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             _logger.LogInformation("🚀 GenerateStreamingResponseSafe called");
 
-            var prompt = meaiInfo
-                ? await _systemPromptBuilder.BuildMeaiSystemPrompt(plant, relevantChunks, question)
-                : BuildEnhancedPrompt(question, relevantChunks, context, meaiInfo, plant, questionType);
+            string prompt;
 
+            if (isOracleEbsQuery)
+            {
+                // 🔧 Oracle EBS SQL expert prompt
+                prompt = _systemPromptBuilder.BuildOracleEBSQuerySystemPrompt(
+                    plant, relevantChunks, question);
+                _logger.LogInformation("🔧 Using Oracle EBS system prompt (streaming)");
+            }
+            else if (meaiInfo)
+            {
+                prompt = await _systemPromptBuilder.BuildMeaiSystemPrompt(
+                    plant, relevantChunks, question);
+            }
+            else
+            {
+                prompt = _systemPromptBuilder.BuildGeneralSystemPrompt();
+            }
+
+           
             _logger.LogInformation($"📝 Prompt built, length: {prompt?.Length ?? 0} chars");
 
             var stream = await SafeCreateStream(model, prompt, cancellationToken);
@@ -5451,7 +5418,7 @@ Be helpful, informative, and engaging in your communication."
 
                 // Check models
                 var models = await _modelManager.DiscoverAvailableModelsAsync();
-                var embeddingModels = models.Where(m => m.Type == "embedding" || m.Type == "both").ToList();
+                var embeddingModels = models.Where(m => m.Type == "embedding").ToList();
                 diagnostics.EmbeddingModels = embeddingModels.Select(m => m.Name).ToList();
 
                 // Check each model's collection
@@ -5530,7 +5497,7 @@ Be helpful, informative, and engaging in your communication."
                 _logger.LogInformation($"🔄 Processing single file: {filePath} for plant: {plant}");
 
                 var models = await _modelManager.DiscoverAvailableModelsAsync();
-                var embeddingModels = models.Where(m => m.Type == "embedding" || m.Type == "both").ToList();
+                var embeddingModels = models.Where(m => m.Type == "embedding").ToList();
 
                 if (!embeddingModels.Any())
                 {

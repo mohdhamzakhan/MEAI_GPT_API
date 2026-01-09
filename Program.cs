@@ -49,6 +49,7 @@ builder.Services.AddHttpClient("ChromaDB", client =>
     client.Timeout = TimeSpan.FromMinutes(timeoutMinutes);
 });
 
+
 // Add configuration binding
 builder.Services.Configure<OllamaLoadBalancerOptions>(
     builder.Configuration.GetSection("OllamaLoadBalancer"));
@@ -115,6 +116,9 @@ builder.Services.AddOpenTelemetry()
             .AddPrometheusExporter();
     });
 
+builder.Services.Configure<ChromaDbOptions>(
+    builder.Configuration.GetSection("ChromaDB"));
+
 builder.Services.AddDbContext<ConversationDbContext>(options =>
     options.UseSqlite("Data Source=conversations.db"));
 builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>();
@@ -147,6 +151,11 @@ builder.Services.AddScoped<ConversationAnalysisService>();
 builder.Services.AddScoped<EntityExtractionService>();
 builder.Services.AddScoped<SystemPromptBuilder>();
 builder.Services.AddScoped<HelperMethods>();
+builder.Services.AddScoped<OracleEBSQuery>();
+builder.Services.AddScoped<RerankerService>();
+builder.Services.AddSingleton<Bm25Service>();
+
+
 
 builder.Services.AddSingleton<OllamaQueueService>();
 
@@ -227,8 +236,7 @@ else
 });
 }
 
-builder.Services.Configure<ChromaDbOptions>(
-    builder.Configuration.GetSection("ChromaDB"));
+
 
 var app = builder.Build();
 
@@ -266,11 +274,19 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
     app.UseSwaggerUI();
 }
 
-app.UseCors("AllowAll");
-// Add Prometheus metrics endpoint
-app.UseOpenTelemetryPrometheusScrapingEndpoint();
+
 app.UseRouting();
+
+app.UseCors("AllowAll");
+
+app.UseAuthentication();
+app.UseAuthorization();
+
+// Prometheus
+app.UseOpenTelemetryPrometheusScrapingEndpoint();
+
 app.MapControllers();
+
 app.UseMetrics();
 
 app.UseDeveloperExceptionPage();

@@ -621,7 +621,7 @@ namespace MEAI_GPT_API.Controller
                     Question = question,
                     Plant = plant,
                     GenerationModel = model,
-                    EmbeddingModel = "nomic-embed-text:v1.5",
+                    EmbeddingModel = "qwen3-embedding:8b",
                     MaxResults = 10,
                     meai_info = meaiInfo,
                     sessionId = sessionId

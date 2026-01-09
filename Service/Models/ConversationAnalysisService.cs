@@ -482,7 +482,6 @@ namespace MEAI_GPT_API.Service.Models
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
 
-
         public string DetermineTopicTag(string question, string answer)
         {
             var lowerQuestion = question.ToLowerInvariant();

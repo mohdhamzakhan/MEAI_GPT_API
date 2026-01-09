@@ -25,126 +25,227 @@ namespace MEAI_GPT_API.Services
             _config = config.Value;
         }
 
+        //public async Task<List<ModelConfiguration>> DiscoverAvailableModelsAsync()
+        //{
+        //    try
+        //    {
+        //        var response = await _httpClient.GetAsync("/api/tags");
+
+        //        if (!response.IsSuccessStatusCode)
+        //        {
+        //            _logger.LogError($"Failed to discover models: {response.StatusCode}");
+        //            return GetHardcodedModels(); // Fallback
+        //        }
+
+        //        var json = await response.Content.ReadAsStringAsync();
+        //        _logger.LogInformation($"Ollama models response: {json}");
+
+        //        using var doc = JsonDocument.Parse(json);
+        //        var models = new List<ModelConfiguration>();
+
+        //        if (doc.RootElement.TryGetProperty("models", out var modelsArray))
+        //        {
+        //            foreach (var modelElement in modelsArray.EnumerateArray())
+        //            {
+        //                if (modelElement.TryGetProperty("name", out var nameProperty))
+        //                {
+        //                    var modelName = nameProperty.GetString();
+        //                    if (string.IsNullOrEmpty(modelName)) continue;
+
+        //                    var config = new ModelConfiguration
+        //                    {
+        //                        Name = modelName,
+        //                        Type = DetermineModelType(modelName),
+        //                        MaxContextLength = GetMaxContextLength(modelName),
+        //                        EmbeddingDimension = GetEmbeddingDimension(modelName),
+        //                        ModelOptions = new Dictionary<string, object>
+        //                {
+        //                    { "num_ctx", 2048 },
+        //                    { "temperature", 0.1 }
+        //                }
+        //                    };
+
+        //                    models.Add(config);
+        //                    _logger.LogInformation($"Discovered model: {modelName} (Type: {config.Type})");
+        //                }
+        //            }
+        //        }
+
+        //        if (!models.Any())
+        //        {
+        //            _logger.LogWarning("No models discovered from Ollama, using hardcoded models");
+        //            return GetHardcodedModels();
+        //        }
+
+        //        return models;
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        _logger.LogError(ex, "Failed to discover available models");
+        //        return GetHardcodedModels();
+        //    }
+        //}
+
         public async Task<List<ModelConfiguration>> DiscoverAvailableModelsAsync()
         {
             try
             {
                 var response = await _httpClient.GetAsync("/api/tags");
-
                 if (!response.IsSuccessStatusCode)
-                {
-                    _logger.LogError($"Failed to discover models: {response.StatusCode}");
-                    return GetHardcodedModels(); // Fallback
-                }
+                    return GetHardcodedModels();
 
                 var json = await response.Content.ReadAsStringAsync();
-                _logger.LogInformation($"Ollama models response: {json}");
-
                 using var doc = JsonDocument.Parse(json);
+
                 var models = new List<ModelConfiguration>();
 
-                if (doc.RootElement.TryGetProperty("models", out var modelsArray))
-                {
-                    foreach (var modelElement in modelsArray.EnumerateArray())
-                    {
-                        if (modelElement.TryGetProperty("name", out var nameProperty))
-                        {
-                            var modelName = nameProperty.GetString();
-                            if (string.IsNullOrEmpty(modelName)) continue;
-
-                            var config = new ModelConfiguration
-                            {
-                                Name = modelName,
-                                Type = DetermineModelType(modelName),
-                                MaxContextLength = GetMaxContextLength(modelName),
-                                EmbeddingDimension = GetEmbeddingDimension(modelName),
-                                ModelOptions = new Dictionary<string, object>
-                        {
-                            { "num_ctx", 2048 },
-                            { "temperature", 0.1 }
-                        }
-                            };
-
-                            models.Add(config);
-                            _logger.LogInformation($"Discovered model: {modelName} (Type: {config.Type})");
-                        }
-                    }
-                }
-
-                if (!models.Any())
-                {
-                    _logger.LogWarning("No models discovered from Ollama, using hardcoded models");
+                if (!doc.RootElement.TryGetProperty("models", out var arr))
                     return GetHardcodedModels();
+
+                foreach (var m in arr.EnumerateArray())
+                {
+                    var name = m.GetProperty("name").GetString();
+                    if (string.IsNullOrWhiteSpace(name)) continue;
+
+                    var type = DetermineModelType(name);
+
+                    var config = new ModelConfiguration
+                    {
+                        Name = name,
+                        Type = type,
+                        MaxContextLength = DetermineContextLength(name),
+                        EmbeddingDimension = type == "embedding"
+                            ? DetermineEmbeddingDimension(name)
+                            : 0,
+                        Temperature = DetermineOptimalTemperature(name),
+                        ModelOptions = GetModelSpecificOptions(name)
+                    };
+
+                    _availableModels[name] = config;
+                    models.Add(config);
                 }
 
                 return models;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to discover available models");
+                _logger.LogError(ex, "Model discovery failed");
                 return GetHardcodedModels();
             }
         }
-        private List<ModelConfiguration> GetHardcodedModels()
+
+        //    private List<ModelConfiguration> GetHardcodedModels()
+        //    {
+        //        return new List<ModelConfiguration>
+        //{
+        //    new ModelConfiguration
+        //    {
+        //        Name = "qwen3-embedding:8b",
+        //        Type = "embedding",
+        //        MaxContextLength = 8192,
+        //        EmbeddingDimension = 4096, // Nomic embedding dimension
+        //        ModelOptions = new Dictionary<string, object>
+        //        {
+        //            { "num_ctx", 8192 }
+        //        }
+        //    },
+        //    new ModelConfiguration
+        //    {
+        //        Name = "mistral:latest",
+        //        Type = "generation",
+        //        MaxContextLength = 4096,
+        //        EmbeddingDimension = 0,
+        //        ModelOptions = new Dictionary<string, object>
+        //        {
+        //            { "num_ctx", 4096 },
+        //            { "temperature", 0.7 }
+        //        }
+        //    },
+        //    new ModelConfiguration
+        //    {
+        //        Name = "llama3.1:8b",
+        //        Type = "generation",
+        //        MaxContextLength = 4096,
+        //        EmbeddingDimension = 0,
+        //        ModelOptions = new Dictionary<string, object>
+        //        {
+        //            { "num_ctx", 4096 },
+        //            { "temperature", 0.7 }
+        //        }
+        //    }
+        //};
+        //    }
+
+        private List<ModelConfiguration> GetHardcodedModels() => new()
         {
-            return new List<ModelConfiguration>
-    {
-        new ModelConfiguration
-        {
-            Name = "nomic-embed-text:v1.5",
-            Type = "embedding",
-            MaxContextLength = 2048,
-            EmbeddingDimension = 768, // Nomic embedding dimension
-            ModelOptions = new Dictionary<string, object>
+            new ModelConfiguration
             {
-                { "num_ctx", 2048 }
-            }
-        },
-        new ModelConfiguration
-        {
-            Name = "mistral:latest",
-            Type = "generation",
-            MaxContextLength = 4096,
-            EmbeddingDimension = 0,
-            ModelOptions = new Dictionary<string, object>
+                Name = "qwen3-embedding:8b",
+                Type = "embedding",
+                MaxContextLength = 8192,
+                EmbeddingDimension = 4096,
+                ModelOptions = new() { ["num_ctx"] = 8192 }
+            },
+            new ModelConfiguration
             {
-                { "num_ctx", 4096 },
-                { "temperature", 0.7 }
-            }
-        },
-        new ModelConfiguration
-        {
-            Name = "llama3.1:8b",
-            Type = "generation",
-            MaxContextLength = 4096,
-            EmbeddingDimension = 0,
-            ModelOptions = new Dictionary<string, object>
+                Name = "qllama/bge-reranker-v2-m3:f16",
+                Type = "reranker",
+                MaxContextLength = 8192
+            },
+            new ModelConfiguration
             {
-                { "num_ctx", 4096 },
-                { "temperature", 0.7 }
+                Name = "llama3.1:8b",
+                Type = "generation",
+                MaxContextLength = 8192,
+                ModelOptions = new()
+                {
+                    ["num_ctx"] = 8192,
+                    ["temperature"] = 0.1,
+                    ["top_p"] = 0.9
+                }
             }
-        }
-    };
+        };
+
+        private string DetermineModelType(string name)
+        {
+            name = name.ToLowerInvariant();
+
+            if (name.Contains("reranker"))
+                return "reranker";
+
+            if (name.Contains("embed") || name.Contains("embedding") || name.Contains("nomic"))
+                return "embedding";
+
+            return "generation";
         }
 
-        private string DetermineModelType(string modelName)
+        private int DetermineEmbeddingDimension(string name)
         {
-            if (modelName.Contains("embed") || modelName.Contains("nomic"))
-                return "embedding";
-            if (modelName.Contains("mistral") || modelName.Contains("llama") || modelName.Contains("qwen"))
-                return "generation";
-            return "generation"; // Default
+            if (name.Contains("nomic")) return 768;
+            if (name.Contains("qwen3-embedding")) return 4096;
+            return 0;
         }
+
+        //private string DetermineModelType(string modelName)
+        //{
+        //    if (modelName.Contains("embed") || modelName.Contains("nomic") || modelName.Contains("embedding"))
+        //        return "embedding";
+        //    if (modelName.Contains("mistral") || modelName.Contains("llama") || (modelName.Contains("qwen") && !modelName.Contains("embedding")))
+        //        return "generation";
+        //    return "generation"; // Default
+        //}
         private int GetMaxContextLength(string modelName)
         {
             if (modelName.Contains("nomic")) return 2048;
             if (modelName.Contains("mistral")) return 4096;
+            if (modelName.Contains("qwen")) return 4096;
             return 2048; // Default
         }
 
         private int GetEmbeddingDimension(string modelName)
         {
             if (modelName.Contains("nomic-embed-text")) return 768;
+            if (modelName.Contains("embedding")) return 4096;
             return 0; // Not an embedding model
         }
 
@@ -235,110 +336,130 @@ namespace MEAI_GPT_API.Services
             }
         }
 
-        private Dictionary<string, object> GetModelSpecificOptions(string modelName)
+        private Dictionary<string, object> GetModelSpecificOptions(string name)
         {
-            var options = new Dictionary<string, object>();
-            var lowerName = modelName.ToLowerInvariant();
+            name = name.ToLowerInvariant();
 
-            if (lowerName.Contains("mistral"))
-            {
-                options["num_ctx"] = 8192;
-                options["temperature"] = 0.1;
-                options["top_p"] = 0.9;
-            }
-            else if (lowerName.Contains("llama"))
-            {
-                options["num_ctx"] = 4096;
-                options["temperature"] = 0.2;
-                options["top_p"] = 0.95;
-            }
-            else if (lowerName.Contains("qwen"))
-            {
-                options["num_ctx"] = 6144;
-                options["temperature"] = 0.15;
-                options["top_p"] = 0.85;
-            }
-            else
-            {
-                // Safe fallback
-                options["num_ctx"] = 2048;
-                options["temperature"] = 0.2;
-            }
+            if (name.Contains("embedding") || name.Contains("nomic"))
+                return new() { ["num_ctx"] = 8192 };
 
-            return options;
+            if (name.Contains("llama"))
+                return new()
+                {
+                    ["num_ctx"] = 8192,
+                    ["temperature"] = 0.1,
+                    ["top_p"] = 0.9
+                };
+
+            if (name.Contains("qwen"))
+                return new()
+                {
+                    ["num_ctx"] = 8192,
+                    ["temperature"] = 0.15,
+                    ["top_p"] = 0.85
+                };
+
+            return new() { ["num_ctx"] = 4096 };
         }
 
 
-        private int DetermineContextLength(string modelName)
+        private int DetermineContextLength(string name)
         {
-            var lowerName = modelName.ToLower();
-            return lowerName switch
-            {
-                var name when name.Contains("mistral") => 8192,
-                var name when name.Contains("llama") => 4096,
-                var name when name.Contains("phi") => 2048,
-                var name when name.Contains("qwen") => 6144,
-                _ => 4096
-            };
+            name = name.ToLowerInvariant();
+
+            if (name.Contains("mistral")) return 8192;
+            if (name.Contains("llama")) return 8192;
+            if (name.Contains("qwen")) return 8192;
+            return 4096;
         }
 
-        private double DetermineOptimalTemperature(string modelName)
+        private double DetermineOptimalTemperature(string name)
         {
-            var lowerName = modelName.ToLower();
-            return lowerName switch
-            {
-                var name when name.Contains("mistral") => 0.1,
-                var name when name.Contains("llama") => 0.2,
-                var name when name.Contains("phi") => 0.1,
-                var name when name.Contains("qwen") => 0.15,
-                _ => 0.2
-            };
+            name = name.ToLowerInvariant();
+
+            if (name.Contains("mistral")) return 0.1;
+            if (name.Contains("llama")) return 0.1;
+            if (name.Contains("qwen")) return 0.15;
+            return 0.2;
         }
+
+        //public Task<ModelConfiguration?> GetModelAsync(string modelName)
+        //{
+        //    // First, check in static config with exact model name
+        //    if (_config.ModelConfigurations!.TryGetValue(modelName.Replace(':','_'), out var config))
+        //    {
+        //        _logger.LogInformation($"✅ Loaded model config from appsettings: {modelName}");
+
+        //        return Task.FromResult<ModelConfiguration?>(new ModelConfiguration
+        //        {
+        //            Name = modelName,
+        //            IsAvailable = true,
+        //            Type = config.Type,
+        //            EmbeddingDimension = config.EmbeddingDimension,
+        //            MaxContextLength = config.MaxContextLength,
+        //            Temperature = config.Temperature,
+        //            ModelOptions = config.ModelOptions ?? new Dictionary<string, object>()
+        //        });
+        //    }
+
+        //    // If exact match fails, try with base name (without version tag)
+        //    var baseName = modelName.Split(':')[0];
+        //    var matchingConfig = _config.ModelConfigurations.FirstOrDefault(kvp =>
+        //        kvp.Key.Split(':')[0].Equals(baseName, StringComparison.OrdinalIgnoreCase));
+
+        //    if (!matchingConfig.Equals(default(KeyValuePair<string, dynamic>)))
+        //    {
+        //        _logger.LogInformation($"✅ Loaded model config from appsettings (base match): {modelName} -> {matchingConfig.Key}");
+
+        //        return Task.FromResult<ModelConfiguration?>(new ModelConfiguration
+        //        {
+        //            Name = modelName,
+        //            IsAvailable = true,
+        //            Type = matchingConfig.Value.Type,
+        //            EmbeddingDimension = matchingConfig.Value.EmbeddingDimension,
+        //            MaxContextLength = matchingConfig.Value.MaxContextLength,
+        //            Temperature = matchingConfig.Value.Temperature,
+        //            ModelOptions = matchingConfig.Value.ModelOptions ?? new Dictionary<string, object>()
+        //        });
+        //    }
+
+        //    // Optional fallback: run discovery if not in config
+        //    _logger.LogWarning($"⚠️ Model '{modelName}' not found in config. Triggering discovery...");
+        //    return GetModelFromDiscoveryAsync(modelName);
+        //}
 
         public Task<ModelConfiguration?> GetModelAsync(string modelName)
         {
-            // First, check in static config with exact model name
-            if (_config.ModelConfigurations!.TryGetValue(modelName.Replace(':','_'), out var config))
+            if (_config.ModelConfigurations!
+                .TryGetValue(modelName.Replace(':', '_'), out var cfg))
             {
-                _logger.LogInformation($"✅ Loaded model config from appsettings: {modelName}");
-
                 return Task.FromResult<ModelConfiguration?>(new ModelConfiguration
                 {
                     Name = modelName,
-                    IsAvailable = true,
-                    Type = config.Type,
-                    EmbeddingDimension = config.EmbeddingDimension,
-                    MaxContextLength = config.MaxContextLength,
-                    Temperature = config.Temperature,
-                    ModelOptions = config.ModelOptions ?? new Dictionary<string, object>()
+                    Type = cfg.Type,
+                    EmbeddingDimension = cfg.EmbeddingDimension,
+                    MaxContextLength = cfg.MaxContextLength,
+                    Temperature = cfg.Temperature,
+                    ModelOptions = cfg.ModelOptions
                 });
             }
 
-            // If exact match fails, try with base name (without version tag)
-            var baseName = modelName.Split(':')[0];
-            var matchingConfig = _config.ModelConfigurations.FirstOrDefault(kvp =>
-                kvp.Key.Split(':')[0].Equals(baseName, StringComparison.OrdinalIgnoreCase));
-
-            if (!matchingConfig.Equals(default(KeyValuePair<string, dynamic>)))
-            {
-                _logger.LogInformation($"✅ Loaded model config from appsettings (base match): {modelName} -> {matchingConfig.Key}");
-
-                return Task.FromResult<ModelConfiguration?>(new ModelConfiguration
-                {
-                    Name = modelName,
-                    IsAvailable = true,
-                    Type = matchingConfig.Value.Type,
-                    EmbeddingDimension = matchingConfig.Value.EmbeddingDimension,
-                    MaxContextLength = matchingConfig.Value.MaxContextLength,
-                    Temperature = matchingConfig.Value.Temperature,
-                    ModelOptions = matchingConfig.Value.ModelOptions ?? new Dictionary<string, object>()
-                });
-            }
-
-            // Optional fallback: run discovery if not in config
-            _logger.LogWarning($"⚠️ Model '{modelName}' not found in config. Triggering discovery...");
-            return GetModelFromDiscoveryAsync(modelName);
+            _availableModels.TryGetValue(modelName, out var discovered);
+            return Task.FromResult(discovered);
         }
+
+        public async Task<List<ModelConfiguration>> GetEmbeddingModelsAsync()
+           => (await DiscoverAvailableModelsAsync())
+               .Where(m => m.Type == "embedding")
+               .ToList();
+
+        public async Task<List<ModelConfiguration>> GetGenerationModelsAsync()
+            => (await DiscoverAvailableModelsAsync())
+                .Where(m => m.Type == "generation")
+                .ToList();
+
+        public async Task<bool> ValidateModelAsync(string modelName)
+            => (await GetModelAsync(modelName)) != null;
         private async Task<ModelConfiguration?> GetModelFromDiscoveryAsync(string modelName)
         {
             if (_availableModels.TryGetValue(modelName, out var model))
@@ -358,22 +479,22 @@ namespace MEAI_GPT_API.Services
         }
 
 
-        public async Task<List<ModelConfiguration>> GetEmbeddingModelsAsync()
-        {
-            var models = await DiscoverAvailableModelsAsync();
-            return models.Where(m => m.Type == "embedding" || m.Type == "both").ToList();
-        }
+        //public async Task<List<ModelConfiguration>> GetEmbeddingModelsAsync()
+        //{
+        //    var models = await DiscoverAvailableModelsAsync();
+        //    return models.Where(m => m.Type == "embedding" || m.Type == "both").ToList();
+        //}
 
-        public async Task<List<ModelConfiguration>> GetGenerationModelsAsync()
-        {
-            var models = await DiscoverAvailableModelsAsync();
-            return models.Where(m => m.Type == "generation" || m.Type == "both").ToList();
-        }
+        //public async Task<List<ModelConfiguration>> GetGenerationModelsAsync()
+        //{
+        //    var models = await DiscoverAvailableModelsAsync();
+        //    return models.Where(m => m.Type == "generation" || m.Type == "both").ToList();
+        //}
 
-        public async Task<bool> ValidateModelAsync(string modelName)
-        {
-            var model = await GetModelAsync(modelName);
-            return model?.IsAvailable == true;
-        }
+        //public async Task<bool> ValidateModelAsync(string modelName)
+        //{
+        //    var model = await GetModelAsync(modelName);
+        //    return model?.IsAvailable == true;
+        //}
     }
 }

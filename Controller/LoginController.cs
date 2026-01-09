@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Identity.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using System.DirectoryServices;
 using System.DirectoryServices.AccountManagement;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
@@ -42,19 +43,43 @@ namespace MEAI_GPT_API.Controller
                 if (userPrincipal == null)
                     return Unauthorized("User not found in AD.");
 
+                // -----------------------------
+                // ✅ GET USER OU
+                // -----------------------------
+                DirectoryEntry de = (DirectoryEntry)userPrincipal.GetUnderlyingObject();
+                string distinguishedName = de.Properties["distinguishedName"].Value.ToString();
+
+                // Extract OU list
+                var ous = distinguishedName
+                    .Split(',')
+                    .Where(p => p.StartsWith("OU=", StringComparison.OrdinalIgnoreCase))
+                    .Select(p => p.Substring(3))
+                    .ToList();
+
+                string immediateOU = ous.FirstOrDefault();               // Closest OU
+                string fullOUPath = string.Join("/", ous);               // Full hierarchy
+
+                // -----------------------------
+                // GET AD GROUPS
+                // -----------------------------
                 var groups = userPrincipal.GetAuthorizationGroups()
                                           .Select(g => g.SamAccountName)
                                           .Where(name => !string.IsNullOrEmpty(name))
                                           .ToList();
 
-                // Determine plant access based on AD groups
-                string plantAccess = DeterminePlantAccess(groups);
+                // Determine plant access
+                string plantAccess = DeterminePlantAccessByOUPath(ous);
 
+                // -----------------------------
+                // CLAIMS
+                // -----------------------------
                 var claims = new List<Claim>
         {
             new Claim(ClaimTypes.Name, request.Username),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-            new Claim("PlantAccess", plantAccess) // Add plant access claim
+            new Claim("PlantAccess", plantAccess),
+            new Claim("OU", immediateOU ?? string.Empty),
+            new Claim("OUPath", fullOUPath ?? string.Empty)
         };
 
                 foreach (var group in groups)
@@ -81,7 +106,9 @@ namespace MEAI_GPT_API.Controller
                     Username = request.Username,
                     DisplayName = userPrincipal.DisplayName ?? request.Username,
                     Groups = groups,
-                    PlantAccess = plantAccess
+                    PlantAccess = plantAccess,
+                    OU = immediateOU,
+                    OUPath = fullOUPath
                 });
             }
         }
@@ -100,6 +127,28 @@ namespace MEAI_GPT_API.Controller
             else
                 return "Manesar"; // Default
         }
+
+        private string DeterminePlantAccessByOUPath(List<string> ouHierarchy)
+        {
+            if (ouHierarchy == null || ouHierarchy.Count == 0)
+                return "Manesar";
+
+            bool hasManesar = ouHierarchy.Any(ou =>
+                ou.Contains("Manesar", StringComparison.OrdinalIgnoreCase));
+
+            bool hasSanand = ouHierarchy.Any(ou =>
+                ou.Contains("Sanand", StringComparison.OrdinalIgnoreCase));
+
+            if (hasManesar && hasSanand)
+                return "Both"; // rare but safe
+            else if (hasManesar)
+                return "Manesar";
+            else if (hasSanand)
+                return "Sanand";
+            else
+                return "Manesar";
+        }
+
 
         public class LoginRequest
         {

@@ -8,11 +8,13 @@ namespace MEAI_GPT_API.Service.Models
     {
         private readonly PolicyAnalysisService _policyAnalysis;
         private readonly EntityExtractionService _entityExtraction;
+        private readonly OracleEBSQuery _oracleEBSQuery;
 
-        public SystemPromptBuilder(PolicyAnalysisService policyAnalysis, EntityExtractionService entityExtraction)
+        public SystemPromptBuilder(PolicyAnalysisService policyAnalysis, EntityExtractionService entityExtraction, OracleEBSQuery oracleEBSQuery)
         {
             _policyAnalysis = policyAnalysis;
             _entityExtraction = entityExtraction;
+            _oracleEBSQuery = oracleEBSQuery;
         }
 
         // Add these helper methods to SystemPromptBuilder class
@@ -162,31 +164,321 @@ Would you like detailed information about any specific policy?
                 : firstLine ?? "Policy document";
         }
 
+        public string BuildOracleEBSQuerySystemPrompt(string plant, List<RelevantChunk> chunks, string query)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"You are an Oracle EBS R12i SQL Expert for {plant}.");
+            sb.AppendLine("Generate SQL queries using ONLY the schema provided below.");
+            sb.AppendLine();
+            sb.AppendLine("**FORMAT:**");
+            sb.AppendLine("```sql");
+            sb.AppendLine("-- Query description");
+            sb.AppendLine("SELECT ... FROM ... WHERE ... ORDER BY ...;");
+            sb.AppendLine("```");
+            sb.AppendLine();
+            sb.AppendLine("**SCHEMA REFERENCE:**");
+            foreach (var chunk in chunks)
+            {
+                sb.AppendLine(chunk.Text);
+                sb.AppendLine();
+            }
+            sb.AppendLine($"**USER REQUEST:** {query}");
+            return sb.ToString();
+        }
+
         public async Task<string> BuildMeaiSystemPrompt(string plant, List<RelevantChunk> chunks, string query)
         {
+            
+
             if (IsMetadataQuery(query))
-            {
                 return BuildMetadataSystemPrompt(plant, chunks);
-            }
-            // Check if this is a section query first
-            if (HasSectionReference(query))
+
+            if (IsPolicyDetailQuery(query))
+                return BuildPolicyDetailSystemPrompt(plant, chunks, query);
+
+            if (_entityExtraction.HasManyAbbreviations(query))
             {
-                return await BuildDynamicSectionSystemPrompt(plant, chunks, query);
-            }
-            else if (_entityExtraction.HasManyAbbreviations(query))
-            {
-                var variables = new Dictionary<string, object>
+                if (HasSectionReference(query))
                 {
-                    ["plant"] = plant,
-                    ["abbreviations"] = _entityExtraction.FormatAbbreviations(_entityExtraction.ExtractAbbreviationsFromQuery(query, chunks))
-                };
-                return BuildSystemPromptFromTemplate(plant, "abbreviation_heavy", variables);
+                    return await BuildDynamicSectionSystemPrompt(plant, chunks, query);
+                }
+                else if (_entityExtraction.HasManyAbbreviations(query))
+                {
+                    var variables = new Dictionary<string, object>
+                    {
+                        ["plant"] = plant,
+                        ["abbreviations"] = _entityExtraction.FormatAbbreviations(_entityExtraction.ExtractAbbreviationsFromQuery(query, chunks))
+                    };
+                    return BuildSystemPromptFromTemplate(plant, "abbreviation_heavy", variables);
+                }
             }
-            else
-            {
-                return BuildContextAwareSystemPrompt(plant, chunks, query);
-            }
+
+            return BuildContextAwareSystemPrompt(plant, chunks, query);
         }
+
+        private string BuildPolicyDetailSystemPrompt(string plant, List<RelevantChunk> chunks, string query)
+        {
+            var sb = new StringBuilder();
+
+            sb.AppendLine($"You are MEAI Policy Assistant for {plant}.");
+            sb.AppendLine();
+            sb.AppendLine("═══════════════════════════════════════════════════════════════");
+            sb.AppendLine();
+
+            sb.AppendLine("🎯 POLICY DETAIL QUERY DETECTED");
+            sb.AppendLine();
+            sb.AppendLine("The user is asking for detailed policy information.");
+            sb.AppendLine();
+
+            sb.AppendLine("CRITICAL INSTRUCTIONS:");
+            sb.AppendLine("1. READ ALL PROVIDED POLICY CONTEXT CAREFULLY");
+            sb.AppendLine("2. MERGE relevant information across multiple sections and documents");
+            sb.AppendLine("3. DO NOT limit yourself to one chunk if related information exists elsewhere");
+            sb.AppendLine("4. INCLUDE:");
+            sb.AppendLine("   - Purpose");
+            sb.AppendLine("   - Scope");
+            sb.AppendLine("   - Applicability");
+            sb.AppendLine("   - Key rules / requirements");
+            sb.AppendLine("   - Responsibilities");
+            sb.AppendLine("   - Exceptions (if mentioned)");
+            sb.AppendLine("5. If content is spread across sections, COMBINE IT logically");
+            sb.AppendLine("6. If exact wording exists, quote it");
+            sb.AppendLine("7. If content is implicit, summarize conservatively based on context");
+            sb.AppendLine();
+
+            sb.AppendLine("RESPONSE STRUCTURE (MANDATORY):");
+            sb.AppendLine("## Policy Overview");
+            sb.AppendLine("## Purpose");
+            sb.AppendLine("## Scope & Applicability");
+            sb.AppendLine("## Key Requirements");
+            sb.AppendLine("## Responsibilities");
+            sb.AppendLine("## Exceptions / Notes (if any)");
+            sb.AppendLine("## Source Documents");
+            sb.AppendLine();
+
+            sb.AppendLine("IMPORTANT:");
+            sb.AppendLine("- You ARE allowed to synthesize information across multiple policy excerpts");
+            sb.AppendLine("- You MUST stay within the provided context");
+            sb.AppendLine("- If some parts are missing, clearly state what is not available");
+            sb.AppendLine();
+
+            sb.AppendLine("═══════════════════════════════════════════════════════════════");
+            sb.AppendLine();
+
+            sb.AppendLine(BuildPolicyInformationExpansionBlock());
+            sb.AppendLine(BuildQueryExpansionGuidance(query));
+            sb.AppendLine(BuildMandatoryPolicyResponseStructure());
+            sb.AppendLine(BuildSelfValidationChecklist());
+
+
+            sb.AppendLine("📄 POLICY CONTEXT:");
+            sb.AppendLine();
+
+            foreach (var chunk in chunks)
+            {
+                sb.AppendLine($"Document: {chunk.Source}");
+                sb.AppendLine(chunk.Text);
+                sb.AppendLine();
+                sb.AppendLine("---------------------------------------------------------------");
+            }
+
+
+            sb.AppendLine();
+            sb.AppendLine("🎯 USER QUESTION:");
+            sb.AppendLine(query);
+            sb.AppendLine();
+            sb.AppendLine("Now provide a COMPLETE, WELL-STRUCTURED policy explanation.");
+
+            return sb.ToString();
+        }
+
+        private bool IsPolicyDetailQuery(string query)
+        {
+            var keywords = new[]
+            {
+        "what is the policy",
+        "explain the policy",
+        "policy on",
+        "describe the policy",
+        "policy says",
+        "guidelines",
+        "rules",
+        "requirements"
+    };
+
+            var q = query.ToLowerInvariant();
+            return keywords.Any(k => q.Contains(k));
+        }
+
+        private string BuildPolicyInformationExpansionBlock()
+        {
+            return @"
+🔍 POLICY INFORMATION EXPANSION (MANDATORY):
+
+When answering a policy-related question, you MUST actively search the provided context for the following information
+— even if the user does NOT explicitly ask for it.
+
+EXTRACT AND INCLUDE IF PRESENT:
+
+1. **Purpose / Objective**
+   - Why the policy exists
+   - Business or compliance intent
+
+2. **Scope & Applicability**
+   - Who the policy applies to
+   - Employment type, department, plant, or role limitations
+
+3. **Eligibility Criteria**
+   - Conditions required to be eligible
+   - Employee category restrictions
+
+4. **Definitions / Key Terms**
+   - Acronyms or terms defined in the policy
+   - Use exact wording when available
+
+5. **Key Rules & Requirements**
+   - Mandatory rules
+   - “Must”, “Shall”, “Required” statements
+
+6. **Roles & Responsibilities**
+   - Employee responsibilities
+   - Manager / HR / Admin duties
+
+7. **Procedures / Workflow**
+   - Step-by-step processes
+   - Submission, approval, escalation steps
+
+8. **Approvals & Authorities**
+   - Who can approve
+   - Authority levels and exceptions
+
+9. **Exceptions / Special Cases**
+   - Emergency cases
+   - Conditional relaxations or exclusions
+
+10. **Compliance & Consequences**
+    - Disciplinary actions
+    - Violations and penalties
+
+11. **Related Policies / Cross References**
+    - Linked or dependent policies
+    - SOPs, manuals, annexures
+
+12. **Effective Date / Revision History**
+    - Effective date
+    - Version or amendment information
+
+13. **Plant / Department Specific Variations**
+    - Differences across plants
+    - Special clauses for locations or teams
+
+IMPORTANT RULES:
+- If information is present → INCLUDE IT
+- If information is NOT present → explicitly state:
+  ""Not specified in the provided policy excerpts.""
+- Do NOT invent or assume missing policy details
+";
+        }
+
+        private string BuildQueryExpansionGuidance(string query)
+        {
+            return $@"
+🧠 QUERY INTERPRETATION & EXPANSION GUIDANCE:
+
+User Question:
+""{query}""
+
+Interpret the user's intent broadly and intelligently:
+
+• If the question asks:
+  ""What is the policy…"" or ""Explain the policy…""
+  → Treat it as a request for a COMPLETE policy overview
+
+• If the question asks:
+  ""Can I…"" / ""Is it allowed…"" / ""Am I permitted…""  
+  → Search for:
+    - Rules
+    - Conditions
+    - Approvals
+    - Exceptions
+
+• If the question asks:
+  ""How does it work…"" / ""What is the process…""  
+  → Extract:
+    - Procedures
+    - Workflows
+    - Step-by-step instructions
+
+• If the question asks:
+  ""Who is responsible…""  
+  → Focus on:
+    - Roles
+    - Authorities
+    - Accountability
+
+• If the question asks:
+  ""What happens if…""  
+  → Look for:
+    - Compliance rules
+    - Disciplinary action
+    - Escalation clauses
+
+• If the question is short or ambiguous:
+  → Expand it into a full policy interpretation using the available context
+
+ALWAYS:
+- Look for related clauses even if wording differs
+- Combine information across multiple sections or documents
+- Stay strictly within the provided context
+";
+        }
+
+        private string BuildMandatoryPolicyResponseStructure()
+        {
+            return @"
+📌 MANDATORY RESPONSE STRUCTURE:
+
+Your response MUST follow this structure exactly.
+If a section is missing in the context, clearly state so.
+
+## Policy Overview
+## Purpose & Objective
+## Scope & Applicability
+## Definitions / Key Terms (if any)
+## Eligibility Criteria
+## Key Rules & Requirements
+## Procedures / Workflow
+## Roles & Responsibilities
+## Approvals & Authorities
+## Exceptions / Special Cases
+## Compliance & Consequences
+## Related Policies / References
+## Effective Date / Version (if available)
+## Source Documents
+
+DO NOT skip sections.
+DO NOT merge sections unless logically required.
+";
+        }
+
+        private string BuildSelfValidationChecklist()
+        {
+            return @"
+🧪 INTERNAL SELF-VALIDATION CHECK (MANDATORY):
+
+Before finalizing the response, verify:
+
+✓ All relevant policy excerpts were reviewed
+✓ Information was merged across documents where applicable
+✓ No important clause was skipped
+✓ All statements are supported by provided context
+✓ Missing information is explicitly acknowledged
+✓ Sources are clearly cited
+
+If any requirement cannot be met, state it clearly.
+";
+        }
+
         public string BuildGeneralSystemPrompt()
         {
             return @"You are - a professional, knowledgeable assistant dedicated to helping users with their queries.
@@ -816,6 +1108,8 @@ Be thorough in checking for all variations of terms."
             if (lowerSource.Contains("environment")) return "Environment";
             return "General";
         }
+
+
 
     }
 }
