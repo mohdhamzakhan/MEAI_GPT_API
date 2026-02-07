@@ -2966,16 +2966,10 @@ These are the fixed organizational details for {plant} plant.";
             {
                 _logger.LogInformation("🔍 Starting knowledge base retrieval");
 
-                // ----------------------------
-                // 1️⃣ Choose best query variant
-                // ----------------------------
                 var effectiveQuery = !string.IsNullOrWhiteSpace(contextualQuery)
                     ? contextualQuery
                     : expandedQuery;
 
-                // ----------------------------
-                // 2️⃣ Generate embedding
-                // ----------------------------
                 var queryEmbedding = await GetEmbeddingAsync(effectiveQuery, embeddingModel);
 
                 if (queryEmbedding == null || queryEmbedding.Count == 0)
@@ -2984,14 +2978,8 @@ These are the fixed organizational details for {plant} plant.";
                     return new List<RelevantChunk>();
                 }
 
-                // ----------------------------
-                // 3️⃣ Get Chroma collection
-                // ----------------------------
                 var collectionId = await _collectionManager.GetOrCreateCollectionAsync(embeddingModel);
 
-                // ----------------------------
-                // 4️⃣ Vector search (ChromaDB)
-                // ----------------------------
                 var searchPayload = new
                 {
                     query_embeddings = new[] { queryEmbedding },
@@ -3003,25 +2991,48 @@ These are the fixed organizational details for {plant} plant.";
             }
                 };
 
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
                 var response = await _chromaClient.PostAsJsonAsync(
                     $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
-                    searchPayload);
+                    searchPayload,
+                    cts.Token);
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogError($"❌ Chroma query failed: {response.StatusCode}");
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    _logger.LogError($"❌ Chroma query failed: {response.StatusCode} - {errorContent}");
+                    return new List<RelevantChunk>();
+                }
+
+                // ✅ CRITICAL FIX: Check content exists
+                if (response.Content == null)
+                {
+                    _logger.LogError("❌ Response content is null - ChromaDB may not be responding correctly");
                     return new List<RelevantChunk>();
                 }
 
                 var json = await response.Content.ReadAsStringAsync();
+
+                if (string.IsNullOrWhiteSpace(json))
+                {
+                    _logger.LogError("❌ Response JSON is empty - ChromaDB returned no data");
+                    return new List<RelevantChunk>();
+                }
+
+                _logger.LogDebug($"📄 Received JSON response: {json.Substring(0, Math.Min(200, json.Length))}...");
+
                 using var doc = JsonDocument.Parse(json);
 
-                // ----------------------------
-                // 5️⃣ Parse results
-                // ----------------------------
                 var chunks = new List<RelevantChunk>();
 
-                var documents = doc.RootElement.GetProperty("documents")[0];
+                if (!doc.RootElement.TryGetProperty("documents", out var documentsProperty))
+                {
+                    _logger.LogWarning("⚠️ No 'documents' property in response");
+                    return chunks;
+                }
+
+                var documents = documentsProperty[0];
                 var metadatas = doc.RootElement.GetProperty("metadatas")[0];
                 var distances = doc.RootElement.GetProperty("distances")[0];
 
@@ -3038,26 +3049,15 @@ These are the fixed organizational details for {plant} plant.";
                         Id = metadata.TryGetProperty("chunk_id", out var idProp)
                                 ? idProp.GetString() ?? Guid.NewGuid().ToString()
                                 : Guid.NewGuid().ToString(),
-
                         Text = text,
                         Source = metadata.TryGetProperty("source_file", out var src)
                                 ? src.GetString() ?? "Unknown"
                                 : "Unknown",
-
-                        Similarity = 1.0 - distance, // convert distance → similarity
+                        Similarity = 1.0 - distance,
                         Bm25Score = 0
                     });
                 }
 
-                if (!chunks.Any())
-                {
-                    _logger.LogInformation("⚠️ No vector results found");
-                    return chunks;
-                }
-
-                // ----------------------------
-                // 6️⃣ Deduplicate & trim
-                // ----------------------------
                 chunks = chunks
                     .GroupBy(c => c.Id)
                     .Select(g => g.First())
@@ -3872,22 +3872,32 @@ These are the fixed organizational details for {plant} plant.";
             // ============================
             // 6️⃣ VECTOR RETRIEVAL
             // ============================
+            //            var vectorChunks = await GetRelevantChunksWithExpansionAsync(
+            //    originalQuestion,
+            //    expandedQuestion,
+            //    _conversationAnalysis.BuildContextualQuery(question, context.History),
+            //    embModel,
+            //    maxResults,
+            //    plant,
+            //    useReRanking: false,   // ⛔ disable internal reranking
+            //    context               // pass conversation context
+            //);
             var vectorChunks = await GetRelevantChunksWithExpansionAsync(
-    originalQuestion,
-    expandedQuestion,
-    _conversationAnalysis.BuildContextualQuery(question, context.History),
-    embModel,
-    maxResults,
-    plant,
-    useReRanking: false,   // ⛔ disable internal reranking
-    context               // pass conversation context
-);
+                            originalQuestion,
+                            embModel,
+                            maxResults,
+                            meaiInfo,
+                            context,
+                            useReRanking: false,   // ⛔ disable internal reranking
+                            genModel,
+                            plant
 
+                );
 
-            // ============================
-            // 7️⃣ BM25 RETRIEVAL (HYBRID)
-            // ============================
-            var bm25Chunks = _bm25Service.Rank(question, vectorChunks, maxResults * 2);
+                        // ============================
+                        // 7️⃣ BM25 RETRIEVAL (HYBRID)
+                        // ============================
+                        var bm25Chunks = _bm25Service.Rank(question, vectorChunks, maxResults * 2);
 
             var hybridChunks = vectorChunks
                 .Concat(bm25Chunks)

@@ -16,48 +16,63 @@ namespace MEAI_GPT_API.Service
         }
 
         public async Task<List<RelevantChunk>> RerankAsync(
-            string query,
-            List<RelevantChunk> chunks,
-            string modelName,
-            int topK = 5)
+    string query,
+    List<RelevantChunk> chunks,
+    string modelName,
+    int topK = 5)
         {
-            if (!chunks.Any()) return chunks;
+            if (chunks == null || chunks.Count == 0)
+                return chunks;
 
-            var inputs = chunks.Select(c => new
+            var scored = new List<(int Index, double Score)>();
+
+            for (int i = 0; i < chunks.Count; i++)
             {
-                query,
-                passage = c.Text
-            }).ToList();
+                var prompt = $"""
+You are a relevance ranking model.
+Score the relevance between the query and passage on a scale from 0 to 1.
+Return ONLY a single number.
 
-            var request = new
-            {
-                model = modelName,
-                input = inputs
-            };
+Query:
+{query}
 
-            var response = await _ollama.PostAsJsonAsync("/api/rerank", request);
-            response.EnsureSuccessStatusCode();
+Passage:
+{chunks[i].Text}
+""";
 
-            var json = await response.Content.ReadAsStringAsync();
-            using var doc = JsonDocument.Parse(json);
-
-            var scores = doc.RootElement
-                .GetProperty("results")
-                .EnumerateArray()
-                .Select((r, i) => new
+                var request = new
                 {
-                    Index = i,
-                    Score = r.GetProperty("relevance_score").GetDouble()
-                })
-                .OrderByDescending(x => x.Score)
-                .Take(topK)
-                .ToList();
+                    model = modelName,
+                    prompt = prompt,
+                    stream = false
+                };
 
-            return scores.Select(s =>
-            {
-                chunks[s.Index].Similarity = s.Score;
-                return chunks[s.Index];
-            }).ToList();
+                var response = await _ollama.PostAsJsonAsync("/api/generate", request);
+                response.EnsureSuccessStatusCode();
+
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+
+                var output = doc.RootElement
+                    .GetProperty("response")
+                    .GetString();
+
+                if (!double.TryParse(output, out var score))
+                    score = 0; // fallback safety
+
+                scored.Add((i, score));
+            }
+
+            return scored
+                .OrderByDescending(s => s.Score)
+                .Take(topK)
+                .Select(s =>
+                {
+                    chunks[s.Index].Similarity = s.Score;
+                    return chunks[s.Index];
+                })
+                .ToList();
         }
+
     }
 }
