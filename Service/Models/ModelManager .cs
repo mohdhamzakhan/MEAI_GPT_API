@@ -1,4 +1,5 @@
-﻿using MEAI_GPT_API.Models;
+﻿using DocumentFormat.OpenXml.Wordprocessing;
+using MEAI_GPT_API.Models;
 using MEAI_GPT_API.Service.Interface;
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
@@ -16,7 +17,7 @@ namespace MEAI_GPT_API.Services
         private readonly TimeSpan _discoveryInterval = TimeSpan.FromMinutes(10);
         private readonly DynamicRAGConfiguration _config;
 
-        public ModelManager(HttpClient httpClient, 
+        public ModelManager(HttpClient httpClient,
             ILogger<ModelManager> logger,
             IOptions<DynamicRAGConfiguration> config)
         {
@@ -104,25 +105,33 @@ namespace MEAI_GPT_API.Services
 
                 foreach (var m in arr.EnumerateArray())
                 {
+
                     var name = m.GetProperty("name").GetString();
-                    if (string.IsNullOrWhiteSpace(name)) continue;
-
-                    var type = DetermineModelType(name);
-
-                    var config = new ModelConfiguration
+                    try
                     {
-                        Name = name,
-                        Type = type,
-                        MaxContextLength = DetermineContextLength(name),
-                        EmbeddingDimension = type == "embedding"
-                            ? DetermineEmbeddingDimension(name)
-                            : 0,
-                        Temperature = DetermineOptimalTemperature(name),
-                        ModelOptions = GetModelSpecificOptions(name)
-                    };
+                        if (string.IsNullOrWhiteSpace(name)) continue;
 
-                    _availableModels[name] = config;
-                    models.Add(config);
+                        var type = DetermineModelType(name);
+
+                        var config = new ModelConfiguration
+                        {
+                            Name = name,
+                            Type = type,
+                            MaxContextLength = DetermineContextLength(name),
+                            EmbeddingDimension = type == "embedding"
+                                ? DetermineEmbeddingDimension(name)
+                                : 0,
+                            Temperature = DetermineOptimalTemperature(name),
+                            ModelOptions = GetModelSpecificOptions(name)
+                        };
+
+                        _availableModels[name] = config;
+                        models.Add(config);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, $"Failed processing model: {name}");
+                    }
                 }
 
                 return models;
@@ -252,7 +261,7 @@ namespace MEAI_GPT_API.Services
         private async Task<ModelConfiguration?> DetectModelCapabilitiesAsync(string modelName)
         {
             try
-            {           
+            {
                 var embeddingDimension = await TestEmbeddingCapabilityAsync(modelName);
                 var canGenerate = await TestGenerationCapabilityAsync(modelName);
                 _logger.LogInformation($"{modelName} , {embeddingDimension}, {canGenerate}");

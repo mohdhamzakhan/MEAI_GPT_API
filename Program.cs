@@ -5,6 +5,8 @@ using MEAI_GPT_API.Service;
 using MEAI_GPT_API.Service.Interface;
 using MEAI_GPT_API.Service.Models;
 using MEAI_GPT_API.Services;
+using MEAI_GPT_API.Services.Agent;
+using MEAI_GPT_API.Services.Agent.Tools;
 using MEAIGPTAPI.Models;
 using MEAIGPTAPI.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -70,8 +72,6 @@ builder.Services.AddHttpClient("OllamaAPI", client =>
 
 // Register the wrapper as a singleton
 builder.Services.AddSingleton<OllamaHttpClient>();
-
-
 
 // Add Redis Cache with fallback to in-memory cache
 if (builder.Configuration.GetConnectionString("Redis") != null)
@@ -154,6 +154,19 @@ builder.Services.AddScoped<HelperMethods>();
 builder.Services.AddScoped<OracleEBSQuery>();
 builder.Services.AddScoped<RerankerService>();
 builder.Services.AddSingleton<Bm25Service>();
+builder.Services.AddSingleton<CompliancePolicyDetector>();
+builder.Services.AddSingleton<QueryIntentAnalyzer>();
+
+//For Agentic AI
+builder.Services.AddSingleton<AgentDecisionLogger>();
+builder.Services.AddSingleton<AgentPlanner>();
+builder.Services.AddSingleton<AgentExecutor>();
+builder.Services.AddSingleton<SelfVerifier>();
+
+//For Agentic AI
+builder.Services.AddScoped<PolicySearchTool>();
+builder.Services.AddScoped<RerankTool>();
+
 
 
 
@@ -251,19 +264,19 @@ try
 {
     var logger = app.Services.GetRequiredService<ILogger<Program>>();
     var ragService = app.Services.GetRequiredService<IRAGService>();
-    
+
     logger.LogInformation("🚀 Initializing RAG Service at startup...");
-    
+
     // Initialize synchronously at startup
     await ragService.InitializeAsync();
-    
+
     logger.LogInformation("✅ RAG Service initialization completed successfully");
 }
 catch (Exception ex)
 {
     var logger = app.Services.GetRequiredService<ILogger<Program>>();
     logger.LogError(ex, "❌ Failed to initialize RAG Service at startup");
-    
+
     // Optional: Decide whether to continue or stop the application
     // throw; // Uncomment to stop application if RAG initialization fails
 }
@@ -274,10 +287,10 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
     app.UseSwaggerUI();
 }
 
+app.UseCors("AllowAll");
 
 app.UseRouting();
 
-app.UseCors("AllowAll");
 
 app.UseAuthentication();
 app.UseAuthorization();

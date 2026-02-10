@@ -5,6 +5,8 @@ using MEAI_GPT_API.Models;
 using MEAI_GPT_API.Service;
 using MEAI_GPT_API.Service.Interface;
 using MEAI_GPT_API.Service.Models;
+using MEAI_GPT_API.Services.Agent;
+using MEAI_GPT_API.Services.Agent.Tools;
 using MEAIGPTAPI.Services;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualBasic;
@@ -19,6 +21,7 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using static MEAI_GPT_API.Models.Conversation;
 using static MEAI_GPT_API.Services.DynamicRagService;
+using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
 
 namespace MEAI_GPT_API.Services
 {
@@ -80,6 +83,15 @@ namespace MEAI_GPT_API.Services
 
         private readonly string _metricsFile = Path.Combine(AppContext.BaseDirectory, "Logs", "rag-metrics.log");
         private readonly OllamaHttpClient _ollamaClient;
+
+        // For Agentic AI
+        private readonly IServiceProvider _serviceProvider;
+        private readonly AgentPlanner _agentPlanner;
+        private readonly AgentExecutor _agentExecutor;
+        private readonly SelfVerifier _selfVerifier;
+        private readonly AgentDecisionLogger _agentLogger;
+
+        private readonly QueryIntentAnalyzer _queryIntentAnalyzer;
         public DynamicRagService(
             IModelManager modelManager,
             DynamicCollectionManager collectionManager,
@@ -104,7 +116,13 @@ namespace MEAI_GPT_API.Services
             HelperMethods helperMethods,
             OllamaHttpClient ollamaClient,
             OracleEBSQuery oracleEBSQuery,
-            RerankerService rerankerService)
+            RerankerService rerankerService,
+            QueryIntentAnalyzer queryIntentAnalyzer,
+            IServiceProvider serviceProvider,
+            AgentPlanner agentPlanner,
+            AgentExecutor agentExecutor,
+            SelfVerifier selfVerifier,
+            AgentDecisionLogger agentLogger)
         {
             _modelManager = modelManager;
             _collectionManager = collectionManager;
@@ -135,6 +153,35 @@ namespace MEAI_GPT_API.Services
             _helperMethods = helperMethods;
             _oracleEBSQuery = oracleEBSQuery;
             _rerankerService = rerankerService;
+            _queryIntentAnalyzer = queryIntentAnalyzer;
+
+            //For Agentic AI
+            _serviceProvider = serviceProvider;
+            _agentPlanner = agentPlanner;
+            _agentExecutor = agentExecutor;
+            _selfVerifier = selfVerifier;
+            _agentLogger = agentLogger;
+
+            RegisterAgentTools();
+        }
+
+        //For Agentic AI
+        private void RegisterAgentTools()
+        {
+            try
+            {
+                var policyTool = _serviceProvider.GetRequiredService<PolicySearchTool>();
+                var rerankTool = _serviceProvider.GetRequiredService<RerankTool>();
+
+                _agentExecutor.RegisterTool(policyTool);
+                _agentExecutor.RegisterTool(rerankTool);
+
+                _logger.LogInformation("✅ Agent tools registered");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to register agent tools");
+            }
         }
         private void EnsureDirectoriesExist()
         {
@@ -363,99 +410,158 @@ These are the fixed organizational details for {plant} plant.";
                 return false; // Assume doesn't exist if check fails
             }
         }
-        private async Task ProcessFileForModelAsync(string filePath, ModelConfiguration model, string collectionId, string plant)
+        //    private async Task ProcessFileForModelAsync(
+        //string filePath,
+        //ModelConfiguration model,
+        //string collectionId,
+        //string plant)
+        //    {
+        //        try
+        //        {
+        //            var fileInfo = new FileInfo(filePath);
+        //            var cacheKey = $"{filePath}:{model.Name}";
+
+        //            // ✅ SINGLE SOURCE OF TRUTH - Cache check only
+        //            if (processedFilesCache.TryGetValue(cacheKey, out var cachedWriteTime))
+        //            {
+        //                if (cachedWriteTime >= fileInfo.LastWriteTime)
+        //                {
+        //                    _logger.LogDebug($"✓ Skipping unchanged file: {fileInfo.Name}");
+        //                    return; // Early exit - no DB checks needed!
+        //                }
+
+        //                // File changed - delete old embeddings
+        //                _logger.LogInformation($"🔄 File modified, deleting old embeddings: {fileInfo.Name}");
+        //                await DeleteFileEmbeddingsAsync(filePath, model.Name, collectionId);
+        //            }
+
+        //            _logger.LogInformation($"📄 Extracting text from {fileInfo.Name}");
+        //            var content = await _documentProcessor.ExtractTextAsync(filePath);
+
+        //            // ✅ COMPREHENSIVE CONTENT VALIDATION
+        //            if (!ValidateExtractedContent(content, fileInfo.Name))
+        //            {
+        //                _logger.LogError($"❌ Content validation failed: {fileInfo.Name}");
+        //                return; // Don't cache failures
+        //            }
+
+        //            _logger.LogInformation($"✅ Validated {content.Length} characters from {fileInfo.Name}");
+
+        //            // ✅ IMPROVED CHUNKING
+        //            var chunks = _textChunking.ChunkText(content, filePath);
+
+        //            if (!chunks.Any())
+        //            {
+        //                _logger.LogWarning($"⚠️ No chunks created from {fileInfo.Name}");
+        //                return;
+        //            }
+
+        //            // ✅ PROCESS WITH RETRY LOGIC
+        //            var successCount = await ProcessChunkBatchForModelAsync(
+        //                chunks, model, collectionId, fileInfo.LastWriteTime, plant);
+
+        //            // ✅ UPDATE CACHE ONLY ON SUCCESS
+        //            if (successCount > 0)
+        //            {
+        //                processedFilesCache[cacheKey] = fileInfo.LastWriteTime;
+        //                _logger.LogInformation(
+        //                    $"✅ Successfully processed & CACHED {successCount}/{chunks.Count} chunks from {fileInfo.Name}");
+        //            }
+        //            else
+        //            {
+        //                _logger.LogError($"❌ Processing failed - NOT caching {fileInfo.Name}");
+        //                processedFilesCache.TryRemove(cacheKey, out _);
+        //            }
+        //        }
+        //        catch (Exception ex)
+        //        {
+        //            _logger.LogError(ex, $"❌ Failed to process file {filePath}");
+        //            processedFilesCache.TryRemove($"{filePath}:{model.Name}", out _);
+        //            throw; // Re-throw for upstream handling
+        //        }
+        //    }
+
+        private async Task ProcessFileForModelAsync(
+    string filePath,
+    ModelConfiguration model,
+    string collectionId,
+    string plant)
         {
             try
             {
                 var fileInfo = new FileInfo(filePath);
-                var lastWriteTime = fileInfo.LastWriteTime;
                 var cacheKey = $"{filePath}:{model.Name}";
 
-
-                // ✅ CHECK 1: In-memory cache
+                // ✅ ENHANCED: Check both cache AND database for existing embeddings
                 if (processedFilesCache.TryGetValue(cacheKey, out var cachedWriteTime))
                 {
-                    if (cachedWriteTime >= lastWriteTime)
+                    if (cachedWriteTime >= fileInfo.LastWriteTime)
                     {
-                        _logger.LogDebug($"✓ Skipping unchanged file: {Path.GetFileName(filePath)}");
-                        return; // Early exit - file hasn't changed
+                        // ✅ DOUBLE-CHECK: Verify embeddings actually exist in ChromaDB
+                        var existsInDb = await FileEmbeddingsExistAsync(filePath, model.Name, collectionId);
+
+                        if (existsInDb)
+                        {
+                            _logger.LogDebug($"✓ Skipping unchanged file with verified embeddings: {fileInfo.Name}");
+                            return;
+                        }
+                        else
+                        {
+                            _logger.LogWarning($"⚠️ Cache says file exists but no embeddings found in DB - reprocessing: {fileInfo.Name}");
+                            processedFilesCache.TryRemove(cacheKey, out _);
+                        }
                     }
-                }
-
-                // ✅ CHECK 2: ChromaDB existence (in case cache was cleared but embeddings exist)
-                var embeddingsExist = await FileEmbeddingsExistAsync(filePath, model.Name, collectionId);
-
-                if (embeddingsExist)
-                {
-                    // ✅ FIX 3: Add to cache to prevent future DB checks
-                    processedFilesCache[cacheKey] = lastWriteTime;
-                    _logger.LogDebug($"✓ File already in DB, adding to cache: {Path.GetFileName(filePath)}");
-                    return;
-                }
-
-                _logger.LogInformation($"📄 Processing NEW/MODIFIED file: {Path.GetFileName(filePath)}");
-
-                // Only delete if we're reprocessing a changed file
-                if (embeddingsExist)
-                {
-                    _logger.LogInformation($"🗑️ Deleting old embeddings for modified file: {Path.GetFileName(filePath)}");
-                    await DeleteFileEmbeddingsAsync(filePath, model.Name, collectionId);
-                }
-
-                _logger.LogInformation($"📄 Extracting text from {Path.GetFileName(filePath)}");
-                var content = await _documentProcessor.ExtractTextAsync(filePath);
-
-                // ✅ VALIDATE EXTRACTED TEXT
-                if (string.IsNullOrWhiteSpace(content))
-                {
-                    _logger.LogWarning($"❌ No content extracted from {Path.GetFileName(filePath)}");
-                    return;
-                }
-
-                // ✅ CHECK FOR BINARY/CORRUPTED DATA
-                var replacementCharCount = content.Count(c => c == '\uFFFD');
-                if (replacementCharCount > 10) // Allow some tolerance
-                {
-                    _logger.LogError($"❌ File appears corrupted: {Path.GetFileName(filePath)} " +
-                                  $"contains {replacementCharCount} replacement characters");
-                    return;
-                }
-
-                // ✅ CHECK TEXT QUALITY
-                var alphanumericRatio = content.Count(char.IsLetterOrDigit) / (double)content.Length;
-                if (alphanumericRatio < 0.5) // Less than 50% readable chars
-                {
-                    _logger.LogWarning($"⚠️ Low quality text in {Path.GetFileName(filePath)}: " +
-                                    $"{alphanumericRatio:P0} alphanumeric");
-                }
-
-                _logger.LogInformation($"✅ Extracted {content.Length} characters from {Path.GetFileName(filePath)}");
-
-                var chunks = _textChunking.ChunkText(content, filePath);
-
-                if (string.IsNullOrWhiteSpace(content))
-                {
-                    _logger.LogWarning($"⚠️ No content extracted from {Path.GetFileName(filePath)}");
-                    return;
-                }
-
-
-                if (!chunks.Any())
-                {
-                    _logger.LogWarning($"⚠️ No chunks created from {Path.GetFileName(filePath)}");
-                    return;
-                }
-
-                var successCount = await ProcessChunkBatchForModelAsync(chunks, model, collectionId, fileInfo.LastWriteTime, plant);
-
-                if (successCount > 0)
-                {
-                    processedFilesCache[cacheKey] = lastWriteTime;
-                    _logger.LogInformation($"✅ Successfully processed & CACHED {successCount}/{chunks.Count} chunks from {Path.GetFileName(filePath)}");
+                    else
+                    {
+                        _logger.LogInformation($"🔄 File modified, deleting old embeddings: {fileInfo.Name}");
+                        await DeleteFileEmbeddingsAsync(filePath, model.Name, collectionId);
+                    }
                 }
                 else
                 {
-                    _logger.LogError($"❌ Failed to process - NOT caching");
+                    // ✅ NEW FILE: Check if embeddings already exist (in case cache was cleared)
+                    var existsInDb = await FileEmbeddingsExistAsync(filePath, model.Name, collectionId);
+
+                    if (existsInDb)
+                    {
+                        _logger.LogInformation($"✓ Embeddings already exist for {fileInfo.Name} - adding to cache");
+                        processedFilesCache[cacheKey] = fileInfo.LastWriteTime;
+                        return;
+                    }
+                }
+
+                // Continue with extraction and processing...
+                _logger.LogInformation($"📄 Extracting text from {fileInfo.Name}");
+                var content = await _documentProcessor.ExtractTextAsync(filePath);
+
+                if (!ValidateExtractedContent(content, fileInfo.Name))
+                {
+                    _logger.LogError($"❌ Content validation failed: {fileInfo.Name}");
+                    return;
+                }
+
+                _logger.LogInformation($"✅ Validated {content.Length} characters from {fileInfo.Name}");
+
+                var chunks = _textChunking.ChunkText(content, filePath);
+
+                if (!chunks.Any())
+                {
+                    _logger.LogWarning($"⚠️ No chunks created from {fileInfo.Name}");
+                    return;
+                }
+
+                var successCount = await ProcessChunkBatchForModelAsync(
+                    chunks, model, collectionId, fileInfo.LastWriteTime, plant);
+
+                if (successCount > 0)
+                {
+                    processedFilesCache[cacheKey] = fileInfo.LastWriteTime;
+                    _logger.LogInformation(
+                        $"✅ Successfully processed & CACHED {successCount}/{chunks.Count} chunks from {fileInfo.Name}");
+                }
+                else
+                {
+                    _logger.LogError($"❌ Processing failed - NOT caching {fileInfo.Name}");
                     processedFilesCache.TryRemove(cacheKey, out _);
                 }
             }
@@ -463,8 +569,80 @@ These are the fixed organizational details for {plant} plant.";
             {
                 _logger.LogError(ex, $"❌ Failed to process file {filePath}");
                 processedFilesCache.TryRemove($"{filePath}:{model.Name}", out _);
+                throw;
             }
         }
+
+        private bool ValidateExtractedContent(string content, string fileName)
+        {
+            // Check 1: Not empty
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                _logger.LogWarning($"❌ No content extracted: {fileName}");
+                return false;
+            }
+
+            // Check 2: Minimum length
+            if (content.Length < 100)
+            {
+                _logger.LogWarning($"❌ Content too short ({content.Length} chars): {fileName}");
+                return false;
+            }
+
+            // Check 3: Not corrupted (binary data)
+            var replacementCharCount = content.Count(c => c == '\uFFFD');
+            var corruptionRatio = (double)replacementCharCount / content.Length;
+
+            if (corruptionRatio > 0.01) // More than 1% corruption
+            {
+                _logger.LogError(
+                    $"❌ File appears corrupted: {fileName} " +
+                    $"({replacementCharCount} replacement characters, {corruptionRatio:P1})");
+                return false;
+            }
+
+            // Check 4: Text quality - STRICTER THAN BEFORE
+            var alphanumericRatio = content.Count(char.IsLetterOrDigit) / (double)content.Length;
+            if (alphanumericRatio < 0.65) // Increased from 0.5
+            {
+                _logger.LogWarning(
+                    $"❌ Low quality text: {fileName} " +
+                    $"(only {alphanumericRatio:P0} alphanumeric characters)");
+                return false;
+            }
+
+            // Check 5: Meaningful words count
+            var words = content.Split(new[] { ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            var meaningfulWords = words.Count(w =>
+                w.Length >= 3 &&
+                Regex.IsMatch(w, @"^[a-zA-Z]+$"));
+
+            if (meaningfulWords < 50)
+            {
+                _logger.LogWarning(
+                    $"❌ Too few meaningful words ({meaningfulWords}): {fileName}");
+                return false;
+            }
+
+            // Check 6: Excessive repetition (corrupted extraction indicator)
+            if (words.Length > 100)
+            {
+                var uniqueWords = words.Distinct(StringComparer.OrdinalIgnoreCase).Count();
+                var uniqueRatio = (double)uniqueWords / words.Length;
+
+                if (uniqueRatio < 0.05) // Less than 30% unique words
+                {
+                    _logger.LogWarning(
+                        $"❌ Excessive repetition detected: {fileName} " +
+                        $"(only {uniqueWords}/{words.Length} unique words, {uniqueRatio:P0})");
+                    return false;
+                }
+            }
+
+            _logger.LogDebug($"✅ Content validation passed: {fileName}");
+            return true;
+        }
+
 
         /// <summary>
         /// Delete all embeddings for a specific file from ChromaDB
@@ -2135,76 +2313,73 @@ These are the fixed organizational details for {plant} plant.";
 
                 _logger.LogInformation($"✓ {validChunks.Count} valid chunks after filtering");
 
-                // Check existing chunks
-                var existingChunks = await CheckExistingChunksAsync(collectionId, validChunks.Select(c => c.ChunkId).ToList());
-                var newChunks = validChunks.Where(c => !existingChunks.Contains(c.ChunkId)).ToList();
+                // ✅ REMOVED: Redundant CheckExistingChunksAsync call
+                // The cache is our single source of truth!
 
-                if (!newChunks.Any())
-                {
-                    _logger.LogInformation($"✓ All {validChunks.Count} chunks already exist in collection");
-                    return validChunks.Count; // Return success
-                }
+                _logger.LogInformation($"📝 Generating embeddings for {validChunks.Count} chunks");
 
-                _logger.LogInformation($"📝 Generating embeddings for {newChunks.Count} new chunks");
-
-                // Process chunks with detailed error tracking
+                // Process chunks with retry logic
                 var successfulChunks = new List<(string Text, string ChunkId, List<float> Embedding, string SourceFile, string SectionId, string Title)>();
                 var failedChunks = new List<(string ChunkId, string Error)>();
 
-                for (int i = 0; i < newChunks.Count; i++)
+                for (int i = 0; i < validChunks.Count; i++)
                 {
-                    var chunk = newChunks[i];
+                    var chunk = validChunks[i];
                     try
                     {
-                        _logger.LogDebug($"🔤 [{i + 1}/{newChunks.Count}] Generating embedding for chunk: {chunk.ChunkId}");
+                        _logger.LogDebug($"🔤 [{i + 1}/{validChunks.Count}] Generating embedding for chunk: {chunk.ChunkId}");
 
-                        var embedding = await GetEmbeddingAsync(chunk.Text, model);
+                        // ✅ NEW: Use retry logic
+                        var embedding = await GetEmbeddingWithRetryAsync(chunk.Text, model, maxRetries: 3);
 
                         if (embedding == null || embedding.Count == 0)
                         {
-                            var error = $"Empty embedding returned";
+                            var error = "Empty embedding returned after retries";
                             _logger.LogWarning($"⚠️ {error} for chunk: {chunk.ChunkId}");
-                            _logger.LogWarning($"Text preview: {chunk.Text.Substring(0, Math.Min(200, chunk.Text.Length))}");
                             failedChunks.Add((chunk.ChunkId, error));
                             continue;
                         }
 
                         if (embedding.Count != model.EmbeddingDimension)
                         {
-                            var error = $"Embedding dimension mismatch: got {embedding.Count}, expected {model.EmbeddingDimension}";
+                            var error = $"Dimension mismatch: got {embedding.Count}, expected {model.EmbeddingDimension}";
                             _logger.LogError($"❌ {error}");
                             failedChunks.Add((chunk.ChunkId, error));
                             continue;
                         }
 
                         successfulChunks.Add((chunk.Text, chunk.ChunkId, embedding, chunk.SourceFile, chunk.SectionId, chunk.Title));
-                        _logger.LogDebug($"✓ Successfully generated embedding {i + 1}/{newChunks.Count}");
+                        _logger.LogDebug($"✓ Successfully generated embedding {i + 1}/{validChunks.Count}");
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, $"❌ Failed to generate embedding for chunk {i + 1}/{newChunks.Count}: {chunk.ChunkId}");
-                        _logger.LogError($"Problematic text: {chunk.Text.Substring(0, Math.Min(200, chunk.Text.Length))}");
+                        _logger.LogError(ex, $"❌ Failed to generate embedding for chunk {i + 1}: {chunk.ChunkId}");
                         failedChunks.Add((chunk.ChunkId, ex.Message));
                     }
 
-                    // Add small delay to avoid overwhelming the API
-                    if (i < newChunks.Count - 1)
+                    // Rate limiting
+                    if (i < validChunks.Count - 1)
                     {
                         await Task.Delay(50);
                     }
                 }
 
                 // Log summary
-                _logger.LogInformation($"📊 Embedding generation complete: {successfulChunks.Count} succeeded, {failedChunks.Count} failed");
+                _logger.LogInformation(
+                    $"📊 Embedding generation complete: {successfulChunks.Count} succeeded, {failedChunks.Count} failed");
 
                 if (failedChunks.Any())
                 {
-                    _logger.LogWarning($"⚠️ Failed chunks: {string.Join(", ", failedChunks.Select(f => f.ChunkId))}");
+                    _logger.LogWarning($"⚠️ Failed chunks: {string.Join(", ", failedChunks.Take(5).Select(f => f.ChunkId))}");
+                    if (failedChunks.Count > 5)
+                    {
+                        _logger.LogWarning($"... and {failedChunks.Count - 5} more");
+                    }
                 }
 
                 if (!successfulChunks.Any())
                 {
-                    _logger.LogError($"❌ No embeddings generated successfully - cannot save to ChromaDB");
+                    _logger.LogError($"❌ No embeddings generated successfully");
                     return 0;
                 }
 
@@ -2217,7 +2392,7 @@ These are the fixed organizational details for {plant} plant.";
 
                 _logger.LogInformation($"💾 Saving {successfulChunks.Count} chunks to ChromaDB collection: {collectionId}");
 
-                // Save to ChromaDB with error handling
+                // Save to ChromaDB
                 var saveSuccess = await AddToChromaDBAsync(collectionId, ids, embeddings, documents, metadatas);
 
                 if (saveSuccess)
@@ -2237,6 +2412,53 @@ These are the fixed organizational details for {plant} plant.";
                 return 0;
             }
         }
+
+        private async Task<List<float>?> GetEmbeddingWithRetryAsync(
+    string text,
+    ModelConfiguration model,
+    int maxRetries = 3)
+        {
+            Exception? lastException = null;
+
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
+            {
+                try
+                {
+                    var embedding = await GetEmbeddingAsync(text, model);
+
+                    // Validate embedding
+                    if (embedding != null && embedding.Count == model.EmbeddingDimension)
+                    {
+                        if (attempt > 1)
+                        {
+                            _logger.LogInformation($"✓ Embedding generated successfully on attempt {attempt}");
+                        }
+                        return embedding;
+                    }
+
+                    _logger.LogWarning(
+                        $"⚠️ Invalid embedding on attempt {attempt}/{maxRetries}: " +
+                        $"got {embedding?.Count ?? 0} dimensions, expected {model.EmbeddingDimension}");
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                    _logger.LogWarning($"⚠️ Attempt {attempt}/{maxRetries} failed: {ex.Message}");
+
+                    if (attempt < maxRetries)
+                    {
+                        // Exponential backoff: 2s, 4s, 8s
+                        var delaySeconds = Math.Pow(2, attempt);
+                        _logger.LogInformation($"⏱️ Waiting {delaySeconds}s before retry...");
+                        await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
+                    }
+                }
+            }
+
+            _logger.LogError(lastException, $"❌ All {maxRetries} attempts failed to generate embedding");
+            return null;
+        }
+
 
 
         //private async Task ProcessChunkBatchForModelAsync(List<(string Text, string SourceFile, string SectionId, string Title)> chunks, ModelConfiguration model, string collectionId, DateTime lastModified, string plant)
@@ -2452,9 +2674,12 @@ These are the fixed organizational details for {plant} plant.";
             return response;
         }
         // 2. UPDATE: More lenient similarity thresholds in search parsing
-        private List<RelevantChunk> ParseSearchResults(JsonElement root, int maxResults, string currentPlant)
+        private List<RelevantChunk> ParseSearchResults(JsonElement root, int maxResults, string currentPlant, string originalQuery)
         {
             var relevantChunks = new List<RelevantChunk>();
+
+            var policyIntent = _queryIntentAnalyzer.DetectPolicyIntent(originalQuery);
+
 
             if (root.TryGetProperty("documents", out var documentsArray) &&
                 documentsArray.GetArrayLength() > 0 &&
@@ -2478,6 +2703,20 @@ These are the fixed organizational details for {plant} plant.";
 
                     // ✅ FIXED: Correct policy type determination
                     string policyType = _policyAnalysis.DeterminePolicyType(metadata, sourceFile, currentPlant);
+
+                    // ✅ ADD THIS - Boost exact policy matches
+                    if (policyIntent.IntendedPolicyType != null &&
+                        policyType.Equals(policyIntent.IntendedPolicyType, StringComparison.OrdinalIgnoreCase))
+                    {
+                        similarity += 0.50; // HUGE boost for exact policy match
+                        _logger.LogInformation($"🎯 EXACT POLICY MATCH: {policyType} boosted to {similarity:F3}");
+                    }
+                    // ✅ ADD THIS - Penalize non-matching policies
+                    else if (policyIntent.IntendedPolicyType != null && policyIntent.Confidence >= 0.7)
+                    {
+                        similarity *= 0.5; // Reduce non-matching policies
+                        _logger.LogInformation($"⬇️ Non-matching policy {policyType} reduced to {similarity:F3}");
+                    }
 
                     // Priority boost logic (unchanged)
                     var isPolicyDocument = sourceFile.ToLowerInvariant().Contains("policy") ||
@@ -2590,7 +2829,7 @@ These are the fixed organizational details for {plant} plant.";
                 }
                 else
                 {
-                    return await SearchGeneral(query, embeddingModel, maxResults, plant, collectionId);
+                    return await SearchGeneral(query, embeddingModel, maxResults, plant, collectionId, query);
                 }
             }
             catch (Exception ex)
@@ -3122,7 +3361,7 @@ These are the fixed organizational details for {plant} plant.";
 
                 var responseContent = await response.Content.ReadAsStringAsync();
                 using var doc = JsonDocument.Parse(responseContent);
-                return ParseSearchResults(doc.RootElement, maxResults, plant);
+                return ParseSearchResults(doc.RootElement, maxResults, plant, query);
             }
             catch (Exception ex)
             {
@@ -3130,7 +3369,7 @@ These are the fixed organizational details for {plant} plant.";
                 return new List<RelevantChunk>();
             }
         }
-        private async Task<List<RelevantChunk>> SearchGeneral(string query, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId)
+        private async Task<List<RelevantChunk>> SearchGeneral(string query, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId, string originalQuery)
         {
             try
             {
@@ -3174,7 +3413,7 @@ These are the fixed organizational details for {plant} plant.";
                 {
                     var responseContent = await response.Content.ReadAsStringAsync();
                     using var doc = JsonDocument.Parse(responseContent);
-                    var results = ParseSearchResults(doc.RootElement, maxResults, plant);
+                    var results = ParseSearchResults(doc.RootElement, maxResults, plant, originalQuery);
 
                     _logger.LogInformation($"🔍 General search found {results.Count} results");
                     return results;
@@ -3245,9 +3484,78 @@ These are the fixed organizational details for {plant} plant.";
         private readonly ConcurrentDictionary<string, DateTime> _plantLastScan = new();
         private bool _systemInitialized = false;
         private readonly object _systemInitLock = new();
+        //public async Task InitializeAsync()
+        //{
+        //    // ✅ FIX: Check if already initialized at the start
+        //    lock (_systemInitLock)
+        //    {
+        //        if (_systemInitialized)
+        //        {
+        //            _logger.LogInformation("✅ System already initialized, skipping");
+        //            return;
+        //        }
+        //    }
+
+        //    try
+        //    {
+        //        _logger.LogInformation("🚀 Starting RAG initialization");
+
+        //        // Load configurations in parallel
+        //        var initTasks = new List<Task>
+        //{
+        //    Task.Run(async () =>
+        //    {
+        //        var models = await _modelManager.DiscoverAvailableModelsAsync();
+        //        await ConfigureDefaultModelsAsync(models);
+        //        return models;
+        //    }),
+        //    Task.Run(() => EnsureDirectoriesExist()),
+        //    Task.Run(() => EnsureAbbreviationContext()),
+        //    Task.Run(() => EnsurePlantSpecificOrganizationContext()),
+        //    Task.Run(async () => await LoadCorrectionCacheAsync()),
+        //    Task.Run(async () => await LoadHistoricalAppreciatedAnswersAsync())
+        //};
+
+        //        await Task.WhenAll(initTasks);
+
+        //        // ✅ FIX: Only process NEW plants
+        //        var models = await _modelManager.DiscoverAvailableModelsAsync();
+        //        var embeddingModels = models.Where(m => m.Type == "embedding").ToList();
+
+        //        var plantTasks = _plants.Plants.Keys.Select(async plant =>
+        //        {
+        //            // Check if already initialized
+        //            if (_plantInitialized.TryGetValue(plant, out var initialized) && initialized)
+        //            {
+        //                _logger.LogInformation($"✓ Plant '{plant}' already initialized");
+        //                return;
+        //            }
+
+        //            _logger.LogInformation($"📄 Processing NEW plant: {plant}");
+        //            await ProcessDocumentsForAllModelsAsync(embeddingModels, plant);
+
+        //            _plantInitialized[plant] = true;
+        //            _plantLastScan[plant] = DateTime.Now;
+        //        });
+
+        //        await Task.WhenAll(plantTasks);
+
+        //        lock (_systemInitLock)
+        //        {
+        //            _systemInitialized = true;
+        //        }
+
+        //        _logger.LogInformation("✅ RAG initialization complete");
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        _logger.LogError(ex, "❌ Initialization failed");
+        //        throw;
+        //    }
+        //}
+
         public async Task InitializeAsync()
         {
-            // ✅ FIX: Check if already initialized at the start
             lock (_systemInitLock)
             {
                 if (_systemInitialized)
@@ -3261,35 +3569,30 @@ These are the fixed organizational details for {plant} plant.";
             {
                 _logger.LogInformation("🚀 Starting RAG initialization");
 
-                // Load configurations in parallel
-                var initTasks = new List<Task>
-        {
-            Task.Run(async () =>
-            {
+                // ✅ FIX 1: Sequential initialization to avoid DbContext conflicts
                 var models = await _modelManager.DiscoverAvailableModelsAsync();
                 await ConfigureDefaultModelsAsync(models);
-                return models;
-            }),
-            Task.Run(() => EnsureDirectoriesExist()),
-            Task.Run(() => EnsureAbbreviationContext()),
-            Task.Run(() => EnsurePlantSpecificOrganizationContext()),
-            Task.Run(async () => await LoadCorrectionCacheAsync()),
-            Task.Run(async () => await LoadHistoricalAppreciatedAnswersAsync())
-        };
 
-                await Task.WhenAll(initTasks);
+                EnsureDirectoriesExist();
+                EnsureAbbreviationContext();
+                EnsurePlantSpecificOrganizationContext();
 
-                // ✅ FIX: Only process NEW plants
-                var models = await _modelManager.DiscoverAvailableModelsAsync();
+                // ✅ Load corrections and appreciated answers sequentially (avoid DbContext conflicts)
+                await LoadCorrectionCacheAsync();
+                await LoadHistoricalAppreciatedAnswersAsync();
+
                 var embeddingModels = models.Where(m => m.Type == "embedding").ToList();
 
-                var plantTasks = _plants.Plants.Keys.Select(async plant =>
+                // ✅ FIX 2: Process plants sequentially to avoid parallel DbContext issues
+                foreach (var plant in _plants.Plants.Keys)
                 {
-                    // Check if already initialized
                     if (_plantInitialized.TryGetValue(plant, out var initialized) && initialized)
                     {
                         _logger.LogInformation($"✓ Plant '{plant}' already initialized");
-                        return;
+
+                        // ✅ FIX 3: Check for file changes without reprocessing everything
+                        await CheckForChangedFilesAsync(plant, embeddingModels);
+                        continue;
                     }
 
                     _logger.LogInformation($"📄 Processing NEW plant: {plant}");
@@ -3297,9 +3600,7 @@ These are the fixed organizational details for {plant} plant.";
 
                     _plantInitialized[plant] = true;
                     _plantLastScan[plant] = DateTime.Now;
-                });
-
-                await Task.WhenAll(plantTasks);
+                }
 
                 lock (_systemInitLock)
                 {
@@ -3775,155 +4076,312 @@ These are the fixed organizational details for {plant} plant.";
         }
 
 
+        //public async IAsyncEnumerable<StreamChunk> ProcessQueryStreamAsync(
+        //    string question,
+        //    string plant,
+        //    string? generationModel = null,
+        //    string? embeddingModel = null,
+        //    int maxResults = 10,
+        //    bool meaiInfo = true,
+        //    string? sessionId = null,
+        //    bool useReRanking = true,
+        //    string? userId = null,
+        //    [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        //{
+        //    var stopwatch = Stopwatch.StartNew();
+
+        //    // ============================
+        //    // 1️⃣ AUTO MODEL SELECTION
+        //    // ============================
+        //    generationModel ??= AutoSelectGenerationModel(question);
+        //    embeddingModel ??= _config.DefaultEmbeddingModel;
+
+        //    yield return new StreamChunk { Type = "status", Content = "Initializing..." };
+
+        //    // ============================
+        //    // 2️⃣ SESSION & CONTEXT
+        //    // ============================
+        //    var sessionResult = await SafeInitializeSession(sessionId, userId, cancellationToken);
+        //    if (sessionResult.HasError)
+        //    {
+        //        yield return new StreamChunk { Type = "error", Content = sessionResult.ErrorMessage };
+        //        yield break;
+        //    }
+
+        //    var context = sessionResult.Context!;
+        //    var actualUserId = userId ?? "system";
+
+        //    var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
+        //        sessionId ?? Guid.NewGuid().ToString(),
+        //        actualUserId,
+        //        plant);
+
+        //    if (string.IsNullOrWhiteSpace(question))
+        //    {
+        //        yield return new StreamChunk { Type = "error", Content = "Question cannot be empty" };
+        //        yield break;
+        //    }
+
+        //    // ============================
+        //    // 3️⃣ ABBREVIATION EXPANSION
+        //    // ============================
+        //    var originalQuestion = question;
+        //    var expandedQuestion = _abbreviationService.ExpandQuery(question);
+        //    question = expandedQuestion;
+
+        //    // ============================
+        //    // 4️⃣ FAST EXIT: APPRECIATED / CORRECTIONS
+        //    // ============================
+        //    var appreciated = await SafeCheckAppreciatedAnswer(question);
+        //    if (appreciated.Answer.Any())
+        //    {
+        //        await foreach (var c in StreamTextResponse(appreciated.Answer, cancellationToken))
+        //            yield return c;
+
+        //        yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+        //        yield break;
+        //    }
+
+        //    var correction = await SafeCheckCorrections(question);
+        //    if (correction.Answer.Any())
+        //    {
+        //        var fixedAnswer = await SafeRephraseWithLLM(correction.Answer, generationModel)
+        //                          ?? correction.Answer;
+
+        //        await foreach (var c in StreamTextResponse(fixedAnswer, cancellationToken))
+        //            yield return c;
+
+        //        yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+        //        yield break;
+        //    }
+
+        //    // ============================
+        //    // 5️⃣ MODEL VALIDATION
+        //    // ============================
+        //    var modelResult = await SafeValidateModels(generationModel, embeddingModel);
+        //    if (modelResult.HasError)
+        //    {
+        //        yield return new StreamChunk { Type = "error", Content = "Model validation failed" };
+        //        yield break;
+        //    }
+
+        //    var genModel = modelResult.GenerationModel!;
+        //    var embModel = modelResult.EmbeddingModel!;
+
+        //    yield return new StreamChunk { Type = "status", Content = "Searching knowledge base..." };
+
+        //    // ============================
+        //    // 6️⃣ VECTOR RETRIEVAL
+        //    // ============================
+        //    //            var vectorChunks = await GetRelevantChunksWithExpansionAsync(
+        //    //    originalQuestion,
+        //    //    expandedQuestion,
+        //    //    _conversationAnalysis.BuildContextualQuery(question, context.History),
+        //    //    embModel,
+        //    //    maxResults,
+        //    //    plant,
+        //    //    useReRanking: false,   // ⛔ disable internal reranking
+        //    //    context               // pass conversation context
+        //    //);
+        //    var vectorChunks = await GetRelevantChunksWithExpansionAsync(
+        //                    originalQuestion,
+        //                    embModel,
+        //                    maxResults,
+        //                    meaiInfo,
+        //                    context,
+        //                    useReRanking: false,   // ⛔ disable internal reranking
+        //                    genModel,
+        //                    plant
+
+        //        );
+
+        //                // ============================
+        //                // 7️⃣ BM25 RETRIEVAL (HYBRID)
+        //                // ============================
+        //                var bm25Chunks = _bm25Service.Rank(question, vectorChunks, maxResults * 2);
+
+        //    var hybridChunks = vectorChunks
+        //        .Concat(bm25Chunks)
+        //        .GroupBy(c => c.Id)
+        //        .Select(g => g.First())
+        //        .OrderByDescending(c => c.Similarity + (c.Bm25Score * 0.1))
+        //        .Take(maxResults)
+        //        .ToList();
+
+        //    // ============================
+        //    // 8️⃣ RERANKING (CROSS-ENCODER)
+        //    // ============================
+        //    if (useReRanking && hybridChunks.Count > 3)
+        //    {
+        //        hybridChunks = await _rerankerService.RerankAsync(
+        //            question,
+        //            hybridChunks,
+        //            "qllama/bge-reranker-v2-m3:f16",
+        //            topK: 5);
+        //    }
+
+        //    // 🔒 FREEZE CONTEXT FOR STREAMING
+        //    var finalChunks = hybridChunks.Take(5).ToList();
+
+        //    // ============================
+        //    // 9️⃣ STREAM SOURCES
+        //    // ============================
+        //    if (finalChunks.Any())
+        //    {
+        //        yield return new StreamChunk
+        //        {
+        //            Type = "sources",
+        //            Sources = finalChunks.Select(c => c.Source).Distinct().ToList()
+        //        };
+        //    }
+
+        //    yield return new StreamChunk { Type = "status", Content = "Generating response..." };
+
+        //    // ============================
+        //    // 🔟 STREAM GENERATION
+        //    // ============================
+        //    var fullResponse = new StringBuilder();
+        //    var questionEmbedding = await GetEmbeddingAsync(question, embModel);
+
+        //    await foreach (var token in GenerateStreamingResponseSafe(
+        //        question,
+        //        genModel.Name!,
+        //        context,
+        //        finalChunks,
+        //        meaiInfo,
+        //        plant,
+        //        QuestionType.NewTopic,
+        //        false,
+        //        cancellationToken))
+        //    {
+        //        if (token.StartsWith("__ERROR__:"))
+        //        {
+        //            yield return new StreamChunk { Type = "error", Content = token[10..] };
+        //            yield break;
+        //        }
+
+        //        fullResponse.Append(token);
+        //        yield return new StreamChunk { Type = "response", Content = token };
+        //    }
+
+        //    // ============================
+        //    // 1️⃣1️⃣ SAVE & UPDATE CONTEXT
+        //    // ============================
+        //    var answerEmbedding = await GetEmbeddingAsync(fullResponse.ToString(), embModel);
+        //    var entities = await _entityExtraction.ExtractEntitiesAsync(fullResponse.ToString());
+
+        //    await SaveConversationToDatabaseFast(
+        //        dbSession.SessionId,
+        //        question,
+        //        fullResponse.ToString(),
+        //        finalChunks,
+        //        genModel,
+        //        embModel,
+        //        finalChunks.Any() ? finalChunks.Average(c => c.Similarity) : 0.8,
+        //        stopwatch.ElapsedMilliseconds,
+        //        false,
+        //        null,
+        //        plant,
+        //        questionEmbedding,
+        //        answerEmbedding,
+        //        entities);
+
+        //    await UpdateConversationHistoryFast(
+        //        context,
+        //        question,
+        //        fullResponse.ToString(),
+        //        finalChunks,
+        //        entities);
+
+        //    stopwatch.Stop();
+
+        //    yield return new StreamChunk
+        //    {
+        //        Type = "complete",
+        //        ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+        //    };
+        //}
+
         public async IAsyncEnumerable<StreamChunk> ProcessQueryStreamAsync(
-            string question,
-            string plant,
-            string? generationModel = null,
-            string? embeddingModel = null,
-            int maxResults = 10,
-            bool meaiInfo = true,
-            string? sessionId = null,
-            bool useReRanking = true,
-            string? userId = null,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    string question,
+    string plant,
+    string? generationModel = null,
+    string? embeddingModel = null,
+    int maxResults = 10,
+    bool meaiInfo = true,
+    string? sessionId = null,
+    bool useReRanking = true,
+    string? userId = null,
+    [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             var stopwatch = Stopwatch.StartNew();
 
             // ============================
-            // 1️⃣ AUTO MODEL SELECTION
+            // PRE-FLIGHT VALIDATION
             // ============================
-            generationModel ??= AutoSelectGenerationModel(question);
-            embeddingModel ??= _config.DefaultEmbeddingModel;
+            var validationResult = await ValidateAndInitializeAsync(
+                question, plant, sessionId, userId, generationModel, embeddingModel, cancellationToken);
 
-            yield return new StreamChunk { Type = "status", Content = "Initializing..." };
-
-            // ============================
-            // 2️⃣ SESSION & CONTEXT
-            // ============================
-            var sessionResult = await SafeInitializeSession(sessionId, userId, cancellationToken);
-            if (sessionResult.HasError)
+            if (!validationResult.Success)
             {
-                yield return new StreamChunk { Type = "error", Content = sessionResult.ErrorMessage };
+                yield return new StreamChunk { Type = "error", Content = validationResult.ErrorMessage };
                 yield break;
             }
 
-            var context = sessionResult.Context!;
-            var actualUserId = userId ?? "system";
+            var agentContext = validationResult.Context!;
+            var genModel = validationResult.GenerationModel!;
+            var embModel = validationResult.EmbeddingModel!;
 
-            var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
-                sessionId ?? Guid.NewGuid().ToString(),
-                actualUserId,
-                plant);
+            yield return new StreamChunk { Type = "status", Content = "Initializing agent..." };
 
-            if (string.IsNullOrWhiteSpace(question))
+            // ============================
+            // CACHE CHECK
+            // ============================
+            var cacheResult = await CheckCacheAsync(question, generationModel);
+
+            if (cacheResult.HasResult)
             {
-                yield return new StreamChunk { Type = "error", Content = "Question cannot be empty" };
-                yield break;
-            }
-
-            // ============================
-            // 3️⃣ ABBREVIATION EXPANSION
-            // ============================
-            var originalQuestion = question;
-            var expandedQuestion = _abbreviationService.ExpandQuery(question);
-            question = expandedQuestion;
-
-            // ============================
-            // 4️⃣ FAST EXIT: APPRECIATED / CORRECTIONS
-            // ============================
-            var appreciated = await SafeCheckAppreciatedAnswer(question);
-            if (appreciated.Answer.Any())
-            {
-                await foreach (var c in StreamTextResponse(appreciated.Answer, cancellationToken))
-                    yield return c;
-
-                yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
-                yield break;
-            }
-
-            var correction = await SafeCheckCorrections(question);
-            if (correction.Answer.Any())
-            {
-                var fixedAnswer = await SafeRephraseWithLLM(correction.Answer, generationModel)
-                                  ?? correction.Answer;
-
-                await foreach (var c in StreamTextResponse(fixedAnswer, cancellationToken))
-                    yield return c;
+                await foreach (var chunk in StreamTextResponse(cacheResult.CachedAnswer!, cancellationToken))
+                {
+                    yield return chunk;
+                }
 
                 yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
                 yield break;
             }
 
             // ============================
-            // 5️⃣ MODEL VALIDATION
+            // PLANNING
             // ============================
-            var modelResult = await SafeValidateModels(generationModel, embeddingModel);
-            if (modelResult.HasError)
+            yield return new StreamChunk { Type = "status", Content = "Planning execution..." };
+
+            var planResult = await CreateExecutionPlanAsync(question, agentContext, meaiInfo);
+
+            if (!planResult.Success)
             {
-                yield return new StreamChunk { Type = "error", Content = "Model validation failed" };
+                await foreach (var chunk in ExecuteDirectPathAsync(
+                    question, plant, agentContext, genModel, embModel,
+                    maxResults, meaiInfo, useReRanking, stopwatch, cancellationToken))
+                {
+                    yield return chunk;
+                }
                 yield break;
             }
 
-            var genModel = modelResult.GenerationModel!;
-            var embModel = modelResult.EmbeddingModel!;
+            var plan = planResult.Plan!;
 
+            // ============================
+            // RETRIEVAL
+            // ============================
             yield return new StreamChunk { Type = "status", Content = "Searching knowledge base..." };
 
-            // ============================
-            // 6️⃣ VECTOR RETRIEVAL
-            // ============================
-            //            var vectorChunks = await GetRelevantChunksWithExpansionAsync(
-            //    originalQuestion,
-            //    expandedQuestion,
-            //    _conversationAnalysis.BuildContextualQuery(question, context.History),
-            //    embModel,
-            //    maxResults,
-            //    plant,
-            //    useReRanking: false,   // ⛔ disable internal reranking
-            //    context               // pass conversation context
-            //);
-            var vectorChunks = await GetRelevantChunksWithExpansionAsync(
-                            originalQuestion,
-                            embModel,
-                            maxResults,
-                            meaiInfo,
-                            context,
-                            useReRanking: false,   // ⛔ disable internal reranking
-                            genModel,
-                            plant
+            var retrievalResult = await ExecuteRetrievalAsync(
+                question, embModel, maxResults, plant, agentContext, useReRanking, plan);
 
-                );
-
-                        // ============================
-                        // 7️⃣ BM25 RETRIEVAL (HYBRID)
-                        // ============================
-                        var bm25Chunks = _bm25Service.Rank(question, vectorChunks, maxResults * 2);
-
-            var hybridChunks = vectorChunks
-                .Concat(bm25Chunks)
-                .GroupBy(c => c.Id)
-                .Select(g => g.First())
-                .OrderByDescending(c => c.Similarity + (c.Bm25Score * 0.1))
-                .Take(maxResults)
-                .ToList();
+            var finalChunks = retrievalResult.Chunks;
 
             // ============================
-            // 8️⃣ RERANKING (CROSS-ENCODER)
-            // ============================
-            if (useReRanking && hybridChunks.Count > 3)
-            {
-                hybridChunks = await _rerankerService.RerankAsync(
-                    question,
-                    hybridChunks,
-                    "qllama/bge-reranker-v2-m3:f16",
-                    topK: 5);
-            }
-
-            // 🔒 FREEZE CONTEXT FOR STREAMING
-            var finalChunks = hybridChunks.Take(5).ToList();
-
-            // ============================
-            // 9️⃣ STREAM SOURCES
+            // STREAM SOURCES
             // ============================
             if (finalChunks.Any())
             {
@@ -3934,23 +4392,20 @@ These are the fixed organizational details for {plant} plant.";
                 };
             }
 
+            // ============================
+            // RESPONSE GENERATION (FIXED)
+            // ============================
             yield return new StreamChunk { Type = "status", Content = "Generating response..." };
 
-            // ============================
-            // 🔟 STREAM GENERATION
-            // ============================
             var fullResponse = new StringBuilder();
-            var questionEmbedding = await GetEmbeddingAsync(question, embModel);
 
-            await foreach (var token in GenerateStreamingResponseSafe(
+            await foreach (var token in GenerateResponseFromContext(
                 question,
                 genModel.Name!,
-                context,
+                agentContext,
                 finalChunks,
                 meaiInfo,
                 plant,
-                QuestionType.NewTopic,
-                false,
                 cancellationToken))
             {
                 if (token.StartsWith("__ERROR__:"))
@@ -3963,34 +4418,605 @@ These are the fixed organizational details for {plant} plant.";
                 yield return new StreamChunk { Type = "response", Content = token };
             }
 
-            // ============================
-            // 1️⃣1️⃣ SAVE & UPDATE CONTEXT
-            // ============================
-            var answerEmbedding = await GetEmbeddingAsync(fullResponse.ToString(), embModel);
-            var entities = await _entityExtraction.ExtractEntitiesAsync(fullResponse.ToString());
+            var responseText = fullResponse.ToString();
 
-            await SaveConversationToDatabaseFast(
-                dbSession.SessionId,
+            if (string.IsNullOrWhiteSpace(responseText))
+            {
+                yield return new StreamChunk { Type = "error", Content = "Generated response was empty" };
+                yield break;
+            }
+
+            // ============================
+            // VERIFICATION
+            // ============================
+            var verification = await VerifyResponseSafelyAsync(question, responseText, finalChunks, meaiInfo);
+
+            if (verification != null)
+            {
+                yield return new StreamChunk
+                {
+                    Type = "metadata",
+                    Content = JsonSerializer.Serialize(new
+                    {
+                        verified = !verification.NeedsReprocessing,
+                        confidence = verification.OverallConfidence,
+                        quality_checks = new
+                        {
+                            complete = verification.IsComplete,
+                            grounded = verification.IsGrounded,
+                            hallucination_free = !verification.HasHallucinations
+                        }
+                    })
+                };
+            }
+
+            // ============================
+            // SAVE TO DATABASE
+            // ============================
+            _ = SaveConversationSafelyAsync(
+                agentContext, question, responseText, finalChunks,
+                genModel, embModel, plant, verification, stopwatch.ElapsedMilliseconds);
+
+            stopwatch.Stop();
+
+            // ============================
+            // COMPLETION
+            // ============================
+            LogAgentCompletion(verification?.OverallConfidence ?? 0.7, stopwatch.ElapsedMilliseconds);
+
+            yield return new StreamChunk
+            {
+                Type = "complete",
+                ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+            };
+        }
+
+        private async IAsyncEnumerable<string> GenerateResponseFromContext(
+    string question,
+    string modelName,
+    AgentContext agentContext,
+    List<RelevantChunk> chunks,
+    bool meaiInfo,
+    string plant,
+    [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            // Get or create conversation context
+            var conversationContext = _conversation.GetOrCreateConversationContext(agentContext.SessionId);
+
+            // Update with latest history
+            conversationContext.History = agentContext.History.Select(h => new ConversationTurn
+            {
+                Question = h.Question,
+                Answer = h.Answer,
+                Timestamp = h.Timestamp,
+                Sources = h.Sources
+            }).ToList();
+
+            // Call the existing method
+            await foreach (var token in GenerateStreamingResponseSafe(
                 question,
-                fullResponse.ToString(),
-                finalChunks,
-                genModel,
-                embModel,
-                finalChunks.Any() ? finalChunks.Average(c => c.Similarity) : 0.8,
-                stopwatch.ElapsedMilliseconds,
-                false,
-                null,
+                modelName,
+                conversationContext,
+                chunks,
+                meaiInfo,
                 plant,
-                questionEmbedding,
-                answerEmbedding,
-                entities);
+                QuestionType.NewTopic,
+                false,
+                cancellationToken))
+            {
+                yield return token;
+            }
+        }
 
-            await UpdateConversationHistoryFast(
-                context,
+        private async Task<AgentContext> CreateAgentContextAsync(
+    string? sessionId,
+    string? userId,
+    string plant,
+    CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var actualUserId = userId ?? "system";
+                var actualSessionId = sessionId ?? Guid.NewGuid().ToString();
+
+                var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
+                    actualSessionId,
+                    actualUserId,
+                    plant
+                );
+
+                // Load conversation history from database
+                var conversations = await _conversationStorage.GetSessionConversationsAsync(dbSession.SessionId);
+
+                // Create agent context
+                var agentContext = new AgentContext
+                {
+                    SessionId = dbSession.SessionId,
+                    UserId = actualUserId,
+                    Plant = plant,
+                    State = new Dictionary<string, object>(),
+                    LastAccessed = DateTime.Now
+                };
+
+                // Convert database conversations to ConversationTurn format
+                agentContext.History = conversations
+                    .OrderBy(c => c.CreatedAt)
+                    .TakeLast(10)
+                    .Select(c => new ConversationTurn
+                    {
+                        Question = c.Question,
+                        Answer = c.Answer,
+                        Timestamp = c.CreatedAt,
+                        Sources = c.Sources ?? new List<string>()
+                    })
+                    .ToList();
+
+                // Load named entities
+                agentContext.NamedEntities = conversations
+                    .SelectMany(c => c.NamedEntities ?? new List<string>())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                return agentContext;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create agent context");
+
+                // Return minimal context on failure
+                return new AgentContext
+                {
+                    SessionId = sessionId ?? Guid.NewGuid().ToString(),
+                    UserId = userId ?? "system",
+                    Plant = plant,
+                    History = new List<ConversationTurn>(),
+                    NamedEntities = new List<string>(),
+                    State = new Dictionary<string, object>(),
+                    LastAccessed = DateTime.Now
+                };
+            }
+        }
+
+        // ============================
+        // VALIDATION WRAPPER
+        // ============================
+        private async Task<ValidationResult> ValidateAndInitializeAsync(
+            string question,
+            string plant,
+            string? sessionId,
+            string? userId,
+            string? generationModel,
+            string? embeddingModel,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(question))
+                {
+                    return new ValidationResult
+                    {
+                        Success = false,
+                        ErrorMessage = "Question cannot be empty"
+                    };
+                }
+
+                // Auto-select models
+                generationModel ??= AutoSelectGenerationModel(question);
+                embeddingModel ??= _config.DefaultEmbeddingModel;
+
+                // Validate models
+                var genModel = await _modelManager.GetModelAsync(generationModel);
+                var embModel = await _modelManager.GetModelAsync(embeddingModel);
+
+                if (genModel == null || embModel == null)
+                {
+                    return new ValidationResult
+                    {
+                        Success = false,
+                        ErrorMessage = "Required models not available"
+                    };
+                }
+
+                // Create agent context
+                var agentContext = await CreateAgentContextAsync(sessionId, userId, plant, cancellationToken);
+                agentContext.State["query"] = question;
+
+                _agentLogger.LogStep("StreamQueryReceived", new
+                {
+                    question = question.Substring(0, Math.Min(100, question.Length)),
+                    plant,
+                    sessionId = agentContext.SessionId
+                });
+
+                return new ValidationResult
+                {
+                    Success = true,
+                    Context = agentContext,
+                    GenerationModel = genModel,
+                    EmbeddingModel = embModel
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Validation failed");
+                return new ValidationResult
+                {
+                    Success = false,
+                    ErrorMessage = $"Initialization failed: {ex.Message}"
+                };
+            }
+        }
+
+        // ============================
+        // CACHE CHECK WRAPPER
+        // ============================
+        private async Task<CacheResult> CheckCacheAsync(string question, string? generationModel)
+        {
+            try
+            {
+                var appreciated = await CheckAppreciatedAnswerAsync(question);
+                if (appreciated.HasValue)
+                {
+                    _agentLogger.LogDecision(new AgentDecision
+                    {
+                        Phase = "CacheHit",
+                        DecisionMade = "AppreciatedAnswer",
+                        Reasoning = "Found cached appreciated answer",
+                        Confidence = 0.95
+                    });
+
+                    return new CacheResult
+                    {
+                        HasResult = true,
+                        CachedAnswer = appreciated.Value.Answer
+                    };
+                }
+
+                var correction = await CheckCorrectionsAsync(question);
+                if (correction != null)
+                {
+                    _agentLogger.LogDecision(new AgentDecision
+                    {
+                        Phase = "CacheHit",
+                        DecisionMade = "CorrectionFound",
+                        Reasoning = "Found user correction",
+                        Confidence = 1.0
+                    });
+
+                    var rephrased = await _helperMethods.RephraseWithLLMAsync(
+                        correction.Answer,
+                        generationModel ?? _config.DefaultGenerationModel
+                    );
+
+                    return new CacheResult
+                    {
+                        HasResult = true,
+                        CachedAnswer = rephrased ?? correction.Answer
+                    };
+                }
+
+                return new CacheResult { HasResult = false };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Cache check failed, continuing without cache");
+                return new CacheResult { HasResult = false };
+            }
+        }
+
+        // ============================
+        // PLANNING WRAPPER
+        // ============================
+        private async Task<PlanResult> CreateExecutionPlanAsync(
+            string question,
+            AgentContext context,
+            bool meaiInfo)
+        {
+            try
+            {
+                var plan = await _agentPlanner.PlanQueryAsync(question, context, meaiInfo);
+
+                _agentLogger.LogDecision(new AgentDecision
+                {
+                    Phase = "Planning",
+                    DecisionMade = $"Created {plan.Steps.Count}-step plan",
+                    Reasoning = string.Join(" → ", plan.Steps.Select(s => s.Name)),
+                    Confidence = 1.0
+                });
+
+                return new PlanResult { Success = true, Plan = plan };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Planning failed, will use direct execution");
+
+                _agentLogger.LogDecision(new AgentDecision
+                {
+                    Phase = "Planning",
+                    DecisionMade = "FALLBACK",
+                    Reasoning = "Planning failed, using direct execution",
+                    Confidence = 0.5
+                });
+
+                return new PlanResult { Success = false, ErrorMessage = ex.Message };
+            }
+        }
+
+        // ============================
+        // RETRIEVAL WRAPPER
+        // ============================
+        // In ExecuteRetrievalAsync method, replace the call with:
+
+        private async Task<RetrievalResult> ExecuteRetrievalAsync(
+            string question,
+            ModelConfiguration embModel,
+            int maxResults,
+            string plant,
+            AgentContext context,
+            bool useReRanking,
+            ExecutionPlan plan)
+        {
+            var result = new RetrievalResult { Chunks = new List<RelevantChunk>() };
+
+            try
+            {
+                // Expand query
+                var expandedQuery = _abbreviationService.ExpandQuery(question);
+
+                // Get or create conversation context for the session
+                var conversationContext = _conversation.GetOrCreateConversationContext(context.SessionId);
+
+                // Populate conversation context with history from agent context
+                conversationContext.History = context.History.Select(h => new ConversationTurn
+                {
+                    Question = h.Question,
+                    Answer = h.Answer,
+                    Timestamp = h.Timestamp,
+                    Sources = h.Sources
+                }).ToList();
+
+                // Retrieve chunks using the existing method
+                var chunks = await GetRelevantChunksWithExpansionAsync(
+                    question,
+                    embModel,
+                    maxResults,
+                    true, // meaiInfo
+                    conversationContext, // Pass ConversationContext, not List<ConversationTurn>
+                    false, // useReRanking - we'll do it separately
+                    embModel, // generationModel (using embModel as fallback)
+                    plant
+                );
+
+                // Apply BM25
+                var bm25Chunks = _bm25Service.Rank(question, chunks, maxResults * 2);
+
+                var hybridChunks = chunks
+                    .Concat(bm25Chunks)
+                    .GroupBy(c => c.Id)
+                    .Select(g => g.First())
+                    .OrderByDescending(c => c.Similarity + (c.Bm25Score * 0.1))
+                    .Take(maxResults)
+                    .ToList();
+
+                // Rerank if needed
+                if (useReRanking && hybridChunks.Count > 3)
+                {
+                    hybridChunks = await _rerankerService.RerankAsync(
+                        question,
+                        hybridChunks,
+                        "qllama/bge-reranker-v2-m3:f16",
+                        topK: 5
+                    );
+                }
+
+                result.Chunks = hybridChunks.Take(5).ToList();
+
+                _agentLogger.LogDecision(new AgentDecision
+                {
+                    Phase = "Retrieval",
+                    DecisionMade = $"Retrieved {result.Chunks.Count} chunks",
+                    Confidence = result.Chunks.Any() ? result.Chunks.Average(c => c.Similarity) : 0.0
+                });
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Retrieval failed");
+
+                _agentLogger.LogDecision(new AgentDecision
+                {
+                    Phase = "Retrieval",
+                    DecisionMade = "FAILED",
+                    Reasoning = ex.Message,
+                    Confidence = 0.0
+                });
+
+                return result; // Return empty chunks
+            }
+        }
+
+        // ============================
+        // VERIFICATION WRAPPER
+        // ============================
+        private async Task<VerificationResult?> VerifyResponseSafelyAsync(
+            string question,
+            string response,
+            List<RelevantChunk> chunks,
+            bool checkFactuality)
+        {
+            try
+            {
+                var verification = await _selfVerifier.VerifyResponseAsync(
+                    question,
+                    response,
+                    chunks,
+                    checkFactuality
+                );
+
+                _agentLogger.LogDecision(new AgentDecision
+                {
+                    Phase = "Verification",
+                    DecisionMade = verification.NeedsReprocessing ? "RETRY_NEEDED" : "APPROVED",
+                    Reasoning = $"Confidence: {verification.OverallConfidence:P0}, Complete: {verification.IsComplete}",
+                    Confidence = verification.OverallConfidence
+                });
+
+                return verification;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Verification failed, accepting response");
+
+                return new VerificationResult
+                {
+                    IsComplete = true,
+                    IsGrounded = true,
+                    HasHallucinations = false,
+                    OverallConfidence = 0.7,
+                    NeedsReprocessing = false
+                };
+            }
+        }
+
+        // ============================
+        // SAVE WRAPPER (Fire and Forget)
+        // ============================
+        private async Task SaveConversationSafelyAsync(
+            AgentContext context,
+            string question,
+            string answer,
+            List<RelevantChunk> chunks,
+            ModelConfiguration genModel,
+            ModelConfiguration embModel,
+            string plant,
+            VerificationResult? verification,
+            long processingTime)
+        {
+            try
+            {
+                var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
+                    context.SessionId,
+                    context.UserId,
+                    plant
+                );
+
+                var questionEmbedding = await GetEmbeddingAsync(question, embModel);
+                var answerEmbedding = await GetEmbeddingAsync(answer, embModel);
+                var entities = await _entityExtraction.ExtractEntitiesAsync(answer);
+
+                await SaveConversationToDatabaseFast(
+                    dbSession.SessionId,
+                    question,
+                    answer,
+                    chunks,
+                    genModel,
+                    embModel,
+                    verification?.OverallConfidence ?? 0.7,
+                    processingTime,
+                    false,
+                    null,
+                    plant,
+                    questionEmbedding,
+                    answerEmbedding,
+                    entities
+                );
+
+                // Update context
+                context.History.Add(new ConversationTurn
+                {
+                    Question = question,
+                    Answer = answer,
+                    Timestamp = DateTime.Now,
+                    Sources = chunks.Select(c => c.Source).Distinct().ToList()
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to save conversation (non-critical)");
+                // Swallow exception - don't fail the request
+            }
+        }
+
+        // ============================
+        // LOGGING HELPER
+        // ============================
+        private void LogAgentCompletion(double confidence, long durationMs)
+        {
+            try
+            {
+                _agentLogger.LogDecision(new AgentDecision
+                {
+                    Phase = "Complete",
+                    DecisionMade = "SUCCESS",
+                    Reasoning = $"Total duration: {durationMs}ms, Confidence: {confidence:P0}",
+                    Confidence = confidence
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to log completion");
+                // Swallow exception
+            }
+        }
+
+        private async IAsyncEnumerable<StreamChunk> ExecuteDirectPathAsync(
+    string question,
+    string plant,
+    AgentContext context,
+    ModelConfiguration genModel,
+    ModelConfiguration embModel,
+    int maxResults,
+    bool meaiInfo,
+    bool useReRanking,
+    Stopwatch stopwatch,
+    [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            yield return new StreamChunk { Type = "status", Content = "Executing (fallback mode)..." };
+
+            // Safe retrieval
+            var retrievalResult = await ExecuteRetrievalAsync(
+                question, embModel, maxResults, plant, context, useReRanking, null!);
+
+            var chunks = retrievalResult.Chunks;
+
+            if (chunks.Any())
+            {
+                yield return new StreamChunk
+                {
+                    Type = "sources",
+                    Sources = chunks.Select(c => c.Source).Distinct().ToList()
+                };
+            }
+
+            yield return new StreamChunk { Type = "status", Content = "Generating response..." };
+
+            var fullResponse = new StringBuilder();
+
+            // Use the helper method
+            await foreach (var token in GenerateResponseFromContext(
                 question,
-                fullResponse.ToString(),
-                finalChunks,
-                entities);
+                genModel.Name!,
+                context,
+                chunks,
+                meaiInfo,
+                plant,
+                cancellationToken))
+            {
+                if (token.StartsWith("__ERROR__:"))
+                {
+                    yield return new StreamChunk { Type = "error", Content = token[10..] };
+                    yield break;
+                }
+
+                fullResponse.Append(token);
+                yield return new StreamChunk { Type = "response", Content = token };
+            }
+
+            // Save
+            _ = SaveConversationSafelyAsync(
+                context, question, fullResponse.ToString(), chunks,
+                genModel, embModel, plant, null, stopwatch.ElapsedMilliseconds);
 
             stopwatch.Stop();
 
@@ -4001,6 +5027,35 @@ These are the fixed organizational details for {plant} plant.";
             };
         }
 
+        // ADD these to DynamicRagService class
+
+        private class ValidationResult
+        {
+            public bool Success { get; set; }
+            public string ErrorMessage { get; set; } = "";
+            public AgentContext? Context { get; set; }
+            public ModelConfiguration? GenerationModel { get; set; }
+            public ModelConfiguration? EmbeddingModel { get; set; }
+        }
+
+        private class CacheResult
+        {
+            public bool HasResult { get; set; }
+            public string? CachedAnswer { get; set; }
+        }
+
+        private class PlanResult
+        {
+            public bool Success { get; set; }
+            public ExecutionPlan? Plan { get; set; }
+            public string? ErrorMessage { get; set; }
+        }
+
+        private class RetrievalResult
+        {
+            public List<RelevantChunk> Chunks { get; set; } = new();
+            public double AverageConfidence { get; set; }
+        }
 
         private QuestionType ClassifyQuestionType(string question, ConversationContext context)
         {
@@ -5052,29 +6107,29 @@ These are the fixed organizational details for {plant} plant.";
         new
         {
             role = "system",
-            content = @"You are an intelligent and helpful AI assistant with expertise across multiple domains.
+            content = "You are an intelligent and helpful AI assistant with expertise across multiple domains. "+
 
-**Core Principles:**
-- Provide accurate, well-researched, and detailed responses
-- Be conversational, professional, and friendly
-- Use clear structure with appropriate formatting
-- Cite reasoning when making recommendations
-- Admit uncertainty when appropriate rather than guessing
+"**Core Principles:** " +
+"- Provide accurate, well-researched, and detailed responses "+
+"- Be conversational, professional, and friendly "+
+"- Use clear structure with appropriate formatting "+
+"- Cite reasoning when making recommendations "+
+"- Admit uncertainty when appropriate rather than guessing "+
 
-**Response Guidelines:**
-1. For factual questions: Provide direct, accurate answers with relevant context
-2. For how-to questions: Give step-by-step instructions with clear explanations
-3. For recommendations: Explain pros/cons and provide multiple options when relevant
-4. For complex topics: Break down concepts into digestible parts
-5. For opinion-based questions: Present balanced perspectives
+"**Response Guidelines:** "+
+"1. For factual questions: Provide direct, accurate answers with relevant context "+
+"2. For how-to questions: Give step-by-step instructions with clear explanations "+
+"3. For recommendations: Explain pros/cons and provide multiple options when relevant  "+
+"4. For complex topics: Break down concepts into digestible parts "+
+"5. For opinion-based questions: Present balanced perspectives "+
 
-**Formatting:**
-- Use clear paragraphs for readability
-- Add bullet points for lists or multiple items
-- Include examples when they clarify concepts
-- Keep responses concise but complete
+"**Formatting:** "+
+"- Use clear paragraphs for readability "+
+"- Add bullet points for lists or multiple items "+
+"- Include examples when they clarify concepts "+
+"- Keep responses concise but complete "+
 
-Be helpful, informative, and engaging in your communication."
+"Be helpful, informative, and engaging in your communication."
         }
     };
 

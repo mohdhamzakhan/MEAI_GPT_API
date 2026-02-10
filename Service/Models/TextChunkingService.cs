@@ -1,6 +1,7 @@
 ﻿using MEAI_GPT_API.Services;
 using System.Text;
 using System.Text.RegularExpressions;
+using static Microsoft.Extensions.Logging.EventSource.LoggingEventSource;
 
 namespace MEAI_GPT_API.Service.Models
 {
@@ -8,6 +9,7 @@ namespace MEAI_GPT_API.Service.Models
     {
         private readonly StringProcessingService _stringProcessor;
         private readonly ILogger<TextChunkingService> _logger;
+        private readonly CompliancePolicyDetector _policyDetector;
 
         // Enhanced patterns for various document types including ISMS subtypes
         private readonly Dictionary<string, string[]> _documentTypePatterns = new()
@@ -61,64 +63,43 @@ namespace MEAI_GPT_API.Service.Models
         {
             _logger = logger;
             _stringProcessor = stringProcessing;
+            _policyDetector = new CompliancePolicyDetector();
         }
 
+        private static readonly Regex[] CompiledSectionPatterns = new[]
+        {
+            // Standard sections
+            new Regex(@"^(?:SECTION|Section)\s+(\d+(?:\.\d+)*)\s*[:\-]?\s*(.*)$",
+                RegexOptions.Compiled | RegexOptions.IgnoreCase),
+            
+            // NEW: Boxed content patterns
+            new Regex(@"^(?:Questions?|Checklist|Guidelines?|Requirements?|Steps?|Procedures?)\s+(?:to|for)\s+(.+)$",
+                RegexOptions.Compiled | RegexOptions.IgnoreCase),
+            
+            // NEW: All-caps standalone headings (common in boxes)
+            new Regex(@"^([A-Z][A-Z\s]{10,})$",
+                RegexOptions.Compiled),
+            
+            // NEW: Introduction phrases
+            new Regex(@"^(?:The following|Below are|These are)\s+(.+):$",
+                RegexOptions.Compiled | RegexOptions.IgnoreCase),
+            
+            // Chapters, Appendices, etc.
+            new Regex(@"^(?:CHAPTER|Chapter)\s+(\d+)\s*[:\-]?\s*(.*)$",
+                RegexOptions.Compiled | RegexOptions.IgnoreCase),
+            new Regex(@"^(?:APPENDIX|Appendix|ANNEXURE|Annexure)\s+([A-Z\d]+)\s*[:\-]?\s*(.*)$",
+                RegexOptions.Compiled | RegexOptions.IgnoreCase),
+            
+            // Generic numbered sections
+            new Regex(@"^(\d+(?:\.\d+)*)\s*[:\-\.]?\s*(.+)$",
+                RegexOptions.Compiled),
+        };
+
+
         public List<(string Text, string SourceFile, string SectionId, string Title)> ChunkText(
-           string text, string sourceFile, int maxTokens = 2500)
+            string text, string sourceFile, int maxTokens = 2500)
         {
             text = _stringProcessor.CleanCopyPasteText(text);
-
-            // ENHANCED: Comprehensive section patterns for ALL document types
-            var sectionPatterns = new[]
-            {
-                // Standard section formats
-                @"^Section\s+(\d+(?:\.\d+)*)\s*[–\-—\u2013\u2014\u002D]?\s*(.+)$",
-                @"^Section\s*(\d+(?:\.\d+)*)\s*[:\-]?\s*(.*)$",
-                @"^SECTION\s+(\d+(?:\.\d+)*)\s*[:\-]?\s*(.*)$",
-                
-                // Numbered sections
-                @"^(\d+)\.\s+(.+)$",
-                @"^(\d+)\s+(.+)$",
-                @"^(\d+\.\d+)\s+(.+)$",
-                @"^(\d+\.\d+\.\d+)\s+(.+)$",
-                @"^(\d+)\s*[:\-\.]\s*(.+)$",
-                
-                // Chapter formats
-                @"^Chapter\s+(\d+)\s*[:\-]?\s*(.*)$",
-                @"^CHAPTER\s+(\d+)\s*[:\-]?\s*(.*)$",
-                
-                // Article formats
-                @"^Article\s+(\d+)\s*[:\-]?\s*(.*)$",
-                @"^ARTICLE\s+(\d+)\s*[:\-]?\s*(.*)$",
-                
-                // Appendix and Annexure formats
-                @"^Appendix\s+([A-Z\d]+)\s*[:\-]?\s*(.*)$",
-                @"^APPENDIX\s+([A-Z\d]+)\s*[:\-]?\s*(.*)$",
-                @"^Annexure\s+([A-Z\d]+)\s*[:\-]?\s*(.*)$",
-                @"^ANNEXURE\s+([A-Z\d]+)\s*[:\-]?\s*(.*)$",
-                @"^Annex\s+([A-Z\d]+)\s*[:\-]?\s*(.*)$",
-                @"^ANNEX\s+([A-Z\d]+)\s*[:\-]?\s*(.*)$",
-                
-                // Schedule formats
-                @"^Schedule\s+([A-Z\d]+)\s*[:\-]?\s*(.*)$",
-                @"^SCHEDULE\s+([A-Z\d]+)\s*[:\-]?\s*(.*)$",
-                
-                // Part formats
-                @"^Part\s+([IVX\d]+)\s*[:\-]?\s*(.*)$",
-                @"^PART\s+([IVX\d]+)\s*[:\-]?\s*(.*)$",
-                
-                // Title formats
-                @"^Title\s+(\d+)\s*[:\-]?\s*(.*)$",
-                @"^TITLE\s+(\d+)\s*[:\-]?\s*(.*)$",
-                
-                // Clause formats
-                @"^Clause\s+(\d+(?:\.\d+)*)\s*[:\-]?\s*(.*)$",
-                @"^CLAUSE\s+(\d+(?:\.\d+)*)\s*[:\-]?\s*(.*)$",
-                
-                // Generic heading patterns (catch-all)
-                @"^([A-Z][A-Z\s]{3,})\s*[:\-]?\s*$", // ALL CAPS headings
-                @"^([A-Z][a-z\s]{10,})\s*[:\-]?\s*$" // Title Case long headings
-            };
 
             var chunks = new List<(string Text, string SourceFile, string SectionId, string Title)>();
             var lines = text.Split(new[] { "\n", "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
@@ -127,261 +108,390 @@ namespace MEAI_GPT_API.Service.Models
             string currentSectionId = "";
             string currentTitle = "";
             int tokenCount = 0;
+            string previousLine = "";
+            bool inListContext = false;
 
             foreach (var line in lines)
             {
                 string trimmed = line.Trim();
                 if (string.IsNullOrEmpty(trimmed)) continue;
 
-                bool foundSection = false;
-                string detectedSectionId = "";
-                string detectedTitle = "";
-
-                // Check for section headers with improved detection
-                foreach (var pattern in sectionPatterns)
-                {
-                    var match = Regex.Match(trimmed, pattern, RegexOptions.IgnoreCase);
-                    if (match.Success)
-                    {
-                        foundSection = true;
-
-                        // Determine section type and format appropriately
-                        if (trimmed.ToLowerInvariant().Contains("section"))
-                        {
-                            detectedSectionId = $"Section {match.Groups[1].Value}";
-                            detectedTitle = match.Groups[2].Value.Trim();
-                        }
-                        else if (trimmed.ToLowerInvariant().Contains("appendix") ||
-                                trimmed.ToLowerInvariant().Contains("annexure") ||
-                                trimmed.ToLowerInvariant().Contains("annex"))
-                        {
-                            string prefix = trimmed.Split(' ')[0];
-                            detectedSectionId = $"{prefix} {match.Groups[1].Value}";
-                            detectedTitle = match.Groups[2].Value.Trim();
-                        }
-                        else if (trimmed.ToLowerInvariant().Contains("chapter"))
-                        {
-                            detectedSectionId = $"Chapter {match.Groups[1].Value}";
-                            detectedTitle = match.Groups[2].Value.Trim();
-                        }
-                        else if (trimmed.ToLowerInvariant().Contains("schedule"))
-                        {
-                            detectedSectionId = $"Schedule {match.Groups[1].Value}";
-                            detectedTitle = match.Groups[2].Value.Trim();
-                        }
-                        else if (match.Groups.Count >= 3)
-                        {
-                            detectedSectionId = match.Groups[1].Value;
-                            detectedTitle = match.Groups[2].Value.Trim();
-                        }
-                        else
-                        {
-                            detectedSectionId = match.Groups[1].Value;
-                            detectedTitle = "";
-                        }
-
-                        _logger.LogInformation($"✅ Detected section: {detectedSectionId} - {detectedTitle}");
-                        break;
-                    }
-                }
+                // Check for section header
+                var (foundSection, detectedSectionId, detectedTitle) = DetectSectionHeader(trimmed);
 
                 if (foundSection)
                 {
                     // Save previous chunk
                     if (currentChunk.Length > 0)
                     {
+                        var contentType = DetectContentType(currentTitle, currentChunk.ToString());
                         var completeChunk = BuildComprehensiveChunk(
-                            currentSectionId, currentTitle, currentChunk.ToString(), "");
+                            currentSectionId, currentTitle, currentChunk.ToString(), contentType);
                         chunks.Add((completeChunk, sourceFile, currentSectionId, currentTitle));
 
-                        _logger.LogInformation($"🔍 STORING CHUNK:");
-                        _logger.LogInformation($"Section: {currentSectionId} - {currentTitle}");
-                        _logger.LogInformation($"Length: {completeChunk.Length}");
+                        _logger.LogDebug($"Saved chunk: {currentSectionId} ({contentType})");
                     }
 
-                    // Start new section
                     currentSectionId = detectedSectionId;
                     currentTitle = detectedTitle;
                     currentChunk.Clear();
                     currentChunk.AppendLine($"=== {currentSectionId}: {currentTitle} ===");
                     tokenCount = _stringProcessor.EstimateTokenCount($"{currentSectionId}: {currentTitle}");
+                    inListContext = false;
+
+                    _logger.LogDebug($"New section: {currentSectionId} - {currentTitle}");
+                    previousLine = trimmed;
+                    continue;
                 }
 
-                // Add line to current chunk
-                int lineTokens = _stringProcessor.EstimateTokenCount(trimmed);
-                if (tokenCount + lineTokens > maxTokens && currentChunk.Length > 0)
+                // ✅ CHECK: Is this a list item (not a new section)?
+                if (IsListItem(trimmed, previousLine))
                 {
-                    // Split large sections
+                    inListContext = true;
+                    _logger.LogTrace($"List item detected: {trimmed.Substring(0, Math.Min(50, trimmed.Length))}...");
+
+                    // Add to current chunk without creating new section
+                    currentChunk.AppendLine(trimmed);
+                    tokenCount += _stringProcessor.EstimateTokenCount(trimmed);
+                    previousLine = trimmed;
+                    continue;
+                }
+
+                // Normal line processing
+                int lineTokens = _stringProcessor.EstimateTokenCount(trimmed);
+
+                // Smart splitting - avoid breaking lists
+                if (ShouldSplitChunk(currentChunk, trimmed, tokenCount + lineTokens, maxTokens))
+                {
+                    // If in list, allow slightly larger chunk to keep list together
+                    if (inListContext && tokenCount + lineTokens < maxTokens * 1.3)
+                    {
+                        _logger.LogDebug("Allowing larger chunk to preserve list integrity");
+                        currentChunk.AppendLine(trimmed);
+                        tokenCount += lineTokens;
+                        previousLine = trimmed;
+                        continue;
+                    }
+
+                    var contentType = DetectContentType(currentTitle, currentChunk.ToString());
                     var completeChunk = BuildComprehensiveChunk(
-                        currentSectionId, currentTitle, currentChunk.ToString(), "");
+                        currentSectionId, currentTitle, currentChunk.ToString(), contentType);
                     chunks.Add((completeChunk, sourceFile, currentSectionId, currentTitle));
 
                     currentChunk.Clear();
                     currentChunk.AppendLine($"=== {currentSectionId}: {currentTitle} (continued) ===");
                     tokenCount = _stringProcessor.EstimateTokenCount($"{currentSectionId}: {currentTitle} (continued)");
+                    inListContext = false;
                 }
 
                 currentChunk.AppendLine(trimmed);
                 tokenCount += lineTokens;
+                previousLine = trimmed;
             }
 
             // Add final chunk
             if (currentChunk.Length > 0)
             {
+                var contentType = DetectContentType(currentTitle, currentChunk.ToString());
                 var completeChunk = BuildComprehensiveChunk(
-                    currentSectionId, currentTitle, currentChunk.ToString(), "");
+                    currentSectionId, currentTitle, currentChunk.ToString(), contentType);
                 chunks.Add((completeChunk, sourceFile, currentSectionId, currentTitle));
             }
 
-            _logger.LogInformation($"📄 Created {chunks.Count} enhanced chunks from {sourceFile}");
-
-            // Log all sections found
-            var allSections = chunks.Where(c => !string.IsNullOrEmpty(c.SectionId))
-                .Select(c => c.SectionId).Distinct().ToList();
-            _logger.LogInformation($"🎯 All sections found: {string.Join(", ", allSections)}");
-
+            _logger.LogInformation($"Created {chunks.Count} chunks from {Path.GetFileName(sourceFile)}");
             return chunks;
         }
 
-        public string BuildComprehensiveChunk(string sectionId, string title, string content, string pendingContent)
+        private bool IsListItem(string line, string previousLine)
+        {
+            var trimmed = line.Trim();
+
+            // Pattern: "1", "2", "3" or "1.", "2.", "3." at start
+            var match = Regex.Match(trimmed, @"^(\d+)[.\)]?\s+(.+)$");
+            if (!match.Success)
+                return false;
+
+            var number = int.Parse(match.Groups[1].Value);
+            var restOfLine = match.Groups[2].Value;
+
+            // If previous line was also numbered, this is likely a list
+            if (!string.IsNullOrEmpty(previousLine))
+            {
+                var prevMatch = Regex.Match(previousLine.Trim(), @"^(\d+)[.\)]?\s+");
+                if (prevMatch.Success)
+                {
+                    var prevNumber = int.Parse(prevMatch.Groups[1].Value);
+                    // Sequential numbering = list
+                    if (number == prevNumber + 1)
+                        return true;
+                }
+            }
+
+            // Check if starts with common question/statement words (not section titles)
+            var startsWithVerb = Regex.IsMatch(restOfLine,
+                @"^(Is|Can|Will|Does|Do|Should|Must|Are|Have|Has|Would|Could|May|Might|Ensure|Verify|Check|Confirm)\b",
+                RegexOptions.IgnoreCase);
+
+            if (startsWithVerb)
+                return true;
+
+            // Check for common list patterns
+            var listPatterns = new[]
+            {
+                @"^All\s+", @"^Each\s+", @"^Every\s+", @"^Any\s+",
+                @"^No\s+", @"^Only\s+", @"^Never\s+", @"^Always\s+",
+                @".+\?$", // Ends with question mark
+            };
+
+            return listPatterns.Any(p => Regex.IsMatch(restOfLine, p, RegexOptions.IgnoreCase));
+        }
+
+        private string DetectContentType(string sectionTitle, string content)
+        {
+            var combined = $"{sectionTitle} {content}".ToLower();
+
+            // Checklist/Questions
+            if (Regex.IsMatch(combined, @"(questions?|checklist|test for|assess|verify|check if)"))
+            {
+                var hasNumbers = Regex.Matches(content, @"^\d+[.\)]?\s+", RegexOptions.Multiline).Count;
+                if (hasNumbers >= 3)
+                    return "CHECKLIST";
+            }
+
+            // Table
+            if (content.Contains("\t\t") || Regex.IsMatch(content, @"\|[^|]+\|[^|]+\|"))
+                return "TABLE";
+
+            // Bullet list
+            if (Regex.IsMatch(content, @"^[•●○▪▫■□◦‣⁃-]\s+", RegexOptions.Multiline))
+                return "BULLET_LIST";
+
+            // Numbered list
+            var numberedItems = Regex.Matches(content, @"^\d+[.\)]\s+", RegexOptions.Multiline).Count;
+            if (numberedItems >= 3)
+                return "NUMBERED_LIST";
+
+            return "TEXT";
+        }
+
+
+        private (bool found, string sectionId, string title) DetectSectionHeader(string line)
+        {
+            foreach (var regex in CompiledSectionPatterns)
+            {
+                var match = regex.Match(line);
+                if (match.Success)
+                {
+                    string sectionId = match.Groups[1].Value;
+                    string title = match.Groups.Count > 2 ? match.Groups[2].Value.Trim() : "";
+
+                    // Determine section type
+                    if (line.Contains("Section", StringComparison.OrdinalIgnoreCase))
+                        return (true, $"Section {sectionId}", title);
+                    else if (line.Contains("Chapter", StringComparison.OrdinalIgnoreCase))
+                        return (true, $"Chapter {sectionId}", title);
+                    else if (line.Contains("Questions", StringComparison.OrdinalIgnoreCase))
+                        return (true, $"Questions: {sectionId}", title);
+                    else if (line.Contains("Checklist", StringComparison.OrdinalIgnoreCase))
+                        return (true, $"Checklist: {sectionId}", title);
+                    else if (Regex.IsMatch(line, @"^[A-Z][A-Z\s]{10,}$"))
+                        return (true, "Special Section", line.Trim());
+                    else
+                        return (true, sectionId, title);
+                }
+            }
+
+            return (false, "", "");
+        }
+
+        private bool ShouldSplitChunk(StringBuilder currentChunk, string nextLine, int totalTokens, int maxTokens)
+        {
+            if (totalTokens < maxTokens * 0.8)
+                return false;
+
+            if (totalTokens > maxTokens)
+            {
+                var chunkText = currentChunk.ToString();
+                var lastLines = chunkText.Split('\n').TakeLast(3).ToArray();
+
+                if (lastLines.Any(string.IsNullOrWhiteSpace))
+                    return true;
+
+                if (lastLines.Length > 0 && lastLines[^1].TrimEnd().EndsWith('.'))
+                    return true;
+
+                return totalTokens > maxTokens * 1.2;
+            }
+
+            return false;
+        }
+
+        public string BuildComprehensiveChunk(
+             string sectionId,
+             string title,
+             string content,
+             string contentType = "TEXT")
         {
             var chunkBuilder = new StringBuilder();
 
-            // Detect document type from content
             string documentType = DetectDocumentType(sectionId, title, content);
 
-            // Add comprehensive header
+            // Header with content type
             chunkBuilder.AppendLine($"DOCUMENT SECTION: {sectionId}");
             chunkBuilder.AppendLine($"SECTION TITLE: {title}");
             chunkBuilder.AppendLine($"DOCUMENT TYPE: {documentType}");
-            chunkBuilder.AppendLine("===== CONTENT =====");
+            chunkBuilder.AppendLine($"CONTENT TYPE: {contentType}");
 
-            // Add any pending content from previous processing
-            if (!string.IsNullOrEmpty(pendingContent))
+            if (contentType == "CHECKLIST" || contentType == "NUMBERED_LIST")
             {
-                chunkBuilder.AppendLine(pendingContent);
+                var itemCount = Regex.Matches(content, @"^\d+[.\)]?\s+", RegexOptions.Multiline).Count;
+                chunkBuilder.AppendLine($"LIST ITEMS: {itemCount}");
             }
 
-            // Add main content
+            chunkBuilder.AppendLine("===== CONTENT =====");
             chunkBuilder.AppendLine(content);
 
-            // Add searchable keywords - ENHANCED
             chunkBuilder.AppendLine("===== KEYWORDS =====");
-            var keywords = GenerateSearchableKeywords(sectionId, title, content);
-            chunkBuilder.AppendLine(string.Join(", ", keywords));
+            var keywords = GenerateSearchableKeywords(sectionId, title, content, contentType);
 
-            // Add document type specific keywords
-            chunkBuilder.AppendLine("===== DOCUMENT_TYPE_KEYWORDS =====");
-            var typeKeywords = GetDocumentTypeKeywords(documentType);
-            chunkBuilder.AppendLine(string.Join(", ", typeKeywords));
+            // Enhanced keywords based on content type
+            chunkBuilder.AppendLine("===== KEYWORDS =====");
+            var policyKeywords = _policyDetector.GetPolicyKeywords(documentType);
+            keywords.AddRange(policyKeywords.Take(10)); // Add top 10 policy keywords
+
+            chunkBuilder.AppendLine(string.Join(", ", keywords.Distinct()));
 
             return chunkBuilder.ToString();
         }
 
-        public List<string> GenerateSearchableKeywords(string sectionId, string title, string content)
+        private List<string> GenerateSearchableKeywords(
+            string sectionId,
+            string title,
+            string content,
+            string contentType)
         {
             var keywords = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            // Clean inputs first to remove system artifacts
-            sectionId = CleanTextForKeywords(sectionId ?? "");
-            title = CleanTextForKeywords(title ?? "");
-            content = CleanTextForKeywords(content ?? "");
-
-            // Extract keywords from section ID
+            // Section keywords
             if (!string.IsNullOrEmpty(sectionId))
             {
                 keywords.Add(sectionId.ToLower());
-
-                // Add section number variations
-                var sectionNumber = ExtractSectionNumber(sectionId);
-                if (!string.IsNullOrEmpty(sectionNumber))
+                var sectionNum = Regex.Match(sectionId, @"\d+(?:\.\d+)*").Value;
+                if (!string.IsNullOrEmpty(sectionNum))
                 {
-                    keywords.Add($"section {sectionNumber}");
-                    keywords.Add($"section{sectionNumber}");
-                    keywords.Add(sectionNumber);
-                }
-
-                // Handle special section types
-                if (sectionId.ToLower().Contains("annexure") ||
-                    sectionId.ToLower().Contains("appendix") ||
-                    sectionId.ToLower().Contains("annex"))
-                {
-                    keywords.Add("annexure");
-                    keywords.Add("appendix");
-                    keywords.Add("attachment");
-                    keywords.Add("supplement");
-                }
-
-                if (sectionId.ToLower().Contains("schedule"))
-                {
-                    keywords.Add("schedule");
-                    keywords.Add("table");
-                    keywords.Add("list");
+                    keywords.Add($"section {sectionNum}");
                 }
             }
 
-            // Extract keywords from title - CLEANED
+            // Title keywords
             if (!string.IsNullOrEmpty(title))
             {
-                var titleWords = Regex.Split(title, @"[\s\-_/\\,;:()]+")
-                    .Where(w => !string.IsNullOrWhiteSpace(w) && w.Length > 2 && IsValidKeyword(w))
-                    .Select(w => w.Trim().ToLower());
-
-                foreach (var word in titleWords)
-                {
-                    keywords.Add(word);
-                }
-
-                // Add important phrases from title
-                var titlePhrases = ExtractImportantPhrases(title);
-                foreach (var phrase in titlePhrases)
-                {
-                    keywords.Add(phrase.ToLower());
-                }
+                var titleWords = title.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                    .Where(w => w.Length > 2 && !IsStopWord(w));
+                keywords.UnionWith(titleWords.Select(w => w.ToLower()));
             }
 
-            // Extract comprehensive terms from content - CLEANED
-            var contentKeywords = ExtractComprehensiveTerms(content)
-                .Where(k => IsValidKeyword(k) && !IsSystemArtifact(k))
-                .Select(k => k.ToLower());
-
-            foreach (var keyword in contentKeywords)
+            // Content-type specific keywords
+            switch (contentType)
             {
-                keywords.Add(keyword);
+                case "CHECKLIST":
+                    keywords.Add("checklist");
+                    keywords.Add("questions");
+                    keywords.Add("test");
+                    keywords.Add("assessment");
+                    keywords.Add("verification");
+                    keywords.Add("self-check");
+                    break;
+
+                case "NUMBERED_LIST":
+                    keywords.Add("list");
+                    keywords.Add("items");
+                    keywords.Add("points");
+                    break;
+
+                case "TABLE":
+                    keywords.Add("table");
+                    keywords.Add("data");
+                    keywords.Add("comparison");
+                    break;
+
+                case "BULLET_LIST":
+                    keywords.Add("list");
+                    keywords.Add("points");
+                    keywords.Add("items");
+                    break;
             }
 
-            // Add contextual keywords based on document structure
-            if (content.ToLower().Contains("policy"))
-                keywords.Add("policy document");
-            if (content.ToLower().Contains("procedure"))
-                keywords.Add("procedure document");
+            // Extract important terms from content
+            var contentKeywords = ExtractImportantTerms(content);
+            keywords.UnionWith(contentKeywords.Select(k => k.ToLower()));
 
-            // Final cleanup and return
-            var cleanedKeywords = keywords
-                .Where(k => IsValidKeyword(k) && !IsSystemArtifact(k))
+            return keywords
+                .Where(k => k.Length >= 2)
+                .Where(k => !IsStopWord(k))
+                .Take(50)
                 .ToList();
-
-            return cleanedKeywords;
         }
+        private bool IsStopWord(string word)
+        {
+            var stopWords = new[] {"the", "and", "or", "but", "for", "with", "from", "this", "that",
+            "document", "section", "content", "file", "page", "text"};
+            return stopWords.Contains(word.ToLower());
+        }
+
+        private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "the", "and", "or", "but", "for", "with", "from", "this", "that",
+            "document", "section", "content", "file", "page", "text"
+        };
+        private void ExtractKeywordsWithScore(string text, Dictionary<string, int> scores, int weight)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return;
+
+            var words = Regex.Split(text, @"[\s\-_/\\,;:()]+")
+                .Where(w => !string.IsNullOrWhiteSpace(w) && w.Length > 2)
+                .Where(w => !StopWords.Contains(w));
+
+            foreach (var word in words)
+            {
+                var cleanWord = word.Trim().ToLower();
+                if (IsValidKeyword(cleanWord))
+                {
+                    scores[cleanWord] = scores.GetValueOrDefault(cleanWord, 0) + weight;
+                }
+            }
+        }
+
         private string CleanTextForKeywords(string input)
         {
             if (string.IsNullOrEmpty(input)) return "";
 
-            // Remove file extensions and system artifacts
-            input = Regex.Replace(input, @"\.(?:pdf|doc|docx|txt|xlsx?)$", "", RegexOptions.IgnoreCase);
+            // COMPREHENSIVE cleaning in one pass
+            var cleaningPatterns = new (string pattern, string replacement)[]
+            {
+                // File extensions
+                (@"\.(pdf|doc|docx|txt|xlsx?)$", ""),
+                // GUIDs
+                (@"[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}", ""),
+                // Your specific file pattern
+                (@"_[A-F0-9]{8}_\d+_[A-F0-9]{8}", ""),
+                // Revision numbers
+                (@"_Rev\d+_V\d+", ""),
+                (@"\(\d+\)_", ""),
+                // System namespaces
+                (@"System\.Collections\.Generic\.\w+", ""),
+                (@"System\.\w+", ""),
+                // Long hex strings
+                (@"\b[A-Fa-f0-9]{16,}\b", "")
+            };
 
-            // Remove file paths and GUIDs
-            input = Regex.Replace(input, @"[A-Fa-f0-9]{8}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{4}-?[A-Fa-f0-9]{12}", "");
-            input = Regex.Replace(input, @"_[A-F0-9]{8}_\d+_[A-F0-9]{8}", ""); // Your specific pattern
+            foreach (var (pattern, replacement) in cleaningPatterns)
+            {
+                input = Regex.Replace(input, pattern, replacement, RegexOptions.IgnoreCase);
+            }
 
-            // Remove revision numbers and version info
-            input = Regex.Replace(input, @"_Rev\d+_V\d+", "", RegexOptions.IgnoreCase);
-            input = Regex.Replace(input, @"\(\d+\)_", "");
-
-            // Clean whitespace
-            input = Regex.Replace(input, @"\s+", " ").Trim();
-
-            return input;
+            // Normalize whitespace
+            return Regex.Replace(input, @"\s+", " ").Trim();
         }
 
         private string ExtractSectionNumber(string sectionId)
@@ -392,31 +502,43 @@ namespace MEAI_GPT_API.Service.Models
 
         private bool IsValidKeyword(string keyword)
         {
-            if (string.IsNullOrWhiteSpace(keyword) || keyword.Length < 2) return false;
+            if (string.IsNullOrWhiteSpace(keyword) || keyword.Length < 2)
+                return false;
 
-            // Filter out common stop words and system artifacts
+            // COMPREHENSIVE filtering
             var invalidPatterns = new[]
             {
-                @"^System\.Collections\.Generic\.List",
-                @"^System\.",
-                @"^\d+$", // Pure numbers only
-                @"^[A-Fa-f0-9]{8,}$", // Long hex strings (GUIDs)
-                @"^\W+$" // Only special characters
+                @"System\.",                              // .NET namespaces
+                @"_[A-F0-9]{8}_\d+_[A-F0-9]{8}",         // File patterns
+                @"[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}",        // GUIDs
+                @"_Rev\d+_V\d+",                         // Versions
+                @"^\d+$",                                 // Pure numbers
+                @"^[A-Fa-f0-9]{8,}$",                    // Hex strings
+                @"^\W+$",                                 // Special chars only
+                @"\.(pdf|doc|docx|txt|xlsx?)$",          // Extensions
             };
 
-            return !invalidPatterns.Any(pattern => Regex.IsMatch(keyword, pattern));
+            if (invalidPatterns.Any(p => Regex.IsMatch(keyword, p, RegexOptions.IgnoreCase)))
+                return false;
+
+            // Check against stop words
+            if (StopWords.Contains(keyword))
+                return false;
+
+            // Must contain at least one letter
+            return keyword.Any(char.IsLetter);
         }
 
         private bool IsSystemArtifact(string text)
         {
-            var systemArtifacts = new[]
+            var artifacts = new[]
             {
-                "System.Collections.Generic.List",
-                "System.Single",
-                ".pdf", ".doc", ".docx", ".txt"
+                "System.Collections", "System.Single", "System.String",
+                ".pdf", ".doc", ".docx", ".txt", ".xlsx",
+                "List`1", "Int32", "Boolean", "Single"
             };
 
-            return systemArtifacts.Any(artifact => text.Contains(artifact, StringComparison.OrdinalIgnoreCase));
+            return artifacts.Any(a => text.Contains(a, StringComparison.OrdinalIgnoreCase));
         }
 
         private List<string> ExtractImportantPhrases(string text)
@@ -464,107 +586,28 @@ namespace MEAI_GPT_API.Service.Models
 
         private string DetectDocumentType(string sectionId, string title, string content)
         {
-            var combinedText = $"{sectionId} {title} {content}".ToLower();
-
-            // ENHANCED: Check for ISMS subtypes FIRST (more specific)
-            if (combinedText.Contains("isms") || combinedText.Contains("information security"))
-            {
-                // Check for technical indicators
-                var technicalIndicators = new[]
-                {
-                    "technical", "implementation", "configuration", "network", "firewall",
-                    "encryption", "database", "server", "application", "system",
-                    "infrastructure", "monitoring", "logging", "patch", "vulnerability",
-                    "penetration", "technical controls", "security controls", "backup",
-                    "recovery", "authentication", "authorization", "technical implementation"
-                };
-
-                // Check for general/governance indicators
-                var generalIndicators = new[]
-                {
-                    "general", "governance", "framework", "strategy", "awareness",
-                    "training", "organization", "roles", "responsibilities", "committee",
-                    "management", "overview", "introduction", "scope", "objectives",
-                    "policy statement", "governance structure", "organizational"
-                };
-
-                bool hasTechnical = technicalIndicators.Any(indicator => combinedText.Contains(indicator));
-                bool hasGeneral = generalIndicators.Any(indicator => combinedText.Contains(indicator));
-
-                // Determine ISMS subtype
-                if (hasTechnical && !hasGeneral)
-                    return "ISMS Technical Policy";
-                else if (hasGeneral && !hasTechnical)
-                    return "ISMS General Policy";
-                else if (hasTechnical && hasGeneral)
-                    return "ISMS Comprehensive Policy"; // Contains both
-                else
-                    return "ISMS Policy"; // Default ISMS
-            }
-
-            // Check for other document types
-            if (combinedText.Contains("human resource") || combinedText.Contains("hr policy"))
-                return "HR Policy";
-            if (combinedText.Contains("finance") || combinedText.Contains("accounting"))
-                return "Finance Policy";
-            if (combinedText.Contains("operations") || combinedText.Contains("operational"))
-                return "Operations Policy";
-            if (combinedText.Contains("legal") || combinedText.Contains("compliance"))
-                return "Legal Policy";
-            if (combinedText.Contains("safety") || combinedText.Contains("health"))
-                return "Safety Policy";
-            if (combinedText.Contains("quality"))
-                return "Quality Policy";
-            if (combinedText.Contains("procurement") || combinedText.Contains("purchase"))
-                return "Procurement Policy";
-
-            // Default fallback
-            return "Policy Document";
+            return _policyDetector.DetectDocumentType(sectionId, title, content);
         }
 
         private List<string> GetDocumentTypeKeywords(string documentType)
         {
             var keywords = new List<string>();
 
-            // Handle ISMS subtypes
             if (documentType.Contains("ISMS"))
             {
-                // Common ISMS keywords
                 keywords.AddRange(_documentTypePatterns["ISMS_GENERAL"].Select(k => k.ToLower()));
 
                 if (documentType.Contains("Technical"))
-                {
-                    // Add technical-specific keywords
                     keywords.AddRange(_documentTypePatterns["ISMS_TECHNICAL"].Select(k => k.ToLower()));
-                    keywords.Add("isms technical");
-                    keywords.Add("technical policy");
-                    keywords.Add("technical implementation");
-                    keywords.Add("technical controls");
-                }
-                else if (documentType.Contains("General"))
-                {
-                    // Add general-specific keywords  
-                    keywords.Add("isms general");
-                    keywords.Add("general policy");
-                    keywords.Add("governance");
-                    keywords.Add("framework");
-                    keywords.Add("strategy");
-                }
 
-                // Always add base ISMS keywords
-                keywords.Add("isms");
-                keywords.Add("information security management system");
                 return keywords.Distinct().ToList();
             }
 
-            // Handle other document types
             var typeKey = documentType.ToUpper().Split(' ')[0];
             if (_documentTypePatterns.ContainsKey(typeKey))
-            {
                 return _documentTypePatterns[typeKey].Select(k => k.ToLower()).ToList();
-            }
 
-            return new List<string> { "policy", "document", "procedure" };
+            return new List<string> { "policy", "document" };
         }
 
         public List<string> GenerateSearchKeywords(string sectionId, string title, string documentType, string content)
