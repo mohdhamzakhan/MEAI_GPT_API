@@ -16,6 +16,7 @@ namespace MEAI_GPT_API.Controller
 {
     [Route("api/[controller]")]
     [ApiController]
+
     public class RagController : ControllerBase
     {
         private readonly IRAGService _ragService;
@@ -24,6 +25,7 @@ namespace MEAI_GPT_API.Controller
         private readonly CodingDetectionService _codingDetection;
         private readonly DynamicRAGInitializationService _initService;
         private readonly IConversationStorageService _conversationStorage;
+        private readonly TranslationService _translationService;
 
 
         [ActivatorUtilitiesConstructor]
@@ -33,6 +35,7 @@ namespace MEAI_GPT_API.Controller
         CodingDetectionService codingDetection,
         DynamicRAGInitializationService initService,
          IConversationStorageService conversationStorage,
+         TranslationService translationService,
         ILogger<RagController> logger)
         {
             _ragService = ragService;
@@ -41,6 +44,7 @@ namespace MEAI_GPT_API.Controller
             _codingDetection = codingDetection;
             _initService = initService;
             _conversationStorage = conversationStorage;
+            _translationService = translationService;
         }
         [HttpPost("query")]
         public async Task<IActionResult> Query([FromBody] QueryRequest request, [FromServices] IBackgroundTaskQueue taskQueue)
@@ -123,30 +127,125 @@ namespace MEAI_GPT_API.Controller
         [HttpPost("query-stream")]
         public async Task QueryStream([FromBody] QueryRequest request)
         {
-            if (string.IsNullOrWhiteSpace(request.Question))
+            try
             {
-                Response.StatusCode = StatusCodes.Status400BadRequest;
-                await Response.WriteAsync("Question cannot be empty");
-                return;
-            }
+                // Validate request
+                if (string.IsNullOrWhiteSpace(request.Question))
+                {
+                    _logger.LogWarning("Empty question received");
+                    Response.StatusCode = StatusCodes.Status400BadRequest;
+                    await Response.WriteAsync("Question cannot be empty");
+                    return;
+                }
 
+                _logger.LogInformation($"📨 Stream query received: Q='{request.Question.Substring(0, Math.Min(50, request.Question.Length))}', Plant={request.Plant}, Session={request.sessionId}, User={request.UserId}");
+
+                Response.Headers["Content-Type"] = "text/event-stream; charset=utf-8";
+                Response.Headers["Cache-Control"] = "no-cache";
+                Response.Headers["Connection"] = "keep-alive";
+                Response.Headers["X-Accel-Buffering"] = "no";
+
+                var ct = HttpContext.RequestAborted;
+
+                await foreach (var chunk in ProcessQueryStreamAsync(request).WithCancellation(ct))
+                {
+                    if (ct.IsCancellationRequested)
+                    {
+                        _logger.LogInformation("Stream cancelled by client");
+                        break;
+                    }
+
+                    await WriteSSEData(chunk, ct);
+                }
+
+                _logger.LogInformation("✅ Stream completed successfully");
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Stream cancelled by client");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ CRITICAL ERROR in QueryStream - Type: {ExceptionType}, Message: {Message}, StackTrace: {StackTrace}",
+                    ex.GetType().Name,
+                    ex.Message,
+                    ex.StackTrace);
+
+                try
+                {
+                    Response.StatusCode = StatusCodes.Status500InternalServerError;
+                    await Response.WriteAsync($"data: {JsonSerializer.Serialize(new { type = "error", message = ex.Message })}\n\n");
+                    await Response.Body.FlushAsync();
+                }
+                catch (Exception writeEx)
+                {
+                    _logger.LogError(writeEx, "Failed to write error response");
+                }
+            }
+        }
+
+        private async Task WriteSSEData(string data, CancellationToken ct)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(data))
+                {
+                    _logger.LogWarning("Attempted to write empty SSE data");
+                    return;
+                }
+
+                await Response.WriteAsync($"data: {data}\n\n", ct);
+                await Response.Body.FlushAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to write SSE data: {Data}", data.Substring(0, Math.Min(100, data.Length)));
+                throw;
+            }
+        }
+
+        [HttpPost("translate")]
+        public async Task<ActionResult<TranslationResult>> Translate([FromBody] TranslationRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.Text))
+                return BadRequest("Text cannot be empty");
+
+            if (string.IsNullOrWhiteSpace(request.TargetLanguage))
+                return BadRequest("Target language is required");
+
+            var result = await _translationService.TranslateAsync(
+                request.Text,
+                request.TargetLanguage,
+                request.SourceLanguage
+            );
+
+            return Ok(result);
+        }
+
+        [HttpPost("translate-stream")]
+        public async Task TranslateStream([FromBody] TranslationRequest request)
+        {
             Response.Headers["Content-Type"] = "text/event-stream; charset=utf-8";
             Response.Headers["Cache-Control"] = "no-cache";
             Response.Headers["Connection"] = "keep-alive";
-            Response.Headers["X-Accel-Buffering"] = "no";
 
             var ct = HttpContext.RequestAborted;
 
-            // ✅ FIX: Pre-detect coding query (with error handling)
-            // var codingDetection = SafeDetectCoding(request.Question);
-
-            // ✅ Stream without wrapping the entire block in try-catch
-            await foreach (var chunk in ProcessQueryStreamAsync(request).WithCancellation(ct))
+            await foreach (var token in _translationService.TranslateStreamAsync(
+                request.Text,
+                request.TargetLanguage,
+                request.SourceLanguage).WithCancellation(ct))
             {
-                if (ct.IsCancellationRequested) break;
-
-                await WriteSSEData(chunk, ct);
+                await Response.WriteAsync($"data: {JsonSerializer.Serialize(new { type = "response", content = token })}\n\n", ct);
+                await Response.Body.FlushAsync(ct);
             }
+        }
+
+        public class TranslationRequest
+        {
+            public string Text { get; set; } = "";
+            public string TargetLanguage { get; set; } = "";
+            public string? SourceLanguage { get; set; }
         }
 
         // ✅ NEW: Safe helper methods
@@ -168,19 +267,6 @@ namespace MEAI_GPT_API.Controller
             }
         }
 
-        private async Task WriteSSEData(string data, CancellationToken ct)
-        {
-            try
-            {
-                await Response.WriteAsync($"data: {data}\n\n", ct);
-                await Response.Body.FlushAsync(ct);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to write SSE data");
-                // Don't throw - client may have disconnected
-            }
-        }
 
 
         // ✅ FIXED: Proper SSE format
@@ -621,7 +707,7 @@ namespace MEAI_GPT_API.Controller
                     Question = question,
                     Plant = plant,
                     GenerationModel = model,
-                    EmbeddingModel = "qwen3-embedding:8b",
+                    EmbeddingModel = "nomic-embed-text:v1.5",
                     MaxResults = 10,
                     meai_info = meaiInfo,
                     sessionId = sessionId

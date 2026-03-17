@@ -32,9 +32,9 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
     {
-        policy.AllowAnyOrigin()
-              .AllowAnyMethod()
-              .AllowAnyHeader();
+        policy.WithOrigins("https://10.235.20.49:8567")
+            .AllowAnyHeader()
+            .AllowAnyMethod();
     });
 });
 
@@ -119,7 +119,7 @@ builder.Services.AddOpenTelemetry()
 builder.Services.Configure<ChromaDbOptions>(
     builder.Configuration.GetSection("ChromaDB"));
 
-builder.Services.AddDbContext<ConversationDbContext>(options =>
+builder.Services.AddDbContextFactory<ConversationDbContext>(options =>
     options.UseSqlite("Data Source=conversations.db"));
 builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>();
 builder.Services.AddSingleton<ICacheManager, CacheManager>();
@@ -156,6 +156,7 @@ builder.Services.AddScoped<RerankerService>();
 builder.Services.AddSingleton<Bm25Service>();
 builder.Services.AddSingleton<CompliancePolicyDetector>();
 builder.Services.AddSingleton<QueryIntentAnalyzer>();
+builder.Services.AddScoped<TranslationService>();
 
 //For Agentic AI
 builder.Services.AddSingleton<AgentDecisionLogger>();
@@ -287,10 +288,9 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
     app.UseSwaggerUI();
 }
 
-app.UseCors("AllowAll");
-
 app.UseRouting();
 
+app.UseCors("AllowAll");
 
 app.UseAuthentication();
 app.UseAuthorization();

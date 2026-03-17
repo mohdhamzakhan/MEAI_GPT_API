@@ -66,7 +66,7 @@ namespace MEAI_GPT_API.Services.Agent.Tools
                 _logger.LogInformation($"🔍 PolicySearchTool: {strategy} search for plant {plant}");
 
                 // Get embedding model
-                var embeddingModel = await _modelManager.GetModelAsync("nomic-embed-text:latest");
+                var embeddingModel = await _modelManager.GetModelAsync("nomic-embed-text:v1.5");
                 if (embeddingModel == null)
                 {
                     throw new ToolExecutionException(Name, "Embedding model not available");

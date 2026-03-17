@@ -47,6 +47,28 @@ namespace MEAI_GPT_API.Services.Agent
         public long ExecutionTimeMs { get; set; }
     }
 
+    //public class AgentContext
+    //{
+    //    public string SessionId { get; set; } = "";
+    //    public string UserId { get; set; } = "";
+    //    public string Plant { get; set; } = "";
+    //    public List<ConversationTurn> History { get; set; } = new();
+    //    public List<string> NamedEntities { get; set; } = new();
+    //    public Dictionary<string, object> State { get; set; } = new();
+    //    public DateTime LastAccessed { get; set; } = DateTime.Now;
+    //    public string LastTopicAnchor { get; set; } = "";
+    //}
+
+    // Add this new class to track conversation entities
+    public class ConversationEntity
+    {
+        public string Name { get; set; } = "";
+        public DateTime LastMentioned { get; set; }
+        public string? LastQuestion { get; set; }
+        public string? LastAnswer { get; set; }
+    }
+
+    // Update AgentContext class to track multiple entities
     public class AgentContext
     {
         public string SessionId { get; set; } = "";
@@ -54,7 +76,11 @@ namespace MEAI_GPT_API.Services.Agent
         public string Plant { get; set; } = "";
         public List<ConversationTurn> History { get; set; } = new();
         public List<string> NamedEntities { get; set; } = new();
+        public string? LastTopicAnchor { get; set; }
+        public DateTime LastAccessed { get; set; }
         public Dictionary<string, object> State { get; set; } = new();
-        public DateTime LastAccessed { get; set; } = DateTime.Now;
+
+        // ✅ NEW: Track entities discussed with timestamps
+        public List<ConversationEntity> TrackedEntities { get; set; } = new();
     }
 }

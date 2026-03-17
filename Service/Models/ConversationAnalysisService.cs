@@ -1,4 +1,5 @@
-﻿using static MEAI_GPT_API.Models.Conversation;
+﻿using System.Text.RegularExpressions;
+using static MEAI_GPT_API.Models.Conversation;
 
 namespace MEAI_GPT_API.Service.Models
 {
@@ -56,17 +57,93 @@ namespace MEAI_GPT_API.Service.Models
             }
 
             return topics.ToList();
-        }      
+        }
         public string ResolvePronouns(string question, ConversationContext context)
         {
-            if (context.NamedEntities.Count == 0) return question;
+            if (context.History.Count == 0)
+                return question;
 
-            string lastEntity = context.NamedEntities.Last();
+            var lowerQuestion = question.ToLower().Trim();
 
-            question = question.Replace("her", lastEntity, StringComparison.OrdinalIgnoreCase);
-            question = question.Replace("his", lastEntity, StringComparison.OrdinalIgnoreCase);
-            question = question.Replace("their", lastEntity, StringComparison.OrdinalIgnoreCase);
-            return question;
+            // ✅ Detect if question contains pronouns that need resolution
+            var pronouns = new[] { "he", "she", "it", "they", "him", "her", "his", "their", "them" };
+
+            if (!pronouns.Any(p => lowerQuestion.Contains($" {p} ") || lowerQuestion.StartsWith($"{p} ")))
+                return question; // No pronouns to resolve
+
+            // Get the last conversation turn
+            var lastTurn = context.History.Last();
+
+            _logger.LogInformation($"🔍 Resolving pronouns in: '{question}'");
+            _logger.LogInformation($"📌 Previous context: '{lastTurn.Question}' -> '{lastTurn.Answer.Substring(0, Math.Min(50, lastTurn.Answer.Length))}'");
+
+            // ✅ Extract main subject from previous answer
+            var previousSubject = ExtractMainSubject(lastTurn);
+
+            if (string.IsNullOrEmpty(previousSubject))
+            {
+                _logger.LogWarning("⚠️ Could not extract subject from previous conversation");
+                return question;
+            }
+
+            _logger.LogInformation($"✅ Identified subject: {previousSubject}");
+
+            // ✅ Build context-aware question
+            var resolvedQuestion = $"Regarding {previousSubject}: {question}";
+
+            _logger.LogInformation($"✅ Resolved to: '{resolvedQuestion}'");
+
+            return resolvedQuestion;
+        }
+
+        private string ExtractMainSubject(ConversationTurn turn)
+        {
+            try
+            {
+                // Extract from answer first (more reliable than question)
+                var answer = turn.Answer;
+
+                // Common patterns: "X is...", "X was...", "X are..."
+                var patterns = new[]
+                {
+            @"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:is|was|are|were)",  // "Narendra Modi is..."
+            @"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),",                        // "Narendra Modi, ..."
+            @"(?:Yes|No),?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)",          // "Yes, Narendra Modi..."
+        };
+
+                foreach (var pattern in patterns)
+                {
+                    var match = Regex.Match(answer, pattern);
+                    if (match.Success && match.Groups.Count > 1)
+                    {
+                        return match.Groups[1].Value.Trim();
+                    }
+                }
+
+                // Fallback: Extract from question
+                if (turn.Question.ToLower().StartsWith("who is"))
+                {
+                    // "who is the prime minister" -> extract from answer
+                    var firstSentence = answer.Split('.')[0];
+                    var words = firstSentence.Split(' ');
+
+                    // Find proper noun (capitalized words)
+                    for (int i = 0; i < words.Length - 1; i++)
+                    {
+                        if (char.IsUpper(words[i][0]) && char.IsUpper(words[i + 1][0]))
+                        {
+                            return $"{words[i]} {words[i + 1]}";
+                        }
+                    }
+                }
+
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to extract main subject");
+                return null;
+            }
         }
         public string BuildContextualQuery(string currentQuestion, List<ConversationTurn> history)
         {

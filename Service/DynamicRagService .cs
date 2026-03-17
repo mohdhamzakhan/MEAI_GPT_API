@@ -1,4 +1,5 @@
 ﻿// Services/DynamicRagService.cs
+using DocumentFormat.OpenXml.Office.SpreadSheetML.Y2023.MsForms;
 using DocumentFormat.OpenXml.Office2013.Excel;
 using DocumentFormat.OpenXml.Spreadsheet;
 using MEAI_GPT_API.Models;
@@ -8,6 +9,7 @@ using MEAI_GPT_API.Service.Models;
 using MEAI_GPT_API.Services.Agent;
 using MEAI_GPT_API.Services.Agent.Tools;
 using MEAIGPTAPI.Services;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualBasic;
 using System.Collections.Concurrent;
@@ -19,6 +21,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using System.Threading;
 using static MEAI_GPT_API.Models.Conversation;
 using static MEAI_GPT_API.Services.DynamicRagService;
 using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
@@ -69,7 +72,7 @@ namespace MEAI_GPT_API.Services
         private readonly SystemPromptBuilder _systemPromptBuilder;
         private readonly OracleEBSQuery _oracleEBSQuery;
         private readonly RerankerService _rerankerService;
-        private readonly Bm25Service _bm25Service =new();
+        private readonly Bm25Service _bm25Service = new();
         // NEW: Single embedding cache with better management
         //private readonly ConcurrentDictionary<string, (List<float> Embedding, DateTime Cached)> _optimizedEmbeddingCache = new();
         //private readonly SemaphoreSlim _globalEmbeddingSemaphore = new(3, 3); // Allow 3 concurrent embedding requests
@@ -799,7 +802,7 @@ These are the fixed organizational details for {plant} plant.";
 
                 // 3️⃣ Fast path: non-MEAI queries skip embeddings entirely
                 if (!meaiInfo)
-                    return await ProcessNonMeaiQueryFast(question, sessionId, generationModel,actualUserId, stopwatch);
+                    return await ProcessNonMeaiQueryFast(question, sessionId, generationModel, actualUserId, stopwatch);
 
                 // Load models
                 var genModel = await _modelManager.GetModelAsync(generationModel!);
@@ -1048,14 +1051,132 @@ These are the fixed organizational details for {plant} plant.";
         }
 
         private async Task<int> SaveConversationToDatabaseFast(
-    string sessionId, string question, string answer, List<RelevantChunk> chunks,
-    ModelConfiguration generationModel, ModelConfiguration embeddingModel,
-    double confidence, long processingTimeMs, bool isFromCorrection,
-    int? parentId, string plant,
-    List<float> questionEmbedding, List<float> answerEmbedding, List<string> namedEntities)
+            string sessionId,
+            string question,
+            string answer,
+            List<RelevantChunk> chunks,
+            ModelConfiguration generationModel,
+            ModelConfiguration embeddingModel,
+            double confidence,
+            long processingTimeMs,
+            bool isFromCorrection,
+            int? parentId,
+            string plant,
+            List<float> questionEmbedding,
+            List<float> answerEmbedding,
+            List<string> namedEntities)
         {
             try
             {
+                // Validate inputs
+                if (string.IsNullOrWhiteSpace(sessionId))
+                {
+                    _logger.LogError("Cannot save conversation: sessionId is null or empty");
+                    return 0;
+                }
+
+                if (string.IsNullOrWhiteSpace(question))
+                {
+                    _logger.LogError("Cannot save conversation: question is null or empty");
+                    return 0;
+                }
+
+                if (string.IsNullOrWhiteSpace(answer))
+                {
+                    _logger.LogError("Cannot save conversation: answer is null or empty");
+                    return 0;
+                }
+
+                _logger.LogInformation($"💾 Saving conversation to database: Session={sessionId}, Q={question.Substring(0, Math.Min(50, question.Length))}...");
+
+                // Determine topic tag
+                var topicTag = _conversationAnalysis.DetermineTopicTag(question, answer);
+
+                // Create conversation entry
+                var entry = new ConversationEntry
+                {
+                    SessionId = sessionId,
+                    Question = question,
+                    Answer = answer,
+                    CreatedAt = DateTime.Now,
+                    QuestionEmbedding = questionEmbedding ?? new List<float>(),
+                    AnswerEmbedding = answerEmbedding ?? new List<float>(),
+                    NamedEntities = namedEntities ?? new List<string>(),
+                    WasAppreciated = false,
+                    TopicTag = topicTag ?? "general",
+                    FollowUpToId = parentId,
+                    GenerationModel = generationModel?.Name ?? "unknown",
+                    EmbeddingModel = embeddingModel?.Name ?? "unknown",
+                    Confidence = confidence,
+                    ProcessingTimeMs = processingTimeMs,
+                    RelevantChunksCount = chunks?.Count ?? 0,
+                    Sources = chunks?.Select(c => c.Source).Distinct().ToList() ?? new List<string>(),
+                    IsFromCorrection = isFromCorrection,
+                    Plant = plant ?? "unknown"
+                };
+
+                // Save to database
+                await _conversationStorage.SaveConversationAsync(entry);
+
+                _logger.LogInformation($"✅ Saved conversation {entry.Id} to database - Topic: {topicTag}, Confidence: {confidence:F2}, Chunks: {entry.RelevantChunksCount}");
+
+                return entry.Id;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Failed to save conversation to database - Session: {SessionId}, Question: {Question}",
+                    sessionId,
+                    question?.Substring(0, Math.Min(50, question?.Length ?? 0)));
+                return 0;
+            }
+        }
+
+        private async Task<int> SaveNonMeaiConversationToDatabase(
+     string sessionId,
+     string question,
+     string answer,
+     ModelConfiguration generationModel,
+     double confidence,
+     long processingTimeMs,
+     bool isFromCorrection,
+     string plant)
+        {
+            try
+            {
+                // Validate inputs
+                if (string.IsNullOrWhiteSpace(sessionId))
+                {
+                    _logger.LogError("❌ Cannot save: sessionId is null or empty");
+                    return 0;
+                }
+
+                if (string.IsNullOrWhiteSpace(question))
+                {
+                    _logger.LogError("❌ Cannot save: question is null or empty");
+                    return 0;
+                }
+
+                if (string.IsNullOrWhiteSpace(answer))
+                {
+                    _logger.LogError("❌ Cannot save: answer is null or empty");
+                    return 0;
+                }
+
+                _logger.LogInformation($"💾 Saving non-MEAI: Session={sessionId}, Q={question.Substring(0, Math.Min(50, question.Length))}");
+
+                // Extract named entities
+                List<string> namedEntities = new List<string>();
+                try
+                {
+                    namedEntities = await _entityExtraction.ExtractEntitiesAsync(answer);
+                    _logger.LogInformation($"📌 Extracted {namedEntities.Count} entities: {string.Join(", ", namedEntities.Take(5))}");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to extract entities (non-critical)");
+                }
+
+                // Determine topic
                 var topicTag = _conversationAnalysis.DetermineTopicTag(question, answer);
 
                 var entry = new ConversationEntry
@@ -1064,52 +1185,69 @@ These are the fixed organizational details for {plant} plant.";
                     Question = question,
                     Answer = answer,
                     CreatedAt = DateTime.Now,
-                    QuestionEmbedding = questionEmbedding,
-                    AnswerEmbedding = answerEmbedding,
+                    QuestionEmbedding = new List<float>(),
+                    AnswerEmbedding = new List<float>(),
                     NamedEntities = namedEntities,
                     WasAppreciated = false,
-                    TopicTag = topicTag,
-                    FollowUpToId = parentId,
-                    GenerationModel = generationModel.Name,
-                    EmbeddingModel = embeddingModel.Name,
+                    TopicTag = topicTag ?? "general",
+                    FollowUpToId = null,
+                    GenerationModel = generationModel?.Name ?? "unknown",
+                    EmbeddingModel = "none",
                     Confidence = confidence,
                     ProcessingTimeMs = processingTimeMs,
-                    RelevantChunksCount = chunks.Count,
-                    Sources = chunks.Select(c => c.Source).Distinct().ToList(),
+                    RelevantChunksCount = 0,
+                    Sources = isFromCorrection
+                        ? new List<string> { "User Correction" }
+                        : new List<string> { "General Knowledge" },
                     IsFromCorrection = isFromCorrection,
-                    Plant = plant
+                    Plant = plant ?? "general"
                 };
 
+                // ✅ Save to database
                 await _conversationStorage.SaveConversationAsync(entry);
-                _logger.LogInformation($"💾 Saved conversation {entry.Id} to database");
+
+                _logger.LogInformation($"✅ Successfully saved conversation with ID: {entry.Id}, Topic: {topicTag}");
+
                 return entry.Id;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to save conversation to database");
+                _logger.LogError(ex, "❌ Failed to save non-MEAI conversation");
+                _logger.LogError($"   Session: {sessionId}");
+                _logger.LogError($"   Question: {question?.Substring(0, Math.Min(100, question?.Length ?? 0))}");
                 return 0;
             }
         }
 
         private Task UpdateConversationHistoryFast(
-    ConversationContext context, string question, string answer,
-    List<RelevantChunk> relevantChunks, List<string> namedEntities)
+    ConversationContext context,
+    string question,
+    string answer,
+    List<RelevantChunk> relevantChunks,
+    List<string> namedEntities)
         {
             try
             {
+                _logger.LogInformation($"📝 Updating conversation history for session {context.SessionId}");
+
                 var turn = new ConversationTurn
                 {
                     Question = question,
                     Answer = answer,
                     Timestamp = DateTime.Now,
-                    Sources = relevantChunks.Select(c => c.Source).Distinct().ToList()
+                    Sources = relevantChunks?.Select(c => c.Source).Distinct().ToList() ?? new List<string>()
                 };
 
                 context.History.Add(turn);
 
+                // Keep only last 10 turns
                 if (context.History.Count > 10)
+                {
                     context.History = context.History.TakeLast(10).ToList();
+                    _logger.LogDebug($"Trimmed history to last 10 turns");
+                }
 
+                // Extract and update topics
                 var currentTopics = _conversationAnalysis.ExtractKeyTopics(question);
                 if (currentTopics.Any())
                 {
@@ -1118,17 +1256,22 @@ These are the fixed organizational details for {plant} plant.";
                     if (isMainTopic)
                     {
                         context.LastTopicAnchor = question;
-                        _logger.LogDebug($"Updated topic anchor: {question}");
+                        _logger.LogDebug($"Updated topic anchor: {question.Substring(0, Math.Min(50, question.Length))}...");
                     }
                 }
 
                 context.LastAccessed = DateTime.Now;
 
-                foreach (var entity in namedEntities)
+                // Add named entities
+                foreach (var entity in namedEntities ?? new List<string>())
                 {
                     if (!context.NamedEntities.Contains(entity, StringComparer.OrdinalIgnoreCase))
+                    {
                         context.NamedEntities.Add(entity);
+                    }
                 }
+
+                _logger.LogInformation($"✅ History updated - Total turns: {context.History.Count}, Entities: {context.NamedEntities.Count}");
             }
             catch (Exception ex)
             {
@@ -1872,52 +2015,37 @@ These are the fixed organizational details for {plant} plant.";
         {
             try
             {
-                _logger.LogInformation("🚀 Processing NON-MEAI query (skipping embeddings but checking corrections)");
+                _logger.LogInformation("🚀 Processing NON-MEAI query (direct LLM path)");
 
-                // Get session (lightweight)
                 var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
                     sessionId ?? Guid.NewGuid().ToString(), userId);
 
                 var context = _conversation.GetOrCreateConversationContext(dbSession.SessionId);
 
-                // Handle history clear request
+                // Handle history clear
                 if (IsHistoryClearRequest(question))
                 {
                     return await HandleHistoryClearRequest(context, dbSession.SessionId);
                 }
 
-                // 🆕 CHECK FOR CORRECTIONS (even in non-MEAI mode)
+                // Check corrections
                 var correction = await CheckCorrectionsAsync(question);
                 if (correction != null)
                 {
-                    _logger.LogInformation($"🎯 Using correction for NON-MEAI question: {question}");
+                    _logger.LogInformation($"🎯 Using correction for NON-MEAI question");
 
                     string finalAnswer = correction.Answer;
                     try
                     {
-                        finalAnswer = await _helperMethods.RephraseWithLLMAsync(correction.Answer, generationModel ?? _config.DefaultGenerationModel);
+                        finalAnswer = await _helperMethods.RephraseWithLLMAsync(
+                            correction.Answer, generationModel ?? _config.DefaultGenerationModel);
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Failed to rephrase correction — using raw answer.");
-                    }
-
-                    // Save correction usage to database (optional - for tracking)
-                    try
-                    {
-                        var genModel = await _modelManager.GetModelAsync(generationModel ?? _config.DefaultGenerationModel);
-                        await SaveNonMeaiConversationToDatabase(
-                            dbSession.SessionId, question, finalAnswer,
-                            genModel, 1.0, stopwatch.ElapsedMilliseconds,
-                            isFromCorrection: true, "General");
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to save non-MEAI correction to database");
+                        _logger.LogWarning(ex, "Failed to rephrase correction");
                     }
 
                     stopwatch.Stop();
-
                     return new QueryResponse
                     {
                         Answer = finalAnswer,
@@ -1935,36 +2063,17 @@ These are the fixed organizational details for {plant} plant.";
                     };
                 }
 
-                // Lightweight topic change detection (no embeddings)
-                if (_conversationAnalysis.IsTopicChangedLightweight(question, context))
-                {
-                    _logger.LogInformation($"Topic changed for session {context.SessionId}, clearing context");
-                    ClearContext(context);
-                }
+                // Generate response
+                var genModel = await _modelManager.GetModelAsync(
+                    generationModel ?? _config.DefaultGenerationModel);
 
-                // Generate response directly (no policy context, no embeddings)
-                var answer = await GenerateNonMeaiChatResponseAsync(question, generationModel, context.History);
-
-                // Save conversation to database (optional - for learning)
-                try
-                {
-                    var genModel = await _modelManager.GetModelAsync(generationModel ?? _config.DefaultGenerationModel);
-                    await SaveNonMeaiConversationToDatabase(
-                        dbSession.SessionId, question, answer,
-                        genModel, 0.8, stopwatch.ElapsedMilliseconds,
-                        isFromCorrection: false, "General");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to save non-MEAI conversation to database");
-                }
-
-                // Lightweight conversation tracking
-                await UpdateConversationHistoryLightweight(context, question, answer);
+                // **FIX: Use direct answer generation without intro**
+                var answer = await GenerateDirectAnswerAsync(
+                    question,
+                    genModel.Name!,
+                    context.History);
 
                 stopwatch.Stop();
-
-                _logger.LogInformation($"✅ NON-MEAI query completed in {stopwatch.ElapsedMilliseconds}ms");
 
                 return new QueryResponse
                 {
@@ -1986,6 +2095,82 @@ These are the fixed organizational details for {plant} plant.";
             {
                 _logger.LogError(ex, "Fast non-MEAI query processing failed");
                 throw;
+            }
+        }
+
+        private async Task<string> GenerateDirectAnswerAsync(
+    string question,
+    string modelName,
+    List<ConversationTurn> history)
+        {
+            var messages = new List<object>();
+
+            int numPredict = IsConciseAnswerQuestion(question) ? 50 : 2000;
+
+            // **Direct system prompt - no introduction**
+            messages.Add(new
+            {
+                role = "system",
+                content = @"You are a helpful AI assistant.
+
+CRITICAL: For simple factual questions (Who/What/When/Where/Which), answer in ONE SENTENCE only.
+
+Only provide detailed explanations when explicitly requested.
+
+Answer directly without introducing yourself."
+            });
+
+            // Add conversation history (last 4 turns for context)
+            foreach (var turn in history.TakeLast(4))
+            {
+                messages.Add(new { role = "user", content = turn.Question });
+                messages.Add(new { role = "assistant", content = turn.Answer });
+            }
+
+            // Add current question
+            messages.Add(new { role = "user", content = question });
+
+            var requestData = new
+            {
+                model = modelName,
+                messages,
+                temperature = 0.3,
+                stream = false,
+                options = new Dictionary<string, object>
+        {
+            { "num_ctx", 8192 },
+            { "num_predict", numPredict },  // ✅ Dynamic based on question type
+            { "top_p", 0.9 },
+            { "stop", new[] { "\n\n" } }
+        }
+            };
+
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                var response = await _ollamaClient.PostAsJsonAsync("/api/chat", requestData, cts.Token);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogError($"Chat generation failed: {response.StatusCode}");
+                    return "I apologize, but I'm having trouble generating a response right now.";
+                }
+
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+
+                if (doc.RootElement.TryGetProperty("message", out var message) &&
+                    message.TryGetProperty("content", out var content))
+                {
+                    return content.GetString()?.Trim() ?? "No response generated.";
+                }
+
+                return "I apologize, but I couldn't generate a proper response.";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Direct answer generation failed");
+                return "I apologize, but I encountered an error generating a response.";
             }
         }
         // ADD THIS METHOD - Chat response generator for non-MEAI queries
@@ -2082,45 +2267,7 @@ These are the fixed organizational details for {plant} plant.";
                 _logger.LogError(ex, "Failed to update conversation history (lightweight)");
             }
         }
-        private async Task<int> SaveNonMeaiConversationToDatabase(string sessionId, string question, string answer, ModelConfiguration generationModel, double confidence, long processingTimeMs, bool isFromCorrection, string plant)
-        {
-            try
-            {
-                // For non-MEAI queries, we skip embedding generation but still save conversation
-                var entry = new ConversationEntry
-                {
-                    SessionId = sessionId,
-                    Question = question,
-                    Answer = answer,
-                    CreatedAt = DateTime.Now,
-                    QuestionEmbedding = new List<float>(), // Empty for non-MEAI
-                    AnswerEmbedding = new List<float>(),   // Empty for non-MEAI
-                    NamedEntities = new List<string>(),    // Skip entity extraction for speed
-                    WasAppreciated = false,
-                    TopicTag = "general", // Simple tag for non-MEAI queries
-                    FollowUpToId = null,
-                    GenerationModel = generationModel.Name,
-                    EmbeddingModel = "none", // No embedding model used
-                    Confidence = confidence,
-                    ProcessingTimeMs = processingTimeMs,
-                    RelevantChunksCount = 0,
-                    Sources = isFromCorrection ? new List<string> { "User Correction" } : new List<string> { "General Knowledge" },
-                    IsFromCorrection = isFromCorrection,
-                    Plant = plant
-                };
-
-                await _conversationStorage.SaveConversationAsync(entry);
-
-                _logger.LogInformation($"💾 Saved non-MEAI conversation {entry.Id} to database");
-                return entry.Id;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to save non-MEAI conversation to database");
-                return 0;
-            }
-        }
-        public async Task ApplyCorrectionAsync(string sessionId, string question, string correctedAnswer, string model)
+          public async Task ApplyCorrectionAsync(string sessionId, string question, string correctedAnswer, string model)
         {
             try
             {
@@ -4301,6 +4448,638 @@ These are the fixed organizational details for {plant} plant.";
         //        ProcessingTimeMs = stopwatch.ElapsedMilliseconds
         //    };
         //}
+        private async IAsyncEnumerable<string> GenerateNonMeaiStreamDirectAsync(
+    string question,
+    string modelName,
+    List<ConversationTurn> history,
+    [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var messages = new List<object>();
+
+            // ✅ Extract subject from most recent answer
+            string? recentSubject = null;
+            string? recentAnswer = null;
+
+            if (history.Any())
+            {
+                var lastTurn = history.Last();
+                recentAnswer = lastTurn.Answer;
+                recentSubject = ExtractMainSubjectFromAnswer(lastTurn.Answer);
+
+                _logger.LogInformation($"📌 Last question: {lastTurn.Question}");
+                _logger.LogInformation($"📌 Last answer: {lastTurn.Answer.Substring(0, Math.Min(100, lastTurn.Answer.Length))}...");
+                _logger.LogInformation($"📌 Extracted subject: {recentSubject ?? "none"}");
+            }
+
+            // ✅ Check if current question has pronoun
+            bool hasPronoun = ContainsPronoun(question);
+
+            if (hasPronoun)
+            {
+                _logger.LogInformation($"🎯 PRONOUN DETECTED in: '{question}'");
+            }
+
+            // ✅ CRITICAL: Rewrite question if pronoun detected
+            string processedQuestion = question;
+            if (hasPronoun && !string.IsNullOrEmpty(recentSubject))
+            {
+                processedQuestion = RewriteQuestionWithSubject(question, recentSubject);
+                _logger.LogInformation($"🔄 Rewrote question: '{question}' → '{processedQuestion}'");
+            }
+
+            // ✅ Simple, direct system prompt
+            var systemPrompt = @"You are a helpful AI assistant. Answer questions accurately and concisely.
+
+For simple factual questions (Who/What/When/Where), provide ONE SENTENCE answers.
+
+NEVER make up information. If you don't know, say so.";
+
+            messages.Add(new { role = "system", content = systemPrompt });
+
+            // ✅ Add ONLY the last turn for context (not multiple turns)
+            if (history.Any())
+            {
+                var lastTurn = history.Last();
+                messages.Add(new { role = "user", content = lastTurn.Question });
+                messages.Add(new { role = "assistant", content = lastTurn.Answer });
+            }
+
+            // ✅ Use the REWRITTEN question (with subject replaced)
+            messages.Add(new { role = "user", content = processedQuestion });
+
+            var requestData = new
+            {
+                model = modelName,
+                messages,
+                temperature = 0.1, // ✅ Lower temperature for factual accuracy
+                stream = true,
+                options = new Dictionary<string, object>
+                {
+                    ["num_ctx"] = 8192,
+                    ["num_predict"] = 150,
+                    ["top_p"] = 0.9,
+                    ["repeat_penalty"] = 1.2, // ✅ Stronger penalty
+                }
+            };
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/api/chat")
+            {
+                Content = JsonContent.Create(requestData)
+            };
+
+            HttpResponseMessage? response = null;
+
+            try
+            {
+                response = await _ollamaClient.SendAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogError($"Ollama request failed: {response.StatusCode}");
+                    yield return "I apologize, but I'm having trouble generating a response right now.";
+                    yield break;
+                }
+
+                using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                using var reader = new StreamReader(stream);
+
+                while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+                {
+                    var line = await reader.ReadLineAsync();
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+
+                    var streamResponse = JsonSerializer.Deserialize<OllamaStreamResponse>(line);
+
+                    if (streamResponse?.Message?.Content != null &&
+                        !string.IsNullOrEmpty(streamResponse.Message.Content))
+                    {
+                        yield return streamResponse.Message.Content;
+                    }
+
+                    if (streamResponse?.Done == true)
+                    {
+                        break;
+                    }
+                }
+            }
+            finally
+            {
+                response?.Dispose();
+            }
+        }
+
+        // In ExtractMainSubjectFromAnswer, add this check:
+
+        private string? ExtractMainSubjectFromAnswer(string answer)
+        {
+            if (string.IsNullOrWhiteSpace(answer))
+                return null;
+
+            try
+            {
+                // Clean the answer
+                var cleanAnswer = answer.Trim();
+
+                // Pattern 1: "X is a [profession]" - MOST RELIABLE
+                var patterns = new[]
+                {
+            // "Elon Musk is a business magnate"
+            @"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+is\s+a(?:n)?\s+",
+            
+            // "Elon Musk is the CEO"
+            @"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+is\s+the\s+",
+            
+            // "Elon Musk, born in..."
+            @"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}),",
+            
+            // At start: "Elon Musk has/was/became..."
+            @"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+(?:has|was|were|became|founded|created|invented)",
+        };
+
+                foreach (var pattern in patterns)
+                {
+                    var match = Regex.Match(cleanAnswer, pattern);
+                    if (match.Success && match.Groups.Count > 1)
+                    {
+                        var subject = match.Groups[1].Value.Trim();
+
+                        // Validate it's not a common word
+                        if (!IsCommonWord(subject))
+                        {
+                            _logger.LogInformation($"✅ Extracted subject using pattern: '{subject}'");
+                            return subject;
+                        }
+                    }
+                }
+
+                // Fallback: Find first proper name (2+ capitalized words)
+                var nameMatch = Regex.Match(cleanAnswer, @"\b([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b");
+                if (nameMatch.Success)
+                {
+                    var potentialName = nameMatch.Groups[1].Value.Trim();
+                    if (!IsCommonWord(potentialName) && potentialName.Split(' ').Length >= 2)
+                    {
+                        _logger.LogInformation($"✅ Extracted subject (fallback): '{potentialName}'");
+                        return potentialName;
+                    }
+                }
+
+                _logger.LogWarning($"❌ Could not extract subject from: '{cleanAnswer.Substring(0, Math.Min(100, cleanAnswer.Length))}'");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to extract main subject");
+                return null;
+            }
+        }
+
+        private bool IsCommonWord(string word)
+        {
+            var commonWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        // Articles & Determiners
+        "The", "A", "An", "This", "That", "These", "Those",
+        
+        // Response Words
+        "Yes", "No", "Maybe", "Perhaps", "Certainly", "Indeed", "Sure",
+        
+        // Titles & Positions
+        "Mr", "Mrs", "Ms", "Dr", "Prof", "Sir", "Madam", "Lord", "Lady",
+        "Prime", "Minister", "President", "Vice", "Deputy", "Chief",
+        "Executive", "Officer", "Director", "Manager", "Secretary",
+        "Chairman", "Chairwoman", "Chairperson", "Head", "Leader",
+        "Governor", "Mayor", "Senator", "Representative", "Congressman",
+        "Congresswoman", "Justice", "Judge", "Attorney", "General",
+        "Commissioner", "Ambassador", "Consul", "Chancellor", "Rector",
+        "Dean", "Principal", "Superintendent", "Captain", "Colonel",
+        "General", "Admiral", "Commander", "Lieutenant", "Sergeant",
+        "Corporal", "Major", "King", "Queen", "Prince", "Princess",
+        "Duke", "Duchess", "Count", "Countess", "Baron", "Baroness",
+        "Emperor", "Empress", "Sultan", "Caliph", "Sheikh", "Emir",
+        
+        // Professional Titles
+        "Doctor", "Professor", "Engineer", "Architect", "Lawyer",
+        "Teacher", "Lecturer", "Instructor", "Coach", "Trainer",
+        "Consultant", "Advisor", "Analyst", "Specialist", "Expert",
+        "Technician", "Assistant", "Associate", "Partner", "Member",
+        
+        // Corporate Titles
+        "CEO", "CFO", "CTO", "COO", "CIO", "CMO", "VP", "SVP", "EVP",
+        "Chairman", "Chairwoman", "Board", "Trustee", "Stakeholder",
+        
+        // Government & Politics
+        "Government", "Parliament", "Congress", "Senate", "Assembly",
+        "Council", "Cabinet", "Ministry", "Department", "Agency",
+        "Bureau", "Commission", "Committee", "Party", "Opposition",
+        "Coalition", "Alliance", "Union", "Federation", "Republic",
+        "Democracy", "Monarchy", "Kingdom", "Empire", "State",
+        
+        // Geographic Terms
+        "Country", "Nation", "State", "Province", "Territory", "Region",
+        "District", "County", "City", "Town", "Village", "Municipality",
+        "Capital", "Metropolis", "Urban", "Rural", "Suburban",
+        "North", "South", "East", "West", "Northern", "Southern",
+        "Eastern", "Western", "Central", "Northeast", "Northwest",
+        "Southeast", "Southwest", "Midwest", "Atlantic", "Pacific",
+        
+        // Continents & Major Regions
+        "Asia", "Europe", "Africa", "America", "Americas", "Australia",
+        "Antarctica", "Oceania", "Caribbean", "Mediterranean", "Baltic",
+        "Scandinavia", "Balkans", "Caucasus", "Middle", "Far",
+        
+        // Major Countries (commonly used in titles)
+        "India", "China", "Japan", "Russia", "Germany", "France",
+        "Britain", "England", "Scotland", "Wales", "Ireland",
+        "Spain", "Italy", "Greece", "Turkey", "Egypt", "Iran",
+        "Iraq", "Syria", "Israel", "Palestine", "Jordan", "Lebanon",
+        "Saudi", "Arabia", "Kuwait", "Qatar", "Bahrain", "Oman",
+        "Yemen", "Pakistan", "Bangladesh", "Nepal", "Bhutan", "Myanmar",
+        "Thailand", "Vietnam", "Malaysia", "Singapore", "Indonesia",
+        "Philippines", "Korea", "Taiwan", "Mongolia", "Afghanistan",
+        "Brazil", "Mexico", "Canada", "Argentina", "Chile", "Peru",
+        "Colombia", "Venezuela", "Ecuador", "Bolivia", "Uruguay",
+        "Paraguay", "Australia", "Zealand", "Fiji", "Samoa",
+        "South", "Africa", "Nigeria", "Kenya", "Ethiopia", "Ghana",
+        "Morocco", "Algeria", "Tunisia", "Libya", "Sudan", "Uganda",
+        
+        // US States (commonly used)
+        "California", "Texas", "Florida", "York", "Illinois", "Pennsylvania",
+        "Ohio", "Georgia", "Michigan", "Carolina", "Jersey", "Virginia",
+        "Washington", "Massachusetts", "Arizona", "Indiana", "Tennessee",
+        "Missouri", "Maryland", "Wisconsin", "Minnesota", "Colorado",
+        "Alabama", "Louisiana", "Kentucky", "Oregon", "Oklahoma",
+        "Connecticut", "Iowa", "Mississippi", "Arkansas", "Kansas",
+        "Utah", "Nevada", "Mexico", "Nebraska", "Virginia", "Idaho",
+        "Hawaii", "Hampshire", "Maine", "Montana", "Island", "Delaware",
+        "Dakota", "Alaska", "Vermont", "Wyoming", "Columbia",
+        
+        // Indian States & Cities
+        "Maharashtra", "Gujarat", "Karnataka", "Kerala", "Punjab",
+        "Haryana", "Rajasthan", "Pradesh", "Bengal", "Bihar",
+        "Odisha", "Assam", "Chhattisgarh", "Jharkhand", "Uttarakhand",
+        "Himachal", "Jammu", "Kashmir", "Goa", "Sikkim", "Tripura",
+        "Meghalaya", "Manipur", "Mizoram", "Nagaland", "Arunachal",
+        "Mumbai", "Delhi", "Bangalore", "Hyderabad", "Chennai",
+        "Kolkata", "Pune", "Ahmedabad", "Surat", "Jaipur", "Lucknow",
+        "Kanpur", "Nagpur", "Indore", "Thane", "Bhopal", "Visakhapatnam",
+        "Pimpri", "Patna", "Vadodara", "Ghaziabad", "Ludhiana",
+        "Agra", "Nashik", "Faridabad", "Meerut", "Rajkot", "Varanasi",
+        
+        // Time & Temporal
+        "Current", "Former", "Incumbent", "Acting", "Interim", "Elect",
+        "Designate", "Emeritus", "Retired", "Late", "Present", "Past",
+        "Future", "Recent", "New", "Old", "Ancient", "Modern",
+        "Contemporary", "Historical", "Previous", "Next", "Last",
+        
+        // Organizational
+        "Organization", "Organisation", "Institute", "Institution",
+        "Foundation", "Association", "Society", "Corporation", "Company",
+        "Firm", "Enterprise", "Business", "Group", "Consortium",
+        "Syndicate", "Cooperative", "Partnership", "Trust", "Fund",
+        "Center", "Centre", "Academy", "University", "College",
+        "School", "Hospital", "Clinic", "Laboratory", "Library",
+        "Museum", "Gallery", "Theater", "Theatre", "Stadium", "Arena",
+        
+        // Religious Terms
+        "Church", "Temple", "Mosque", "Synagogue", "Cathedral",
+        "Monastery", "Convent", "Abbey", "Shrine", "Sanctuary",
+        "Pope", "Bishop", "Archbishop", "Cardinal", "Priest",
+        "Pastor", "Reverend", "Father", "Brother", "Sister",
+        "Imam", "Mullah", "Ayatollah", "Rabbi", "Monk", "Nun",
+        "Saint", "Blessed", "Holy", "Divine", "Sacred",
+        
+        // Military & Security
+        "Army", "Navy", "Force", "Forces", "Marine", "Corps",
+        "Regiment", "Battalion", "Brigade", "Division", "Squadron",
+        "Fleet", "Platoon", "Company", "Unit", "Troops", "Soldiers",
+        "Military", "Defense", "Defence", "Security", "Intelligence",
+        "Police", "Officer", "Constable", "Inspector", "Superintendent",
+        
+        // Academic & Research
+        "Research", "Study", "Studies", "Science", "Technology",
+        "Engineering", "Mathematics", "Physics", "Chemistry", "Biology",
+        "Medicine", "Law", "Economics", "Business", "Management",
+        "Arts", "Humanities", "Social", "Natural", "Applied",
+        "Theoretical", "Practical", "Experimental", "Clinical",
+        
+        // Media & Communication
+        "News", "Media", "Press", "Journalism", "Broadcasting",
+        "Television", "Radio", "Newspaper", "Magazine", "Journal",
+        "Reporter", "Journalist", "Editor", "Correspondent", "Anchor",
+        "Producer", "Publisher", "Writer", "Author", "Columnist",
+        
+        // Legal Terms
+        "Law", "Legal", "Court", "Supreme", "High", "District",
+        "Trial", "Appeal", "Justice", "Judicial", "Judiciary",
+        "Magistrate", "Advocate", "Barrister", "Solicitor", "Counsel",
+        
+        // Economic Terms
+        "Economy", "Economic", "Finance", "Financial", "Banking",
+        "Market", "Stock", "Exchange", "Trade", "Commerce",
+        "Industry", "Industrial", "Manufacturing", "Production",
+        "Agriculture", "Farming", "Mining", "Construction",
+        
+        // Common Adjectives (that might appear before names)
+        "Great", "Grand", "Supreme", "Superior", "Senior", "Junior",
+        "First", "Second", "Third", "Fourth", "Fifth", "Last",
+        "Main", "Primary", "Secondary", "Principal", "Major", "Minor",
+        "Upper", "Lower", "Higher", "Lesser", "Greater", "Smaller",
+        "Larger", "Bigger", "Better", "Best", "Worst", "Finest",
+        "Leading", "Top", "Bottom", "Front", "Back", "Side",
+        
+        // Common Nouns (to avoid false positives)
+        "People", "Person", "Man", "Woman", "Men", "Women", "Child",
+        "Children", "Boy", "Girl", "Male", "Female", "Human", "Humans",
+        "Individual", "Group", "Team", "Staff", "Crew", "Personnel",
+        "Public", "Private", "Citizen", "Resident", "Native", "Local",
+        "National", "International", "Global", "Regional", "Provincial",
+        
+        // Miscellaneous Common Words
+        "Information", "Data", "Report", "Document", "Record", "File",
+        "System", "Process", "Method", "Procedure", "Policy", "Rule",
+        "Regulation", "Standard", "Guideline", "Protocol", "Framework",
+        "Structure", "Model", "Pattern", "Format", "Style", "Type",
+        "Kind", "Sort", "Category", "Class", "Grade", "Level",
+        "Rank", "Position", "Status", "Role", "Function", "Duty",
+        "Responsibility", "Authority", "Power", "Control", "Management",
+        
+        // Common Prepositions & Conjunctions (shouldn't be part of name)
+        "Of", "In", "On", "At", "To", "For", "With", "By", "From",
+        "About", "Into", "Through", "During", "Before", "After",
+        "Between", "Among", "Against", "Under", "Over", "Above",
+        "Below", "Across", "Along", "Around", "Behind", "Beyond",
+        "And", "Or", "But", "If", "When", "Where", "While", "Until",
+        "Since", "Because", "Although", "Though", "Unless", "Whether"
+    };
+
+            var firstWord = word.Split(' ')[0];
+            return commonWords.Contains(firstWord);
+        }
+
+        private bool IsProperName(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+
+            var excludedWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        // Same list as IsCommonWord for consistency
+        // Articles & Determiners
+        "The", "A", "An", "This", "That", "These", "Those",
+        
+        // Response Words
+        "Yes", "No", "Maybe", "Perhaps", "Certainly", "Indeed",
+        
+        // Common Titles
+        "Mr", "Mrs", "Ms", "Dr", "Prof", "Prime", "Minister",
+        "President", "Vice", "Chief", "Executive", "Officer",
+        "Director", "Manager", "Secretary", "Chairman", "Governor",
+        "Mayor", "Senator", "Judge", "General", "Captain",
+        
+        // Generic Terms
+        "Government", "Parliament", "Congress", "Ministry",
+        "Department", "Agency", "Committee", "Party", "Country",
+        "State", "City", "Town", "Region", "District",
+        
+        // Time References
+        "Current", "Former", "Incumbent", "Acting", "Interim",
+        
+        // Organizational
+        "Organization", "Institute", "Foundation", "Association",
+        "Corporation", "Company", "University", "College", "School"
+    };
+
+            var words = text.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+
+            // Validation checks
+            if (words.Length == 0 || words.Length > 4)
+                return false;
+
+            // Each word must be at least 2 characters
+            if (words.Any(w => w.Length < 2))
+                return false;
+
+            // Must start with capital letter
+            if (words.Any(w => !char.IsUpper(w[0])))
+                return false;
+
+            // Check for excluded words
+            var nonExcludedWords = words.Where(w => !excludedWords.Contains(w)).ToList();
+
+            // Must have at least one non-excluded word
+            if (!nonExcludedWords.Any())
+                return false;
+
+            // Pattern checks for valid names
+            // 1. Single capitalized word (at least 3 chars) that's not excluded
+            if (words.Length == 1)
+            {
+                return words[0].Length >= 3 &&
+                       !excludedWords.Contains(words[0]) &&
+                       char.IsUpper(words[0][0]) &&
+                       words[0].Skip(1).All(c => char.IsLower(c) || c == '\'' || c == '-');
+            }
+
+            // 2. Two words: First + Last name pattern
+            if (words.Length == 2)
+            {
+                var firstName = words[0];
+                var lastName = words[1];
+
+                // Both should be capitalized and not common words
+                return !excludedWords.Contains(firstName) &&
+                       !excludedWords.Contains(lastName) &&
+                       firstName.Length >= 2 &&
+                       lastName.Length >= 2;
+            }
+
+            // 3. Three words: First + Middle + Last OR Title + First + Last
+            if (words.Length == 3)
+            {
+                
+                var nonTitleWords = words.Where(w => !excludedWords.Contains(w)).ToList();
+                return nonTitleWords.Count >= 2;
+            }
+
+            // 4. Four words: might be "Title First Middle Last"
+            if (words.Length == 4)
+            {
+                var nonTitleWords = words.Where(w => !excludedWords.Contains(w)).ToList();
+                return nonTitleWords.Count >= 2;
+            }
+
+            return false;
+        }
+
+        // ✅ BONUS: Helper method to validate if a name is likely a person's name
+        private bool IsLikelyPersonName(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+
+            // Common name patterns
+            var namePatterns = new[]
+            {
+        @"^[A-Z][a-z]+\s+[A-Z][a-z]+$",                          // First Last
+        @"^[A-Z][a-z]+\s+[A-Z][a-z]+\s+[A-Z][a-z]+$",            // First Middle Last
+        @"^[A-Z][a-z]+\s+[A-Z]\.\s+[A-Z][a-z]+$",                // First M. Last
+        @"^[A-Z]\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$",                // F. Middle Last
+        @"^Dr\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$",                   // Dr. First Last
+        @"^Mr\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$",                   // Mr. First Last
+        @"^Mrs\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$",                  // Mrs. First Last
+        @"^Ms\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$",                   // Ms. First Last
+    };
+
+            return namePatterns.Any(pattern => Regex.IsMatch(text, pattern));
+        }
+
+        // ✅ BONUS: Comprehensive list of world leaders' common last names
+        private bool IsCommonLeaderName(string word)
+        {
+            var leaderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        // Current & Recent World Leaders (Last Names)
+        "Modi", "Biden", "Trump", "Obama", "Bush", "Clinton",
+        "Putin", "Xi", "Jinping", "Macron", "Merkel", "Scholz",
+        "Johnson", "Sunak", "Trudeau", "Bolsonaro", "Lula",
+        "Erdogan", "Netanyahu", "Abbas", "Khamenei", "Kim",
+        "Moon", "Kishida", "Abe", "Gandhi", "Nehru", "Singh",
+        "Khan", "Sharif", "Hasina", "Wickremesinghe", "Wickramasinghe",
+        "Marcos", "Duterte", "Widodo", "Anwar", "Hun", "Sen",
+        
+        // Historical Leaders
+        "Churchill", "Roosevelt", "Kennedy", "Reagan", "Thatcher",
+        "Napoleon", "Caesar", "Alexander", "Genghis", "Khan",
+        "Washington", "Lincoln", "Jefferson", "Franklin",
+        "Lenin", "Stalin", "Mao", "Deng", "Castro", "Mandela",
+        "Gorbachev", "Yeltsin", "Brezhnev", "Khrushchev",
+        
+        // Indian Political Names
+        "Vajpayee", "Advani", "Jaitley", "Shah", "Amit",
+        "Sonia", "Rahul", "Priyanka", "Akhilesh", "Mayawati",
+        "Mamata", "Banerjee", "Stalin", "Naidu", "Chandrababu",
+        "Jagan", "Reddy", "Rao", "Patnaik", "Kejriwal",
+        "Thackeray", "Pawar", "Fadnavis", "Yogi", "Adityanath"
+    };
+
+            return leaderNames.Contains(word);
+        }
+
+        private bool ContainsPronoun(string question)
+        {
+            var lowerQuestion = question.ToLower().Trim();
+
+            // Check for pronouns at word boundaries
+            var pronounPatterns = new[]
+            {
+        @"\bhe\b", @"\bshe\b", @"\bhim\b", @"\bher\b",
+        @"\bhis\b", @"\bhers\b", @"\bthey\b", @"\bthem\b",
+        @"\btheir\b", @"\btheirs\b"
+    };
+
+            foreach (var pattern in pronounPatterns)
+            {
+                if (Regex.IsMatch(lowerQuestion, pattern))
+                {
+                    _logger.LogDebug($"Found pronoun matching pattern: {pattern}");
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private string RewriteQuestionWithSubject(string question, string subject)
+        {
+            var lowerQuestion = question.ToLower();
+
+            // Pattern 1: "is he/she X" → "is [Subject] X"
+            if (Regex.IsMatch(lowerQuestion, @"^is\s+(he|she)\s+"))
+            {
+                var result = Regex.Replace(question, @"^(is\s+)(he|she)(\s+)",
+                    $"$1{subject}$3", RegexOptions.IgnoreCase);
+                return result;
+            }
+
+            // Pattern 2: "does he/she X" → "does [Subject] X"
+            if (Regex.IsMatch(lowerQuestion, @"^does\s+(he|she)\s+"))
+            {
+                var result = Regex.Replace(question, @"^(does\s+)(he|she)(\s+)",
+                    $"$1{subject}$3", RegexOptions.IgnoreCase);
+                return result;
+            }
+
+            // Pattern 3: "what does he/she do" → "what does [Subject] do"
+            if (Regex.IsMatch(lowerQuestion, @"what\s+does\s+(he|she)\s+"))
+            {
+                var result = Regex.Replace(question, @"(what\s+does\s+)(he|she)(\s+)",
+                    $"$1{subject}$3", RegexOptions.IgnoreCase);
+                return result;
+            }
+
+            // Pattern 4: "where is he/she" → "where is [Subject]"
+            if (Regex.IsMatch(lowerQuestion, @"where\s+is\s+(he|she)"))
+            {
+                var result = Regex.Replace(question, @"(where\s+is\s+)(he|she)",
+                    $"$1{subject}", RegexOptions.IgnoreCase);
+                return result;
+            }
+
+            // Pattern 5: General replacement of pronouns
+            var result2 = question;
+            var replacements = new Dictionary<string, string>
+            {
+                [@"\bhe\b"] = subject,
+                [@"\bshe\b"] = subject,
+                [@"\bhim\b"] = subject,
+                [@"\bher\b"] = subject,
+                [@"\bhis\b"] = $"{subject}'s",
+                [@"\bhers\b"] = $"{subject}'s",
+            };
+
+            foreach (var replacement in replacements)
+            {
+                result2 = Regex.Replace(result2, replacement.Key, replacement.Value, RegexOptions.IgnoreCase);
+            }
+
+            return result2;
+        }
+
+        
+        private bool IsConciseAnswerQuestion(string question)
+        {
+            var lowerQuestion = question.Trim().ToLower();
+
+            // Check if it starts with W-question words
+            var wQuestionStarters = new[]
+            {
+        "who is", "who are", "who was", "who were",
+        "what is", "what are", "what was", "what were",
+        "when is", "when was", "when did", "when does",
+        "where is", "where are", "where was", "where were",
+        "which is", "which are", "which was", "which were"
+    };
+
+            var startsWithWQuestion = wQuestionStarters.Any(starter =>
+                lowerQuestion.StartsWith(starter));
+
+            // Check if it's a simple factual question (no complexity indicators)
+            var complexityIndicators = new[]
+            {
+        "explain", "how", "why", "elaborate", "tell me more",
+        "describe", "compare", "difference between", "step by step"
+    };
+
+            var isComplex = complexityIndicators.Any(indicator =>
+                lowerQuestion.Contains(indicator));
+
+            // It's a concise question if it starts with W-question and is not complex
+            return startsWithWQuestion && !isComplex;
+        }
 
         public async IAsyncEnumerable<StreamChunk> ProcessQueryStreamAsync(
     string question,
@@ -4329,6 +5108,15 @@ These are the fixed organizational details for {plant} plant.";
             }
 
             var agentContext = validationResult.Context!;
+
+            // ✅ ADD: Debug logging to verify history is loaded
+            _logger.LogInformation($"📝 Session {agentContext.SessionId} has {agentContext.History.Count} history items");
+
+            if (agentContext.History.Any())
+            {
+                var lastQ = agentContext.History.Last().Question;
+                _logger.LogInformation($"📝 Last question was: {lastQ.Substring(0, Math.Min(50, lastQ.Length))}");
+            }
             var genModel = validationResult.GenerationModel!;
             var embModel = validationResult.EmbeddingModel!;
 
@@ -4349,6 +5137,107 @@ These are the fixed organizational details for {plant} plant.";
                 yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
                 yield break;
             }
+
+            // ============================
+            // NON-MEAI → DIRECT LLM ONLY
+            // ============================
+
+            if (!meaiInfo)
+            {
+                _logger.LogInformation("📝 Processing non-MEAI query");
+
+                // ✅ LOG CURRENT HISTORY STATE
+                _logger.LogInformation($"📚 Current history count: {agentContext.History.Count}");
+                if (agentContext.History.Any())
+                {
+                    foreach (var h in agentContext.History.TakeLast(3))
+                    {
+                        _logger.LogInformation($"  Q: {h.Question.Substring(0, Math.Min(50, h.Question.Length))}");
+                        _logger.LogInformation($"  A: {h.Answer.Substring(0, Math.Min(50, h.Answer.Length))}...");
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning("⚠️ No history available for non-MEAI query");
+                }
+
+                yield return new StreamChunk { Type = "status", Content = "Generating response..." };
+
+                var full = new StringBuilder();
+
+                await foreach (var token in GenerateNonMeaiStreamDirectAsync(
+                    question,
+                    genModel.Name!,
+                    agentContext.History,
+                    cancellationToken))
+                {
+                    full.Append(token);
+                    yield return new StreamChunk { Type = "response", Content = token };
+                }
+
+                var nonMeaiResponseText = full.ToString();
+
+                // ✅ CRITICAL FIX: Save the conversation to database AND update context
+                if (!string.IsNullOrWhiteSpace(nonMeaiResponseText))
+                {
+                    try
+                    {
+                        _logger.LogInformation("💾 Saving non-MEAI conversation...");
+
+                        // Save to database
+                        var conversationId = await SaveNonMeaiConversationToDatabase(
+                            agentContext.SessionId,
+                            question,
+                            nonMeaiResponseText,
+                            genModel,
+                            0.8,
+                            stopwatch.ElapsedMilliseconds,
+                            false,
+                            plant);
+
+                        _logger.LogInformation($"✅ Saved non-MEAI conversation with ID: {conversationId}");
+
+                        // ✅ CRITICAL: Update in-memory context immediately
+                        agentContext.History.Add(new ConversationTurn
+                        {
+                            Question = question,
+                            Answer = nonMeaiResponseText,
+                            Timestamp = DateTime.Now,
+                            Sources = new List<string> { "General Knowledge" }
+                        });
+
+                        // Keep only last 10 turns
+                        if (agentContext.History.Count > 10)
+                        {
+                            agentContext.History = agentContext.History.TakeLast(10).ToList();
+                        }
+
+                        _logger.LogInformation($"📚 Updated agentContext.History, now has {agentContext.History.Count} turns");
+
+                        // ✅ ALSO: Update the session in conversation storage
+                        var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
+                            agentContext.SessionId,
+                            agentContext.UserId,
+                            plant);
+
+                        dbSession.LastAccessedAt = DateTime.Now;
+                        await _conversationStorage.UpdateSessionAsync(dbSession);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to save non-MEAI conversation");
+                    }
+                }
+
+                yield return new StreamChunk
+                {
+                    Type = "complete",
+                    ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+                };
+
+                yield break;
+            }
+
 
             // ============================
             // PLANNING
@@ -4519,14 +5408,21 @@ These are the fixed organizational details for {plant} plant.";
                 var actualUserId = userId ?? "system";
                 var actualSessionId = sessionId ?? Guid.NewGuid().ToString();
 
+                _logger.LogInformation($"🔍 Creating context for session: {actualSessionId}, user: {actualUserId}, plant: {plant}");
+
+                // Get or create session
                 var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
                     actualSessionId,
                     actualUserId,
                     plant
                 );
 
-                // Load conversation history from database
+                _logger.LogInformation($"📂 Database session retrieved: {dbSession.SessionId}");
+
+                // ✅ CRITICAL: Load conversation history from database
                 var conversations = await _conversationStorage.GetSessionConversationsAsync(dbSession.SessionId);
+
+                _logger.LogInformation($"📚 Database returned {conversations.Count} conversations for session {dbSession.SessionId}");
 
                 // Create agent context
                 var agentContext = new AgentContext
@@ -4535,27 +5431,54 @@ These are the fixed organizational details for {plant} plant.";
                     UserId = actualUserId,
                     Plant = plant,
                     State = new Dictionary<string, object>(),
-                    LastAccessed = DateTime.Now
+                    LastAccessed = DateTime.Now,
+                    History = new List<ConversationTurn>() // ✅ Initialize empty list
                 };
 
-                // Convert database conversations to ConversationTurn format
-                agentContext.History = conversations
-                    .OrderBy(c => c.CreatedAt)
-                    .TakeLast(10)
-                    .Select(c => new ConversationTurn
-                    {
-                        Question = c.Question,
-                        Answer = c.Answer,
-                        Timestamp = c.CreatedAt,
-                        Sources = c.Sources ?? new List<string>()
-                    })
-                    .ToList();
+                // ✅ Convert database conversations to ConversationTurn format
+                if (conversations.Any())
+                {
+                    agentContext.History = conversations
+                        .OrderBy(c => c.CreatedAt)
+                        .TakeLast(10)
+                        .Select(c => new ConversationTurn
+                        {
+                            Question = c.Question,
+                            Answer = c.Answer,
+                            Timestamp = c.CreatedAt,
+                            Sources = c.Sources ?? new List<string>()
+                        })
+                        .ToList();
 
-                // Load named entities
+                    _logger.LogInformation($"✅ Loaded {agentContext.History.Count} conversation turns into context");
+
+                    // ✅ LOG WHAT WE LOADED
+                    foreach (var turn in agentContext.History.TakeLast(3))
+                    {
+                        _logger.LogInformation($"  📝 Q: {turn.Question.Substring(0, Math.Min(50, turn.Question.Length))}");
+                        _logger.LogInformation($"     A: {turn.Answer.Substring(0, Math.Min(50, turn.Answer.Length))}...");
+                    }
+                }
+                else
+                {
+                    _logger.LogInformation($"ℹ️ No conversation history found for session {dbSession.SessionId} - starting fresh");
+                }
+
+                // ✅ Extract named entities
                 agentContext.NamedEntities = conversations
                     .SelectMany(c => c.NamedEntities ?? new List<string>())
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
+
+                _logger.LogInformation($"📌 Loaded {agentContext.NamedEntities.Count} named entities");
+
+                // ✅ Set last topic anchor
+                if (agentContext.History.Any())
+                {
+                    var lastConv = agentContext.History.Last();
+                    agentContext.LastTopicAnchor = lastConv.Question;
+                    _logger.LogInformation($"🎯 Set topic anchor: {lastConv.Question.Substring(0, Math.Min(50, lastConv.Question.Length))}");
+                }
 
                 return agentContext;
             }
@@ -4577,6 +5500,55 @@ These are the fixed organizational details for {plant} plant.";
             }
         }
 
+        // Add this method to DynamicRagService.cs:
+
+        private List<RelevantChunk> FilterByPolicyIntent(
+            List<RelevantChunk> chunks,
+            string question)
+        {
+            // Extract policy name from question
+            var policyKeywords = new Dictionary<string, string[]>
+            {
+                ["leave"] = new[] { "leave", "vacation", "absence" },
+                ["isms"] = new[] { "isms", "security", "information security" },
+                ["whistle"] = new[] { "whistle", "whistleblower", "complaint" },
+                ["safety"] = new[] { "safety", "ehs", "hazard" },
+                ["hr"] = new[] { "hr", "human resource", "personnel" }
+            };
+
+            var questionLower = question.ToLowerInvariant();
+
+            // Find which policy is being asked about
+            var targetPolicy = policyKeywords
+                .FirstOrDefault(kvp => kvp.Value.Any(keyword => questionLower.Contains(keyword)))
+                .Key;
+
+            if (string.IsNullOrEmpty(targetPolicy))
+                return chunks; // No specific policy detected
+
+            _logger.LogInformation($"🎯 Filtering for policy: {targetPolicy}");
+
+            // Filter chunks by matching policy
+            var filteredChunks = chunks
+                .Where(c => c.Source.ToLowerInvariant().Contains(targetPolicy))
+                .ToList();
+
+            // If we filtered too much (< 3 chunks), add back high-confidence chunks
+            if (filteredChunks.Count < 3 && chunks.Any())
+            {
+                var additionalChunks = chunks
+                    .Where(c => !filteredChunks.Contains(c))
+                    .Where(c => c.Similarity > 0.7)
+                    .Take(3 - filteredChunks.Count);
+
+                filteredChunks.AddRange(additionalChunks);
+            }
+
+            return filteredChunks.Any() ? filteredChunks : chunks;
+        }
+
+        // Update ExecuteRetrievalAsync to use this filter:
+       
         // ============================
         // VALIDATION WRAPPER
         // ============================
@@ -4758,6 +5730,8 @@ These are the fixed organizational details for {plant} plant.";
         {
             var result = new RetrievalResult { Chunks = new List<RelevantChunk>() };
 
+
+
             try
             {
                 // Expand query
@@ -4780,12 +5754,14 @@ These are the fixed organizational details for {plant} plant.";
                     question,
                     embModel,
                     maxResults,
-                    true, // meaiInfo
-                    conversationContext, // Pass ConversationContext, not List<ConversationTurn>
-                    false, // useReRanking - we'll do it separately
-                    embModel, // generationModel (using embModel as fallback)
+                    true,
+                    conversationContext,
+                    false,
+                    embModel,
                     plant
                 );
+
+                chunks = FilterByPolicyIntent(chunks, question);
 
                 // Apply BM25
                 var bm25Chunks = _bm25Service.Rank(question, chunks, maxResults * 2);
@@ -4883,29 +5859,35 @@ These are the fixed organizational details for {plant} plant.";
         // SAVE WRAPPER (Fire and Forget)
         // ============================
         private async Task SaveConversationSafelyAsync(
-            AgentContext context,
-            string question,
-            string answer,
-            List<RelevantChunk> chunks,
-            ModelConfiguration genModel,
-            ModelConfiguration embModel,
-            string plant,
-            VerificationResult? verification,
-            long processingTime)
+    AgentContext context,
+    string question,
+    string answer,
+    List<RelevantChunk> chunks,
+    ModelConfiguration genModel,
+    ModelConfiguration embModel,
+    string plant,
+    VerificationResult? verification,
+    long processingTime)
         {
             try
             {
+                _logger.LogInformation("💾 Starting safe conversation save...");
+
                 var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
                     context.SessionId,
                     context.UserId,
                     plant
                 );
 
+                // Generate embeddings
                 var questionEmbedding = await GetEmbeddingAsync(question, embModel);
                 var answerEmbedding = await GetEmbeddingAsync(answer, embModel);
+
+                // Extract entities
                 var entities = await _entityExtraction.ExtractEntitiesAsync(answer);
 
-                await SaveConversationToDatabaseFast(
+                // Save to database
+                var conversationId = await SaveConversationToDatabaseFast(
                     dbSession.SessionId,
                     question,
                     answer,
@@ -4922,21 +5904,39 @@ These are the fixed organizational details for {plant} plant.";
                     entities
                 );
 
-                // Update context
-                context.History.Add(new ConversationTurn
+                if (conversationId > 0)
                 {
-                    Question = question,
-                    Answer = answer,
-                    Timestamp = DateTime.Now,
-                    Sources = chunks.Select(c => c.Source).Distinct().ToList()
-                });
+                    _logger.LogInformation($"✅ Successfully saved conversation {conversationId}");
+
+                    // Update in-memory context
+                    context.History.Add(new ConversationTurn
+                    {
+                        Question = question,
+                        Answer = answer,
+                        Timestamp = DateTime.Now,
+                        Sources = chunks.Select(c => c.Source).Distinct().ToList()
+                    });
+
+                    // Keep only last 10 turns in memory
+                    if (context.History.Count > 10)
+                    {
+                        context.History = context.History.TakeLast(10).ToList();
+                    }
+
+                    _logger.LogInformation($"📚 Updated context history, now has {context.History.Count} turns");
+                }
+                else
+                {
+                    _logger.LogWarning("⚠️ Conversation save returned 0 - may have failed");
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to save conversation (non-critical)");
+                _logger.LogError(ex, "❌ Failed to save conversation (non-critical) - Session: {SessionId}", context?.SessionId);
                 // Swallow exception - don't fail the request
             }
         }
+
 
         // ============================
         // LOGGING HELPER
@@ -5218,7 +6218,7 @@ These are the fixed organizational details for {plant} plant.";
                 prompt = _systemPromptBuilder.BuildGeneralSystemPrompt();
             }
 
-           
+
             _logger.LogInformation($"📝 Prompt built, length: {prompt?.Length ?? 0} chars");
 
             var stream = await SafeCreateStream(model, prompt, cancellationToken);

@@ -149,7 +149,7 @@ namespace MEAI_GPT_API.Services
         //{
         //    new ModelConfiguration
         //    {
-        //        Name = "qwen3-embedding:8b",
+        //        Name = "nomic-embed-text:v1.5",
         //        Type = "embedding",
         //        MaxContextLength = 8192,
         //        EmbeddingDimension = 4096, // Nomic embedding dimension
@@ -189,10 +189,10 @@ namespace MEAI_GPT_API.Services
         {
             new ModelConfiguration
             {
-                Name = "qwen3-embedding:8b",
+                Name = "nomic-embed-text:v1.5",
                 Type = "embedding",
                 MaxContextLength = 8192,
-                EmbeddingDimension = 4096,
+                EmbeddingDimension = 768,
                 ModelOptions = new() { ["num_ctx"] = 8192 }
             },
             new ModelConfiguration

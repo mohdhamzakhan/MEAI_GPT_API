@@ -3,6 +3,7 @@ using MEAI_GPT_API.Data;
 using MEAI_GPT_API.Models;
 using MEAI_GPT_API.Service.Interface;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using System.Text.Json;
 using static MEAI_GPT_API.Controller.RagController;
@@ -11,22 +12,23 @@ namespace MEAI_GPT_API.Services
 {
     public class ConversationStorageService : IConversationStorageService
     {
-        private readonly ConversationDbContext _context;
+        private readonly IDbContextFactory<ConversationDbContext> _contextFactory;
         private readonly ILogger<ConversationStorageService> _logger;
         private readonly IModelManager _modelManager;
 
         public ConversationStorageService(
-            ConversationDbContext context,
+           IDbContextFactory<ConversationDbContext> contextFactory,
             ILogger<ConversationStorageService> logger,
             IModelManager modelManager)
         {
-            _context = context;
+            _contextFactory = contextFactory;
             _logger = logger;
             _modelManager = modelManager;
         }
 
         public async Task SaveConversationAsync(ConversationEntry entry)
         {
+            using var _context = await _contextFactory.CreateDbContextAsync();
             try
             {
                 _context.ConversationEntries.Add(entry);
@@ -64,6 +66,7 @@ namespace MEAI_GPT_API.Services
 
         public async Task<ConversationEntry?> GetConversationAsync(int id)
         {
+            using var _context = await _contextFactory.CreateDbContextAsync();
             return await _context.ConversationEntries
                 .Include(c => c.ParentConversation)
                 .Include(c => c.FollowUps)
@@ -72,6 +75,7 @@ namespace MEAI_GPT_API.Services
 
         public async Task<List<ConversationEntry>> GetConversationAsync(string filter, int limit = 1000)
         {
+            using var _context = await _contextFactory.CreateDbContextAsync();
             // Simple parser for filters like: EmbeddingModel == "value"
             string? embeddingModelValue = null;
             if (!string.IsNullOrEmpty(filter) && filter.Contains("EmbeddingModel"))
@@ -104,6 +108,7 @@ namespace MEAI_GPT_API.Services
 
         public async Task<List<ConversationEntry>> GetSessionConversationsAsync(string sessionId, int limit = 50)
         {
+            using var _context = await _contextFactory.CreateDbContextAsync();
             return await _context.ConversationEntries
                 .Where(c => c.SessionId == sessionId)
                 .OrderBy(c => c.CreatedAt)
@@ -114,6 +119,7 @@ namespace MEAI_GPT_API.Services
 
         public async Task<ConversationSession> GetOrCreateSessionAsync(string sessionId, string? userId = null, string? plant = null)
         {
+            using var _context = await _contextFactory.CreateDbContextAsync();
             var session = await _context.ConversationSessions
                 .FirstOrDefaultAsync(s => s.SessionId == sessionId);
 
@@ -145,12 +151,14 @@ namespace MEAI_GPT_API.Services
 
         public async Task UpdateSessionAsync(ConversationSession session)
         {
+            using var _context = await _contextFactory.CreateDbContextAsync();
             _context.ConversationSessions.Update(session);
             await _context.SaveChangesAsync();
         }
 
         public async Task MarkAsAppreciatedAsync(int conversationId)
         {
+            using var _context = await _contextFactory.CreateDbContextAsync();
             var conversation = await _context.ConversationEntries.FindAsync(conversationId);
             if (conversation != null)
             {
@@ -163,6 +171,7 @@ namespace MEAI_GPT_API.Services
 
         public async Task SaveCorrectionAsync(int conversationId, string correctedAnswer)
         {
+            using var _context = await _contextFactory.CreateDbContextAsync();
             var conversation = await _context.ConversationEntries.FindAsync(conversationId);
             if (conversation != null)
             {
@@ -180,7 +189,7 @@ namespace MEAI_GPT_API.Services
             int limit = 10)
         {
             var results = new List<ConversationSearchResult>();
-
+            using var _context = await _contextFactory.CreateDbContextAsync();
             try
             {
                 // Get all conversations with embeddings
@@ -240,6 +249,7 @@ namespace MEAI_GPT_API.Services
 
         public async Task<List<ConversationEntry>> GetAppreciatedAnswersAsync(string? topicTag = null, int limit = 100)
         {
+            using var _context = await _contextFactory.CreateDbContextAsync();
             var query = _context.ConversationEntries
                 .Where(c => c.WasAppreciated);
 
@@ -273,6 +283,7 @@ namespace MEAI_GPT_API.Services
 
         public async Task<ConversationStats> GetConversationStatsAsync()
         {
+            using var _context = await _contextFactory.CreateDbContextAsync();
             var totalConversations = await _context.ConversationEntries.CountAsync();
             var totalSessions = await _context.ConversationSessions.CountAsync();
             var appreciatedAnswers = await _context.ConversationEntries.CountAsync(c => c.WasAppreciated);
@@ -310,7 +321,8 @@ namespace MEAI_GPT_API.Services
 
         public async Task CleanupOldSessionsAsync(TimeSpan maxAge)
         {
-            var cutoffDate = DateTime.UtcNow - maxAge;
+            using var _context = await _contextFactory.CreateDbContextAsync();
+            var cutoffDate = DateTime.Now - maxAge;
             var oldSessions = await _context.ConversationSessions
                 .Where(s => s.LastAccessedAt < cutoffDate)
                 .ToListAsync();
@@ -323,6 +335,7 @@ namespace MEAI_GPT_API.Services
 
         public async Task<List<ConversationEntry>> GetFollowUpChainAsync(int parentId)
         {
+            using var _context = await _contextFactory.CreateDbContextAsync();
             var chain = new List<ConversationEntry>();
             var current = await GetConversationAsync(parentId);
 
@@ -338,6 +351,7 @@ namespace MEAI_GPT_API.Services
 
         public async Task AssignTopicTagAsync(int conversationId, string topicTag)
         {
+            using var _context = await _contextFactory.CreateDbContextAsync();
             var conversation = await _context.ConversationEntries.FindAsync(conversationId);
             if (conversation != null)
             {
@@ -360,6 +374,7 @@ namespace MEAI_GPT_API.Services
 
         public async Task<List<ConversationEntry>> GetCorrectedConversationsAsync()
         {
+            using var _context = await _contextFactory.CreateDbContextAsync();
             return await _context.ConversationEntries
                 .Where(c => c.CorrectedAnswer != null && c.QuestionEmbeddingJson != "")
                 .ToListAsync();
@@ -384,6 +399,7 @@ namespace MEAI_GPT_API.Services
         // ✅ FIXED: Use injected _context instead of creating new scope
         public async Task<List<SessionSummary>> GetConversationSessionsAsync(string? userId = null)
         {
+            using var _context = await _contextFactory.CreateDbContextAsync();
             var query = _context.ConversationSessions
                 .Include(s => s.Conversations)
                 .AsQueryable();
@@ -415,6 +431,7 @@ namespace MEAI_GPT_API.Services
         // ✅ FIXED: Use injected _context
         public async Task<List<ConversationMessage>> GetSessionMessagesAsync(string sessionId)
         {
+            using var _context = await _contextFactory.CreateDbContextAsync();
             var messages = await _context.ConversationEntries
                 .Where(e => e.SessionId == sessionId)
                 .OrderBy(e => e.CreatedAt)
@@ -432,6 +449,7 @@ namespace MEAI_GPT_API.Services
         // ✅ FIXED: Use injected _context
         public async Task DeleteSessionAsync(string sessionId)
         {
+            using var _context = await _contextFactory.CreateDbContextAsync();
             var session = await _context.ConversationSessions
                 .FirstOrDefaultAsync(s => s.SessionId == sessionId);
 
