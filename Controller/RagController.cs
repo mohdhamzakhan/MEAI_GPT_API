@@ -47,81 +47,149 @@ namespace MEAI_GPT_API.Controller
             _translationService = translationService;
         }
         [HttpPost("query")]
-        public async Task<IActionResult> Query([FromBody] QueryRequest request, [FromServices] IBackgroundTaskQueue taskQueue)
+        //public async Task<IActionResult> Query([FromBody] QueryRequest request, [FromServices] IBackgroundTaskQueue taskQueue)
+        //{
+        //    if (string.IsNullOrWhiteSpace(request.Question))
+        //        return BadRequest("Question cannot be empty");
+
+        //    var tcs = new TaskCompletionSource<QueryResponse>();
+
+        //    await taskQueue.QueueBackgroundWorkItemAsync(async token =>
+        //    {
+        //        try
+        //        {
+        //            // 🔍 DETECT IF IT'S A CODING QUERY
+        //            var codingDetection = _codingDetection.DetectCodingQuery(request.Question);
+
+        //            QueryResponse finalResponse;
+
+        //            if (codingDetection.IsCodingRelated && codingDetection.Confidence > 0.5)
+        //            {
+        //                var codingResponse = await _codingService.ProcessCodingQueryAsync(
+        //                    request.Question,
+        //                    null,
+        //                    codingDetection.DetectedLanguage != "general" ? codingDetection.DetectedLanguage : null,
+        //                    request.sessionId,
+        //                    includeExamples: true,
+        //                    difficulty: "intermediate",
+        //                    userId: request.UserId
+        //                );
+
+        //                finalResponse = new QueryResponse
+        //                {
+        //                    Answer = codingResponse.Solution,
+        //                    Sources = new List<string> { $"{codingResponse.Language} Coding Assistant" },
+        //                    SessionId = codingResponse.SessionId,
+        //                    ProcessingTimeMs = codingResponse.ProcessingTimeMs,
+        //                    IsFromCache = codingResponse.IsFromCache,
+        //                    Confidence = codingResponse.Confidence,
+        //                    Metadata = new Dictionary<string, object>
+        //                    {
+        //                        ["IsCodingResponse"] = true,
+        //                        ["Language"] = codingResponse.Language,
+        //                        ["TechnicalLevel"] = codingResponse.TechnicalLevel,
+        //                        ["SolutionComplexity"] = codingResponse.SolutionComplexity,
+        //                        ["CodeExamples"] = codingResponse.CodeExamples,
+        //                        ["RecommendedNextSteps"] = codingResponse.RecommendedNextSteps,
+        //                        ["RelatedTopics"] = codingResponse.RelatedTopics
+        //                    }
+        //                };
+        //            }
+        //            else
+        //            {
+        //                finalResponse = await _ragService.ProcessQueryAsync(
+        //                    request.Question,
+        //                    request.Plant,
+        //                    request.GenerationModel,
+        //                    request.EmbeddingModel,
+        //                    request.MaxResults,
+        //                    request.meai_info,
+        //                    request.sessionId,
+        //                    request.UserId,
+        //                    useReRanking: true
+        //                );
+        //            }
+
+        //            tcs.SetResult(finalResponse);
+        //        }
+        //        catch (Exception ex)
+        //        {
+        //            _logger.LogError(ex, "Query processing failed.");
+        //            tcs.SetException(ex);
+        //        }
+        //    });
+
+        //    // Wait until background worker finishes processing this job
+        //    var result = await tcs.Task;
+        //    return Ok(result);
+        //}
+        public async Task<IActionResult> Query([FromBody] QueryRequest request)
         {
             if (string.IsNullOrWhiteSpace(request.Question))
                 return BadRequest("Question cannot be empty");
 
-            var tcs = new TaskCompletionSource<QueryResponse>();
-
-            await taskQueue.QueueBackgroundWorkItemAsync(async token =>
+            try
             {
-                try
+                var codingDetection = _codingDetection.DetectCodingQuery(request.Question);
+
+                QueryResponse finalResponse;
+
+                if (codingDetection.IsCodingRelated && codingDetection.Confidence > 0.5)
                 {
-                    // 🔍 DETECT IF IT'S A CODING QUERY
-                    var codingDetection = _codingDetection.DetectCodingQuery(request.Question);
+                    var codingResponse = await _codingService.ProcessCodingQueryAsync(
+                        request.Question,
+                        null,
+                        codingDetection.DetectedLanguage != "general"
+                            ? codingDetection.DetectedLanguage
+                            : null,
+                        request.sessionId,
+                        includeExamples: true,
+                        difficulty: "intermediate",
+                        userId: request.UserId
+                    );
 
-                    QueryResponse finalResponse;
-
-                    if (codingDetection.IsCodingRelated && codingDetection.Confidence > 0.5)
+                    finalResponse = new QueryResponse
                     {
-                        var codingResponse = await _codingService.ProcessCodingQueryAsync(
-                            request.Question,
-                            null,
-                            codingDetection.DetectedLanguage != "general" ? codingDetection.DetectedLanguage : null,
-                            request.sessionId,
-                            includeExamples: true,
-                            difficulty: "intermediate",
-                            userId: request.UserId
-                        );
-
-                        finalResponse = new QueryResponse
+                        Answer = codingResponse.Solution,
+                        Sources = new List<string> { $"{codingResponse.Language} Coding Assistant" },
+                        SessionId = codingResponse.SessionId,
+                        ProcessingTimeMs = codingResponse.ProcessingTimeMs,
+                        IsFromCache = codingResponse.IsFromCache,
+                        Confidence = codingResponse.Confidence,
+                        Metadata = new Dictionary<string, object>
                         {
-                            Answer = codingResponse.Solution,
-                            Sources = new List<string> { $"{codingResponse.Language} Coding Assistant" },
-                            SessionId = codingResponse.SessionId,
-                            ProcessingTimeMs = codingResponse.ProcessingTimeMs,
-                            IsFromCache = codingResponse.IsFromCache,
-                            Confidence = codingResponse.Confidence,
-                            Metadata = new Dictionary<string, object>
-                            {
-                                ["IsCodingResponse"] = true,
-                                ["Language"] = codingResponse.Language,
-                                ["TechnicalLevel"] = codingResponse.TechnicalLevel,
-                                ["SolutionComplexity"] = codingResponse.SolutionComplexity,
-                                ["CodeExamples"] = codingResponse.CodeExamples,
-                                ["RecommendedNextSteps"] = codingResponse.RecommendedNextSteps,
-                                ["RelatedTopics"] = codingResponse.RelatedTopics
-                            }
-                        };
-                    }
-                    else
-                    {
-                        finalResponse = await _ragService.ProcessQueryAsync(
-                            request.Question,
-                            request.Plant,
-                            request.GenerationModel,
-                            request.EmbeddingModel,
-                            request.MaxResults,
-                            request.meai_info,
-                            request.sessionId,
-                            request.UserId,
-                            useReRanking: true
-                        );
-                    }
-
-                    tcs.SetResult(finalResponse);
+                            ["IsCodingResponse"] = true,
+                            ["Language"] = codingResponse.Language,
+                            ["TechnicalLevel"] = codingResponse.TechnicalLevel,
+                            ["SolutionComplexity"] = codingResponse.SolutionComplexity,
+                            ["CodeExamples"] = codingResponse.CodeExamples,
+                            ["RecommendedNextSteps"] = codingResponse.RecommendedNextSteps,
+                            ["RelatedTopics"] = codingResponse.RelatedTopics
+                        }
+                    };
                 }
-                catch (Exception ex)
+                else
                 {
-                    _logger.LogError(ex, "Query processing failed.");
-                    tcs.SetException(ex);
+                    finalResponse = await _ragService.ProcessQueryAsync(
+                        request.Question,
+                        request.Plant,
+                        request.GenerationModel,
+                        request.EmbeddingModel,
+                        request.MaxResults,
+                        request.meai_info,
+                        request.sessionId,
+                        request.UserId,
+                        useReRanking: true
+                    );
                 }
-            });
 
-            // Wait until background worker finishes processing this job
-            var result = await tcs.Task;
-            return Ok(result);
+                return Ok(finalResponse);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Query processing failed");
+                return StatusCode(500, new { error = "An error occurred processing your request." });
+            }
         }
 
         [HttpPost("query-stream")]

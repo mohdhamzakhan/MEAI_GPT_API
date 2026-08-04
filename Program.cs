@@ -32,7 +32,9 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
     {
-        policy.WithOrigins("https://10.235.20.49:8567")
+        policy.WithOrigins(
+            "http://localhost:5173",
+            "https://10.235.20.49:8567")
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
@@ -157,6 +159,8 @@ builder.Services.AddSingleton<Bm25Service>();
 builder.Services.AddSingleton<CompliancePolicyDetector>();
 builder.Services.AddSingleton<QueryIntentAnalyzer>();
 builder.Services.AddScoped<TranslationService>();
+builder.Services.AddSingleton<ConversationHistoryService>();
+builder.Services.AddSingleton<AppreciatedAnswerStore>();
 
 //For Agentic AI
 builder.Services.AddSingleton<AgentDecisionLogger>();

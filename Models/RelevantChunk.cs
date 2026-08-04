@@ -9,5 +9,11 @@
         public string PolicyType { get; set; } = "";
         public List<float>? Embedding { get; set; } // NEW
         public double Bm25Score { get; set; }    // BM25 score
+        /// <summary>
+        /// Boosted relevance score used purely for ranking/ordering.
+        /// May exceed 1.0 due to policy-match and plant-specific boosts.
+        /// Never exposed to the user or used for threshold comparisons.
+        /// </summary>
+        public double RelevanceScore { get; set; }
     }
 }
