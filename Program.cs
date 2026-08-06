@@ -61,6 +61,7 @@ builder.Services.Configure<OllamaLoadBalancerOptions>(
 // Configure HttpClient (remove BaseAddress)
 builder.Services.AddHttpClient("OllamaAPI", client =>
 {
+    client.BaseAddress = new Uri("http://10.235.20.91:11434");
     // Note: No BaseAddress set - handled by OllamaHttpClient
     var timeout = builder.Configuration.GetValue<int>("OllamaLoadBalancer:TimeoutMinutes", 10);
     client.Timeout = TimeSpan.FromMinutes(timeout);
@@ -253,7 +254,6 @@ else
         .WriteTo.File("logs/meai_rag_api.log", rollingInterval: RollingInterval.Day);
 });
 }
-
 
 
 var app = builder.Build();

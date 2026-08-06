@@ -110,11 +110,65 @@ namespace MEAI_GPT_API.Service.Models
             int tokenCount = 0;
             string previousLine = "";
             bool inListContext = false;
+            bool inTableOfContents = false;
 
             foreach (var line in lines)
             {
                 string trimmed = line.Trim();
                 if (string.IsNullOrEmpty(trimmed)) continue;
+
+                // ✅ NEW: Detect start of a Table of Contents block
+                if (!inTableOfContents && IsTableOfContentsHeading(trimmed))
+                {
+                    // Close whatever chunk was open (real content, keep it)
+                    if (currentChunk.Length > 0)
+                    {
+                        var contentType = DetectContentType(currentTitle, currentChunk.ToString());
+                        var completeChunk = BuildComprehensiveChunk(
+                            currentSectionId, currentTitle, currentChunk.ToString(), contentType);
+                        chunks.Add((completeChunk, sourceFile, currentSectionId, currentTitle));
+                    }
+
+                    inTableOfContents = true;
+                    currentChunk.Clear();
+                    currentSectionId = "";
+                    currentTitle = "";
+                    tokenCount = 0;
+                    inListContext = false;
+                    previousLine = trimmed;
+
+                    _logger.LogDebug("Entered Table of Contents block — will skip until real content resumes");
+                    continue;
+                }
+
+                // ✅ NEW: While inside TOC, just watch for the exit condition and discard everything
+                if (inTableOfContents)
+                {
+                    if (IsRealProseLine(trimmed))
+                    {
+                        // First substantial sentence = TOC has ended, real content begins.
+                        // Fall through to normal processing for this line (don't 'continue').
+                        inTableOfContents = false;
+                        _logger.LogDebug("Exited Table of Contents block — resuming normal chunking");
+                    }
+                    else
+                    {
+                        // Still inside TOC — discard this line entirely, don't chunk it.
+                        previousLine = trimmed;
+                        continue;
+                    }
+                }
+
+                if (IsListItem(trimmed, previousLine))
+                {
+                    inListContext = true;
+                    _logger.LogTrace($"List item detected: {trimmed.Substring(0, Math.Min(50, trimmed.Length))}...");
+
+                    currentChunk.AppendLine(trimmed);
+                    tokenCount += _stringProcessor.EstimateTokenCount(trimmed);
+                    previousLine = trimmed;
+                    continue;
+                }
 
                 // Check for section header
                 var (foundSection, detectedSectionId, detectedTitle) = DetectSectionHeader(trimmed);
@@ -145,17 +199,17 @@ namespace MEAI_GPT_API.Service.Models
                 }
 
                 // ✅ CHECK: Is this a list item (not a new section)?
-                if (IsListItem(trimmed, previousLine))
-                {
-                    inListContext = true;
-                    _logger.LogTrace($"List item detected: {trimmed.Substring(0, Math.Min(50, trimmed.Length))}...");
+                //if (IsListItem(trimmed, previousLine))
+                //{
+                //    inListContext = true;
+                //    _logger.LogTrace($"List item detected: {trimmed.Substring(0, Math.Min(50, trimmed.Length))}...");
 
-                    // Add to current chunk without creating new section
-                    currentChunk.AppendLine(trimmed);
-                    tokenCount += _stringProcessor.EstimateTokenCount(trimmed);
-                    previousLine = trimmed;
-                    continue;
-                }
+                //    // Add to current chunk without creating new section
+                //    currentChunk.AppendLine(trimmed);
+                //    tokenCount += _stringProcessor.EstimateTokenCount(trimmed);
+                //    previousLine = trimmed;
+                //    continue;
+                //}
 
                 // Normal line processing
                 int lineTokens = _stringProcessor.EstimateTokenCount(trimmed);
@@ -202,6 +256,31 @@ namespace MEAI_GPT_API.Service.Models
             return chunks;
         }
 
+        private static readonly Regex TocHeadingPattern = new Regex(
+    @"^(?:\d+\.?\s*)?(?:TABLE OF )?CONTENTS\s*$",
+    RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+        private bool IsTableOfContentsHeading(string line)
+        {
+            // Matches "CONTENTS", "4. CONTENTS", "TABLE OF CONTENTS", etc.
+            return TocHeadingPattern.IsMatch(line);
+        }
+
+        private bool IsRealProseLine(string line)
+        {
+            // TOC entries are short titles ("Section 2 – Internal Rule Management.",
+            // "3.3.1 Information security management standards...").
+            // Real body prose is longer and reads like a sentence.
+            var wordCount = line.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+
+            // Heuristic: TOC lines rarely exceed ~10 words; body paragraphs almost always do.
+            // Also require it NOT look like a "SectionX" / "N.N Title" TOC line itself.
+            bool looksLikeTocEntry =
+                Regex.IsMatch(line, @"^(?:Section\s*\d+|(\d+(?:\.\d+)*)\s)", RegexOptions.IgnoreCase);
+
+            return wordCount > 10 && !looksLikeTocEntry;
+        }
+
         private bool IsListItem(string line, string previousLine)
         {
             var trimmed = line.Trim();
@@ -213,6 +292,16 @@ namespace MEAI_GPT_API.Service.Models
 
             var number = int.Parse(match.Groups[1].Value);
             var restOfLine = match.Groups[2].Value;
+
+            // ✅ NEW: If this is item "1" and the previous line ends with ':',
+            // this is the START of an inline numbered list, not a new section.
+            // e.g. "...is necessary to:" followed by "1. Protect safety..."
+            if (number == 1 &&
+                !string.IsNullOrEmpty(previousLine) &&
+                previousLine.TrimEnd().EndsWith(":"))
+            {
+                return true;
+            }
 
             // If previous line was also numbered, this is likely a list
             if (!string.IsNullOrEmpty(previousLine))
@@ -238,10 +327,10 @@ namespace MEAI_GPT_API.Service.Models
             // Check for common list patterns
             var listPatterns = new[]
             {
-                @"^All\s+", @"^Each\s+", @"^Every\s+", @"^Any\s+",
-                @"^No\s+", @"^Only\s+", @"^Never\s+", @"^Always\s+",
-                @".+\?$", // Ends with question mark
-            };
+        @"^All\s+", @"^Each\s+", @"^Every\s+", @"^Any\s+",
+        @"^No\s+", @"^Only\s+", @"^Never\s+", @"^Always\s+",
+        @".+\?$", // Ends with question mark
+    };
 
             return listPatterns.Any(p => Regex.IsMatch(restOfLine, p, RegexOptions.IgnoreCase));
         }

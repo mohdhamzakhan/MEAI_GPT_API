@@ -1,6 +1,6 @@
 ﻿public class ChromaDbOptions
 {
-    public string BaseUrl { get; set; } = "192.168.129.203:7654";
+    public string BaseUrl { get; set; } = "10.235.20.91:7654";
     public int TimeoutMinutes { get; set; } = 5;
     public string Tenant { get; set; } = "default_tenant";
     public string Database { get; set; } = "default_database";
