@@ -6788,6 +6788,20 @@ Answer directly without introducing yourself."
             bool isOracleEbsQuery = false,
             [EnumeratorCancellation] CancellationToken ct = default)
         {
+            if (meaiInfo && !isOracleEbsQuery)
+            {
+                var hasSufficientCoverage = _policyAnalysis.CheckPolicyCoverage(relevantChunks, question);
+                if (!hasSufficientCoverage)
+                {
+                    _logger.LogWarning(
+                        "⚠️ Insufficient policy coverage for streaming response (plant={Plant}, chunks={Count}) — refusing to generate",
+                        plant, relevantChunks.Count);
+
+                    yield return $"I don't have sufficient policy information to answer this question for {plant}. Please contact your supervisor or HR department for clarification on this matter.";
+                    yield break;
+                }
+            }
+
             string systemPrompt;
             if (isOracleEbsQuery)
                 systemPrompt = _systemPromptBuilder.BuildOracleEBSQuerySystemPrompt(plant, relevantChunks, question);

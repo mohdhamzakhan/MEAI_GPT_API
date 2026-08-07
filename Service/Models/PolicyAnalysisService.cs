@@ -313,5 +313,54 @@ namespace MEAI_GPT_API.Service.Models
 
             return hasSufficientCoverage;
         }
+        //public bool CheckPolicyCoverage(List<RelevantChunk> chunks, string question)
+        //{
+        //    if (!chunks.Any())
+        //    {
+        //        _logger.LogWarning($"⚠️ No relevant chunks found for question: {question}");
+        //        return false;
+        //    }
+
+        //    var veryHighQuality = chunks.Where(c => c.Similarity >= 0.65).ToList();
+        //    var highQualityChunks = chunks.Where(c => c.Similarity >= 0.45).ToList();
+        //    var mediumQualityChunks = chunks.Where(c => c.Similarity >= 0.30).ToList();
+
+        //    // ✅ CHANGED: require actual word overlap between the QUESTION and the chunk text,
+        //    // not just presence of generic policy vocabulary anywhere in the corpus.
+        //    var questionWords = question
+        //        .ToLowerInvariant()
+        //        .Split(new[] { ' ', ',', '.', '?', '!' }, StringSplitOptions.RemoveEmptyEntries)
+        //        .Where(w => w.Length > 3)
+        //        .ToHashSet();
+
+        //    bool HasTopicalOverlap(RelevantChunk c)
+        //    {
+        //        if (!questionWords.Any()) return false;
+        //        var chunkWords = c.Text.ToLowerInvariant();
+        //        var matchCount = questionWords.Count(qw => chunkWords.Contains(qw));
+        //        // Require at least 2 meaningful question words to actually appear in the chunk,
+        //        // or 1 if the question is very short.
+        //        return matchCount >= Math.Min(2, questionWords.Count);
+        //    }
+
+        //    var hasSufficientCoverage =
+        //        veryHighQuality.Any() ||
+        //        (highQualityChunks.Count >= 1 && highQualityChunks.Any(HasTopicalOverlap)) ||
+        //        (mediumQualityChunks.Count >= 2 && mediumQualityChunks.Count(HasTopicalOverlap) >= 2);
+
+        //    if (!hasSufficientCoverage)
+        //    {
+        //        _logger.LogWarning($"⚠️ Insufficient policy coverage for question: {question}. " +
+        //                          $"VeryHigh: {veryHighQuality.Count}, High: {highQualityChunks.Count}, " +
+        //                          $"Medium: {mediumQualityChunks.Count}");
+
+        //        foreach (var chunk in chunks.Take(3))
+        //        {
+        //            _logger.LogInformation($"📄 Chunk: {chunk.Source} | Similarity: {chunk.Similarity:F3} | Overlap: {HasTopicalOverlap(chunk)}");
+        //        }
+        //    }
+
+        //    return hasSufficientCoverage;
+        //}
     }
 }

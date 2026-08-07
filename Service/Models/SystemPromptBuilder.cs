@@ -188,31 +188,33 @@ Would you like detailed information about any specific policy?
 
         public async Task<string> BuildMeaiSystemPrompt(string plant, List<RelevantChunk> chunks, string query)
         {
-            
-
+            // 1. Metadata queries ("what policies do you have") — most specific intent, check first
             if (IsMetadataQuery(query))
                 return BuildMetadataSystemPrompt(plant, chunks);
 
+            // 2. Section-reference queries ("section 6.1", "clause 3.3.1") — structural signal takes
+            //    priority over generic "policy"/"guidelines" wording, since the section-aware prompt
+            //    is a strict superset of what the generic policy-detail prompt offers.
+            if (HasSectionReference(query))
+                return await BuildDynamicSectionSystemPrompt(plant, chunks, query);
+
+            // 3. Policy detail queries ("explain the policy on X", "what are the requirements for Y")
             if (IsPolicyDetailQuery(query))
                 return BuildPolicyDetailSystemPrompt(plant, chunks, query);
 
+            // 4. Abbreviation-heavy queries with no section reference and no explicit policy-detail phrasing
             if (_entityExtraction.HasManyAbbreviations(query))
             {
-                if (HasSectionReference(query))
+                var variables = new Dictionary<string, object>
                 {
-                    return await BuildDynamicSectionSystemPrompt(plant, chunks, query);
-                }
-                else if (_entityExtraction.HasManyAbbreviations(query))
-                {
-                    var variables = new Dictionary<string, object>
-                    {
-                        ["plant"] = plant,
-                        ["abbreviations"] = _entityExtraction.FormatAbbreviations(_entityExtraction.ExtractAbbreviationsFromQuery(query, chunks))
-                    };
-                    return BuildSystemPromptFromTemplate(plant, "abbreviation_heavy", variables);
-                }
+                    ["plant"] = plant,
+                    ["abbreviations"] = _entityExtraction.FormatAbbreviations(
+                        _entityExtraction.ExtractAbbreviationsFromQuery(query, chunks))
+                };
+                return BuildSystemPromptFromTemplate(plant, "abbreviation_heavy", variables);
             }
 
+            // 5. Default fallback
             return BuildContextAwareSystemPrompt(plant, chunks, query);
         }
 
