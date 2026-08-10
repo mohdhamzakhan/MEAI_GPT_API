@@ -48,7 +48,13 @@ Passage:
                 };
 
                 var response = await _ollama.PostAsJsonAsync("/api/generate", request);
-                response.EnsureSuccessStatusCode();
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Reranker call failed for chunk {Index}: {Status}", i, response.StatusCode);
+                    scored.Add((i, chunks[i].Similarity)); // fall back instead of throwing
+                    continue;
+                }
+                response.EnsureSuccessStatusCode(); // safe now, only reached on success path anyway — can remove
 
                 var json = await response.Content.ReadAsStringAsync();
                 using var doc = JsonDocument.Parse(json);
