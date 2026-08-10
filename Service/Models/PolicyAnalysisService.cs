@@ -95,6 +95,17 @@ namespace MEAI_GPT_API.Service.Models
                 };
             }
 
+            var annexMatch = Regex.Match(lowerQuery, @"annex(?:ure)?\s*(?:no\.?)?\s*(\d+)");
+            if (annexMatch.Success)
+            {
+                return new SectionQuery
+                {
+                    SectionNumber = annexMatch.Groups[1].Value,
+                    DocumentType = "",
+                    IsAnnexure = true   // add this flag to SectionQuery
+                };
+            }
+
             // Pattern 5: Topic-based dynamic section detection - NOW AWAITED
             //var topicBasedSection = await DetectSectionByTopicDynamic(lowerQuery);
             //if (topicBasedSection != null)

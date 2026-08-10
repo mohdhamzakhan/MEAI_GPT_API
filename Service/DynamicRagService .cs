@@ -3139,6 +3139,11 @@ Answer directly without introducing yourself."
                     boost += 0.10;
                 }
 
+                if (documentText.Contains(originalQuery, StringComparison.OrdinalIgnoreCase))
+                {
+                    boost += 0.60; // strong boost for exact phrase match
+                }
+
                 // General policy-document signal (weaker)
                 var isPolicyDocument =
                     lowerSource.Contains("policy") ||
@@ -3450,18 +3455,54 @@ Answer directly without introducing yourself."
         }
         private bool IsSectionContentDynamic(string text, string source, SectionQuery sectionQuery)
         {
-            var lowerText = text.ToLowerInvariant(); var sectionNumber = sectionQuery.SectionNumber; var documentType = sectionQuery.DocumentType;
-            // Check for direct section references (anchored — see IsExactSectionMatch)
-            if (IsExactSectionMatch(lowerText, sectionNumber)) return true;
+            var lowerText = text.ToLowerInvariant();
+            var sectionNumber = sectionQuery.SectionNumber;
+            var documentType = sectionQuery.DocumentType;
+
+            // Check for direct references — route to the right matcher based on query type
+            if (sectionQuery.IsAnnexure)
+            {
+                if (IsExactAnnexureMatch(lowerText, sectionNumber)) return true;
+            }
+            else
+            {
+                if (IsExactSectionMatch(lowerText, sectionNumber)) return true;
+            }
+
             // Check document type alignment
             if (!string.IsNullOrEmpty(documentType))
             {
-                var sourceFileName = Path.GetFileNameWithoutExtension(source).ToLowerInvariant(); if (!sourceFileName.Contains(documentType.ToLowerInvariant()) && !sourceFileName.Contains("general") && !sourceFileName.Contains("centralized"))
-                {                    // If document type doesn't match and it's not a general document, lower relevance
+                var sourceFileName = Path.GetFileNameWithoutExtension(source).ToLowerInvariant();
+                if (!sourceFileName.Contains(documentType.ToLowerInvariant()) &&
+                    !sourceFileName.Contains("general") &&
+                    !sourceFileName.Contains("centralized"))
+                {
                     return false;
                 }
-            }             // Check for section-specific content based on policy type
-            var expectedTopics = _policyAnalysis.GetDynamicSectionTopics(sectionNumber, documentType); var hasExpectedContent = expectedTopics.Any(topic => lowerText.Contains(topic.ToLowerInvariant())); return hasExpectedContent;
+            }
+
+            // Annexures don't have meaningful "expected topics" the way sections do —
+            // an exact-match miss above means this chunk isn't the one being asked for.
+            if (sectionQuery.IsAnnexure)
+                return false;
+
+            // Check for section-specific content based on policy type
+            var expectedTopics = _policyAnalysis.GetDynamicSectionTopics(sectionNumber, documentType);
+            var hasExpectedContent = expectedTopics.Any(topic => lowerText.Contains(topic.ToLowerInvariant()));
+            return hasExpectedContent;
+        }
+
+        private bool IsExactAnnexureMatch(string lowerText, string annexureNumber)
+        {
+            var escaped = Regex.Escape(annexureNumber);
+            var patterns = new[]
+            {
+        $@"annexure\s*{escaped}\b",
+        $@"annexure[\s\-]+{escaped}\b",
+        $@"annex\s*{escaped}\b",
+        $@"annexure\s*no\.?\s*{escaped}\b"
+    };
+            return patterns.Any(p => Regex.IsMatch(lowerText, p));
         }
         // Supporting class for section queries
 
@@ -6201,7 +6242,7 @@ Answer directly without introducing yourself."
                         .Concat(bm25Chunks)
                         .GroupBy(c => c.Id)
                         .Select(g => g.First())
-                        .OrderByDescending(c => c.RelevanceScore + (c.Bm25Score * 0.1))
+                        .OrderByDescending(c => c.RelevanceScore + (c.Bm25Score * 0.5)) // was 0.1
                         .Take(maxResults)
                         .ToList();
 
