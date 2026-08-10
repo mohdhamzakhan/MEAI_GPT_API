@@ -4445,13 +4445,23 @@ Answer directly without introducing yourself."
         }
 
 
-        private string AutoSelectGenerationModel(string question)
+        private async Task<string> AutoSelectGenerationModel(string question)
         {
             var wc = question.Split(' ').Length;
 
-            if (wc <= 12) return "llama3.2:1b";
-            if (wc <= 40) return "llama3.1:8b";
-            return "qwen3:8b";
+            var candidate =
+                wc <= 12 ? "llama3.2:1b" :
+                wc <= 40 ? "llama3.1:8b" :
+                "qwen3:8b";
+
+            if (await _modelManager.ValidateModelAsync(candidate))
+                return candidate;
+
+            _logger.LogWarning(
+                "Auto-selected generation model '{Candidate}' is not available; falling back to configured default '{Default}'",
+                candidate, _config.DefaultGenerationModel);
+
+            return _config.DefaultGenerationModel;
         }
 
 
@@ -5993,7 +6003,8 @@ Answer directly without introducing yourself."
                 }
 
                 // Auto-select models
-                generationModel ??= AutoSelectGenerationModel(question);
+                if (string.IsNullOrEmpty(generationModel))
+                    generationModel = await AutoSelectGenerationModel(question);
                 embeddingModel ??= _config.DefaultEmbeddingModel;
 
                 // Validate models

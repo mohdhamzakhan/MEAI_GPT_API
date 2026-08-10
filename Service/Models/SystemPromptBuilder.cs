@@ -731,7 +731,49 @@ For Safety, Compliance, or Legal matters:
 
 Current context contains: {string.Join(", ", chunks.Select(c => DeterminePolicyTypeFromSource(c.Source)).Distinct())} policies.
 
+{BuildSectionPolicyContextBlock(chunks)}
+
 Now, provide a comprehensive answer about {sectionRef} of {docType} based on the available context.";
+        }
+
+        /// <summary>
+        /// Renders the actual retrieved chunk text for the section-query prompt.
+        /// BuildDynamicSectionSystemPrompt previously told the model to "quote
+        /// directly", "extract ALL relevant details", and "be comprehensive"
+        /// about a specific section, while only ever including the *list of
+        /// section numbers detected* and the *policy types present* — never the
+        /// chunk content itself. With no real excerpt text in the prompt, the
+        /// model had nothing to quote from and would generate plausible-sounding
+        /// but fabricated policy content instead. This mirrors the context block
+        /// used in BuildPolicyDetailSystemPrompt / BuildContextAwareSystemPrompt.
+        /// </summary>
+        private string BuildSectionPolicyContextBlock(List<RelevantChunk> chunks)
+        {
+            var sb = new StringBuilder();
+
+            if (!chunks.Any())
+            {
+                sb.AppendLine("⚠️ NO POLICY EXCERPTS WERE RETRIEVED FOR THIS QUESTION.");
+                sb.AppendLine("Do not answer from general knowledge. State clearly that the requested");
+                sb.AppendLine("section was not found in the available policy context.");
+                return sb.ToString();
+            }
+
+            sb.AppendLine("📄 POLICY CONTEXT (this is the ONLY source you may use):");
+            sb.AppendLine();
+
+            int i = 1;
+            foreach (var chunk in chunks)
+            {
+                sb.AppendLine($"--- Excerpt {i} ---");
+                sb.AppendLine($"Document: {chunk.Source}");
+                sb.AppendLine("Content:");
+                sb.AppendLine(chunk.Text);
+                sb.AppendLine();
+                i++;
+            }
+
+            return sb.ToString();
         }
         public string BuildContextAwareSystemPrompt(string plant, List<RelevantChunk> chunks, string query)
         {

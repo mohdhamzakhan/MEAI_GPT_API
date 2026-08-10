@@ -1,4 +1,5 @@
 ﻿using MEAI_GPT_API.Models;
+using Microsoft.Extensions.Options;
 using System.Text.Json;
 
 namespace MEAI_GPT_API.Services.Agent
@@ -8,15 +9,22 @@ namespace MEAI_GPT_API.Services.Agent
         private readonly HttpClient _ollamaClient;
         private readonly AgentDecisionLogger _decisionLogger;
         private readonly ILogger<SelfVerifier> _logger;
-
+        private readonly string _verifierModel;
         public SelfVerifier(
             IHttpClientFactory httpClientFactory,
             AgentDecisionLogger decisionLogger,
-            ILogger<SelfVerifier> logger)
+            ILogger<SelfVerifier> logger,
+            IOptions<DynamicRAGConfiguration> config)
         {
             _ollamaClient = httpClientFactory.CreateClient("OllamaAPI");
             _decisionLogger = decisionLogger;
             _logger = logger;
+            var cfg = config.Value;
+            _verifierModel = !string.IsNullOrWhiteSpace(cfg.VerifierModel)
+                ? cfg.VerifierModel
+                : (!string.IsNullOrWhiteSpace(cfg.DefaultGenerationModel)
+                ? cfg.DefaultGenerationModel
+                 : "llama3.2:1b");
         }
 
         public async Task<VerificationResult> VerifyResponseAsync(
@@ -94,13 +102,15 @@ Answer with ONLY 'yes' or 'no'.";
 
             try
             {
-                var llmResponse = await CallLLMAsync(prompt, "llama3.2:1b");
+                //var llmResponse = await CallLLMAsync(prompt, "llama3.2:1b");
+                var llmResponse = await CallLLMAsync(prompt, _verifierModel);
                 return llmResponse.ToLowerInvariant().Contains("yes");
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogWarning(ex, "Completeness check failed (model '{Model}'); falling back to length heuristic", _verifierModel);
                 // Fallback: simple heuristic
-                return response.Length > 50;
+                return true;
             }
         }
 
