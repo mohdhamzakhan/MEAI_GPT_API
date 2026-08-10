@@ -10,6 +10,7 @@ using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -917,6 +918,12 @@ These are the fixed organizational details for {plant} plant.";
 
                 var answerEmbedding = await GetPerRequestEmbeddingAsync(answer);
 
+                // Still needed for DB storage (semantic search over past answers) —                // just no longer used to re-score/select the cited chunks (see below).
+                // 🔍 Select the chunks we report as Sources/RelevantChunks, and derive                // Confidence from them.                //                // Previously this compared the *generated answer's* embedding against                // each chunk and overwrote chunk.Similarity with that score. That measures                // "does the answer sound like this chunk", not "was this chunk the honest                // basis for the answer" — a hallucinated answer that happens to echo a                // chunk's wording would score as confidently grounded, while a chunk that                // genuinely fed the answer but got paraphrased differently could be dropped.                // It also silently discarded the true retrieval Similarity.                //                // Instead, rank/filter using the retrieval-time signal: the reranker's                // score when available (RerankScore), otherwise raw cosine Similarity.                // Confidence is then the average raw Similarity of what was actually                // retrieved and used as context — an honest reflection of retrieval                // quality, not of how well the model's own wording matches it.
+                var rankedChunks = relevantChunks.OrderByDescending(c => c.RerankScore ?? c.Similarity).ToList();
+
+
+
                 // 🔍 Rank top chunks
                 var scored = await Task.WhenAll(
                     relevantChunks.OrderByDescending(x => x.Similarity)
@@ -934,12 +941,10 @@ These are the fixed organizational details for {plant} plant.";
                 // It is already correct IF Similarity was never inflated. Double-check here:
 
                 var dynamicThreshold = scored.Any(s => s.sim > 0.6) ? 0.5 : 0.3;
-                var topChunks = scored
-                    .Where(s => s.sim > dynamicThreshold)   // ← uses raw cosine, correct
-                    .OrderByDescending(s => s.sim)
-                    .Take(5)
-                    .Select(s => s.chunk)
-                    .ToList();
+                var topChunks = rankedChunks.Where(c => c.Similarity > dynamicThreshold).Take(5).ToList();
+
+                // If thresholding filtered out everything (e.g. a section-specific query                // with few, weaker matches), fall back to the best few we actually                // retrieved rather than reporting zero sources/confidence.
+                if (!topChunks.Any() && rankedChunks.Any()) { topChunks = rankedChunks.Take(3).ToList(); }
 
                 var confidence = topChunks.Any()
                     ? topChunks.Average(c => c.Similarity)  // ← raw cosine average, correct
@@ -3405,6 +3410,9 @@ Answer directly without introducing yourself."
                 }
             };
         }
+        private static readonly ConcurrentDictionary<string, Regex> _sectionPatternCache = new();
+
+        private bool IsExactSectionMatch(string lowerText, string sectionNumber) { if (string.IsNullOrWhiteSpace(sectionNumber)) return false; var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num => { var escaped = Regex.Escape(num); return new Regex($@"\b(?:section|clause|part)\.?\s*{escaped}(?:\.\d+)*\b" + $@"|(?:^|\n)\s*{escaped}\.(?:\d+\.?)*\s", RegexOptions.IgnoreCase | RegexOptions.Compiled); }); return pattern.IsMatch(lowerText); }
         private async Task<List<RelevantChunk>> SearchForSpecificSection(SectionQuery sectionQuery, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId)
         {
             // Create a single comprehensive search query instead of multiple
@@ -3423,89 +3431,37 @@ Answer directly without introducing yourself."
         }
         private double CalculateDynamicSectionRelevance(RelevantChunk chunk, SectionQuery sectionQuery)
         {
-            double relevance = chunk.Similarity;
-            var lowerText = chunk.Text.ToLowerInvariant();
-            var lowerSource = chunk.Source.ToLowerInvariant();
-
-            // Boost for exact section match
-            var exactSectionPatterns = new[]
+            double relevance = chunk.Similarity; var lowerText = chunk.Text.ToLowerInvariant(); var lowerSource = chunk.Source.ToLowerInvariant();             // Boost for exact section match
+            if (IsExactSectionMatch(lowerText, sectionQuery.SectionNumber))
             {
-        $"section {sectionQuery.SectionNumber}",
-        $"section{sectionQuery.SectionNumber}",
-        $"{sectionQuery.SectionNumber}."
-    };
-
-            if (exactSectionPatterns.Any(pattern => lowerText.Contains(pattern)))
-            {
-                relevance += 0.4; // Strong boost for exact section
-            }
-
-            // Boost for document type match
-            if (!string.IsNullOrEmpty(sectionQuery.DocumentType))
-            {
-                if (lowerSource.Contains(sectionQuery.DocumentType.ToLowerInvariant()))
-                {
-                    relevance += 0.3;
-                }
-            }
-
+                relevance += 0.4;
+            }             // Boost for document type match
+            if (!string.IsNullOrEmpty(sectionQuery.DocumentType)) { if (lowerSource.Contains(sectionQuery.DocumentType.ToLowerInvariant())) { relevance += 0.3; } }
             // Boost for expected section content
-            var expectedTopics = _policyAnalysis.GetDynamicSectionTopics(sectionQuery.SectionNumber, sectionQuery.DocumentType);
-            var topicMatches = expectedTopics.Count(topic => lowerText.Contains(topic.ToLowerInvariant()));
-            if (topicMatches > 0)
+            var expectedTopics = _policyAnalysis.GetDynamicSectionTopics(sectionQuery.SectionNumber, sectionQuery.DocumentType); var topicMatches = expectedTopics.Count(topic => lowerText.Contains(topic.ToLowerInvariant())); if (topicMatches > 0)
             {
                 relevance += 0.2 * Math.Min(topicMatches, 3); // Up to 0.6 boost
-            }
-
-            // Boost for structural indicators
-            var structuralKeywords = new[] { "policy", "procedure", "requirement", "shall", "must", "should" };
-            var structuralMatches = structuralKeywords.Count(keyword => lowerText.Contains(keyword));
-            if (structuralMatches > 0)
+            }             // Boost for structural indicators
+            var structuralKeywords = new[] { "policy", "procedure", "requirement", "shall", "must", "should" }; var structuralMatches = structuralKeywords.Count(keyword => lowerText.Contains(keyword)); if (structuralMatches > 0)
             {
                 relevance += 0.1 * Math.Min(structuralMatches, 2); // Up to 0.2 boost
             }
-
             return Math.Min(1.0, relevance);
         }
         private bool IsSectionContentDynamic(string text, string source, SectionQuery sectionQuery)
         {
-            var lowerText = text.ToLowerInvariant();
-            var sectionNumber = sectionQuery.SectionNumber;
-            var documentType = sectionQuery.DocumentType;
-
-            // Check for direct section references
-            var directSectionIndicators = new[]
-            {
-        $"section {sectionNumber}",
-        $"section{sectionNumber}",
-        $"{sectionNumber}.",
-        $"{sectionNumber} ",
-        $"clause {sectionNumber}",
-        $"part {sectionNumber}"
-    };
-
-            if (directSectionIndicators.Any(indicator => lowerText.Contains(indicator)))
-                return true;
-
+            var lowerText = text.ToLowerInvariant(); var sectionNumber = sectionQuery.SectionNumber; var documentType = sectionQuery.DocumentType;
+            // Check for direct section references (anchored — see IsExactSectionMatch)
+            if (IsExactSectionMatch(lowerText, sectionNumber)) return true;
             // Check document type alignment
             if (!string.IsNullOrEmpty(documentType))
             {
-                var sourceFileName = Path.GetFileNameWithoutExtension(source).ToLowerInvariant();
-                if (!sourceFileName.Contains(documentType.ToLowerInvariant()) &&
-                    !sourceFileName.Contains("general") &&
-                    !sourceFileName.Contains("centralized"))
-                {
-                    // If document type doesn't match and it's not a general document, lower relevance
+                var sourceFileName = Path.GetFileNameWithoutExtension(source).ToLowerInvariant(); if (!sourceFileName.Contains(documentType.ToLowerInvariant()) && !sourceFileName.Contains("general") && !sourceFileName.Contains("centralized"))
+                {                    // If document type doesn't match and it's not a general document, lower relevance
                     return false;
                 }
-            }
-
-            // Check for section-specific content based on policy type
-            var expectedTopics = _policyAnalysis.GetDynamicSectionTopics(sectionNumber, documentType);
-            var hasExpectedContent = expectedTopics.Any(topic =>
-                lowerText.Contains(topic.ToLowerInvariant()));
-
-            return hasExpectedContent;
+            }             // Check for section-specific content based on policy type
+            var expectedTopics = _policyAnalysis.GetDynamicSectionTopics(sectionNumber, documentType); var hasExpectedContent = expectedTopics.Any(topic => lowerText.Contains(topic.ToLowerInvariant())); return hasExpectedContent;
         }
         // Supporting class for section queries
 
@@ -4193,6 +4149,11 @@ Answer directly without introducing yourself."
                 throw;
             }
         }
+        /// <summary>        /// Stable, effectively-collision-free hash for embedding cache keys.        /// string.GetHashCode() is only a 32-bit hash with no uniqueness        /// guarantee — two unrelated chunks/queries can produce the same        /// value and silently share a cached embedding, returning the wrong        /// vector for a piece of text. SHA-256 makes accidental collisions        /// practically impossible.        /// </summary>        
+        private static string ComputeContentHash(string text)
+        {
+            var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(text)); return Convert.ToHexString(bytes);
+        }
         private async Task<List<float>> GetEmbeddingAsync(string text, ModelConfiguration model)
         {
             if (string.IsNullOrWhiteSpace(text))
@@ -4232,13 +4193,13 @@ Answer directly without introducing yourself."
                     return new List<float>();
                 }
 
-                // ✅ Limit text length (important for preventing token issues)
-                if (processedText.Length > 2000)
+                var maxEmbeddingChars = (int)(model.MaxContextLength * 3.5 * 0.9); if (maxEmbeddingChars < 500) maxEmbeddingChars = 500;
+                if (processedText.Length > maxEmbeddingChars)
                 {
-                    processedText = processedText.Substring(0, 2000).Trim();
-                    _logger.LogDebug($"⚠️ Text truncated to 2000 chars");
+                    var originalLength = processedText.Length;
+                    processedText = processedText.Substring(0, maxEmbeddingChars).Trim();
+                    _logger.LogWarning("⚠️ Text truncated for embedding: {Original} chars -> {Truncated} chars (model '{Model}' context {Context} tokens). " + "Consider reducing chunk size in TextChunkingService if this happens often.", originalLength, processedText.Length, model.Name, model.MaxContextLength);
                 }
-
                 _logger.LogDebug($"🔄 Generating embedding for text ({processedText.Length} chars)");
 
                 // ✅ Use the SIMPLEST request format possible

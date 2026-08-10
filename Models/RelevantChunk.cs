@@ -15,5 +15,12 @@
         /// Never exposed to the user or used for threshold comparisons.
         /// </summary>
         public double RelevanceScore { get; set; }
+        /// <summary>
+        /// Score assigned by the LLM-based reranker (0-1, when parseable).
+        /// Kept separate from Similarity so raw cosine similarity is never
+        /// overwritten by a reranker output that failed to parse or is
+        /// otherwise uncalibrated.
+        /// </summary>
+        public double? RerankScore { get; set; }
     }
 }
