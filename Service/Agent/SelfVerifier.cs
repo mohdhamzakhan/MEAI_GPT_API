@@ -9,7 +9,18 @@ namespace MEAI_GPT_API.Services.Agent
         private readonly HttpClient _ollamaClient;
         private readonly AgentDecisionLogger _decisionLogger;
         private readonly ILogger<SelfVerifier> _logger;
+
+        // Model used for the cheap yes/no verification calls. Previously
+        // hardcoded to "llama3.2:1b", which returned 404s against this
+        // deployment's Ollama server (that model isn't pulled there) — every
+        // verification call silently failed and fell back to the "assume
+        // it's fine" branch below, so hallucination checking was effectively
+        // disabled without any visible error. Default to the same model the
+        // rest of the app already uses successfully (DefaultGenerationModel),
+        // which is known to be available, while still allowing a smaller/
+        // faster dedicated verifier model to be configured explicitly.
         private readonly string _verifierModel;
+
         public SelfVerifier(
             IHttpClientFactory httpClientFactory,
             AgentDecisionLogger decisionLogger,
@@ -19,12 +30,13 @@ namespace MEAI_GPT_API.Services.Agent
             _ollamaClient = httpClientFactory.CreateClient("OllamaAPI");
             _decisionLogger = decisionLogger;
             _logger = logger;
+
             var cfg = config.Value;
             _verifierModel = !string.IsNullOrWhiteSpace(cfg.VerifierModel)
                 ? cfg.VerifierModel
                 : (!string.IsNullOrWhiteSpace(cfg.DefaultGenerationModel)
-                ? cfg.DefaultGenerationModel
-                 : "llama3.2:1b");
+                    ? cfg.DefaultGenerationModel
+                    : "llama3.1:8b"); // last-resort fallback if config is empty — not the 1B model, see DynamicRagService.AutoSelectGenerationModel for why
         }
 
         public async Task<VerificationResult> VerifyResponseAsync(
@@ -102,7 +114,6 @@ Answer with ONLY 'yes' or 'no'.";
 
             try
             {
-                //var llmResponse = await CallLLMAsync(prompt, "llama3.2:1b");
                 var llmResponse = await CallLLMAsync(prompt, _verifierModel);
                 return llmResponse.ToLowerInvariant().Contains("yes");
             }
@@ -110,7 +121,7 @@ Answer with ONLY 'yes' or 'no'.";
             {
                 _logger.LogWarning(ex, "Completeness check failed (model '{Model}'); falling back to length heuristic", _verifierModel);
                 // Fallback: simple heuristic
-                return true;
+                return response.Length > 50;
             }
         }
 
@@ -130,11 +141,12 @@ Answer with ONLY 'yes' or 'no'. The response should not make claims that aren't 
 
             try
             {
-                var llmResponse = await CallLLMAsync(prompt, "llama3.2:1b");
+                var llmResponse = await CallLLMAsync(prompt, _verifierModel);
                 return llmResponse.ToLowerInvariant().Contains("yes");
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogWarning(ex, "Grounding check failed (model '{Model}'); conservatively assuming grounded — this means hallucination checking did NOT run for this response", _verifierModel);
                 // Conservative: assume it's grounded if we can't verify
                 return true;
             }

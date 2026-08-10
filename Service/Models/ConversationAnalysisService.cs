@@ -7,7 +7,7 @@ namespace MEAI_GPT_API.Service.Models
     {
         private readonly ILogger<ConversationAnalysisService> _logger;
         private readonly PolicyAnalysisService _policyAnalysis;
-        public ConversationAnalysisService( 
+        public ConversationAnalysisService(
             ILogger<ConversationAnalysisService> logger,
             PolicyAnalysisService policyAnalysis)
         {
@@ -183,7 +183,21 @@ namespace MEAI_GPT_API.Service.Models
                 var lastTurn = history.LastOrDefault();
                 if (lastTurn != null)
                 {
-                    return $"Previous context: {lastTurn.Question} -> {lastTurn.Answer} Current question: {currentQuestion}";
+                    // Only splice in a short snippet of prior context, and put the
+                    // CURRENT question first. Previously this embedded the entire
+                    // previous answer (often 200-400+ words of generic policy
+                    // boilerplate) alongside the question. Since retrieval embeds
+                    // this whole string, that generic text dominated the resulting
+                    // vector and pulled search results toward whatever vocabulary
+                    // the previous answer happened to use — including unrelated
+                    // documents that share that generic wording — instead of the
+                    // actual topic being asked about.
+                    const int maxSnippetChars = 150;
+                    var answerSnippet = lastTurn.Answer.Length > maxSnippetChars
+                        ? lastTurn.Answer.Substring(0, maxSnippetChars).TrimEnd() + "..."
+                        : lastTurn.Answer;
+
+                    return $"{currentQuestion} (context: previously discussed \"{lastTurn.Question}\" — {answerSnippet})";
                 }
             }
 
