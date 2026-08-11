@@ -6206,32 +6206,51 @@ Answer directly without introducing yourself."
 
             try
             {
-                // Expand query
-                var expandedQuery = _abbreviationService.ExpandQuery(question);
+                var sectionQuery = await _policyAnalysis.DetectAndParseSection(question);
 
-                // Get or create conversation context for the session
-                var conversationContext = _conversation.GetOrCreateConversationContext(context.SessionId);
+                List<RelevantChunk> chunks;
 
-                // Populate conversation context with history from agent context
-                conversationContext.History = context.History.Select(h => new ConversationTurn
+                if (sectionQuery != null)
                 {
-                    Question = h.Question,
-                    Answer = h.Answer,
-                    Timestamp = h.Timestamp,
-                    Sources = h.Sources
-                }).ToList();
+                    _logger.LogInformation(
+                        "🎯 Detected {Kind} query: Section/Annexure {Num}",
+                        sectionQuery.IsAnnexure ? "Annexure" : "Section",
+                        sectionQuery.SectionNumber);
 
-                // Retrieve chunks using the existing method
-                var chunks = await GetRelevantChunksWithExpansionAsync(
-                    question,
-                    embModel,
-                    maxResults,
-                    true,
-                    conversationContext,
-                    false,
-                    embModel,
-                    plant
-                );
+                    var collectionId = await _collectionManager.GetOrCreateCollectionAsync(embModel);
+                    chunks = await SearchForSpecificSection(
+                        sectionQuery, embModel, maxResults, plant, collectionId);
+                }
+                else
+                {
+
+                    // Expand query
+                    var expandedQuery = _abbreviationService.ExpandQuery(question);
+
+                    // Get or create conversation context for the session
+                    var conversationContext = _conversation.GetOrCreateConversationContext(context.SessionId);
+
+                    // Populate conversation context with history from agent context
+                    conversationContext.History = context.History.Select(h => new ConversationTurn
+                    {
+                        Question = h.Question,
+                        Answer = h.Answer,
+                        Timestamp = h.Timestamp,
+                        Sources = h.Sources
+                    }).ToList();
+
+                    // Retrieve chunks using the existing method
+                    chunks = await GetRelevantChunksWithExpansionAsync(
+                        question,
+                        embModel,
+                        maxResults,
+                        true,
+                        conversationContext,
+                        false,
+                        embModel,
+                        plant
+                    );
+                }
 
                 chunks = FilterByPolicyIntent(chunks, question);
 
@@ -6242,19 +6261,21 @@ Answer directly without introducing yourself."
                         .Concat(bm25Chunks)
                         .GroupBy(c => c.Id)
                         .Select(g => g.First())
-                        .OrderByDescending(c => c.RelevanceScore + (c.Bm25Score * 0.5)) // was 0.1
+                        .OrderByDescending(c => c.RelevanceScore + (c.Bm25Score * 0.5))
                         .Take(maxResults)
                         .ToList();
 
-                // Rerank if needed
                 if (useReRanking && hybridChunks.Count > 3)
                 {
-                    hybridChunks = await _rerankerService.RerankAsync(
-                        question,
-                        hybridChunks,
-                        "qllama/bge-reranker-v2-m3:f16",
-                        topK: 5
-                    );
+                    try
+                    {
+                        hybridChunks = await _rerankerService.RerankAsync(
+                            question, hybridChunks, "qllama/bge-reranker-v2-m3:f16", topK: 5);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Reranking failed, falling back to un-reranked results");
+                    }
                 }
 
                 result.Chunks = hybridChunks.Take(5).ToList();
