@@ -88,38 +88,38 @@ namespace MEAI_GPT_API.Services
 
         private readonly QueryIntentAnalyzer _queryIntentAnalyzer;
         public DynamicRagService(
-            IModelManager modelManager,
-            DynamicCollectionManager collectionManager,
-            IOptions<DynamicRAGConfiguration> config,
-            IOptions<ChromaDbOptions> chromaOptions,
-            ILogger<DynamicRagService> logger,
-            IHttpClientFactory httpClientFactory,
-            IDocumentProcessor documentProcessor,
-            ICacheManager cacheManager,
-            Conversation conversation,
-            IOptions<PlantSettings> plants,
-            IMetricsCollector metrics,
-            IConversationStorageService conversationStorage,
-            AbbreviationExpansionService abbreviationService,
-            //new code by Hamza
-            StringProcessingService stringProcessor,
-            PolicyAnalysisService policyAnalysis,
-            TextChunkingService textChunking,
-            ConversationAnalysisService conversationAnalysis,
-            EntityExtractionService entityExtraction,
-            SystemPromptBuilder systemPromptBuilder,
-            HelperMethods helperMethods,
-            OllamaHttpClient ollamaClient,
-            OracleEBSQuery oracleEBSQuery,
-            RerankerService rerankerService,
-            QueryIntentAnalyzer queryIntentAnalyzer,
-            IServiceProvider serviceProvider,
-            AgentPlanner agentPlanner,
-            AgentExecutor agentExecutor,
-            SelfVerifier selfVerifier,
-            AgentDecisionLogger agentLogger,
-            ConversationHistoryService historyService,
-            AppreciatedAnswerStore appreciatedAnswerStore)
+          IModelManager modelManager,
+          DynamicCollectionManager collectionManager,
+          IOptions<DynamicRAGConfiguration> config,
+          IOptions<ChromaDbOptions> chromaOptions,
+          ILogger<DynamicRagService> logger,
+          IHttpClientFactory httpClientFactory,
+          IDocumentProcessor documentProcessor,
+          ICacheManager cacheManager,
+          Conversation conversation,
+          IOptions<PlantSettings> plants,
+          IMetricsCollector metrics,
+          IConversationStorageService conversationStorage,
+          AbbreviationExpansionService abbreviationService,
+          //new code by Hamza
+          StringProcessingService stringProcessor,
+          PolicyAnalysisService policyAnalysis,
+          TextChunkingService textChunking,
+          ConversationAnalysisService conversationAnalysis,
+          EntityExtractionService entityExtraction,
+          SystemPromptBuilder systemPromptBuilder,
+          HelperMethods helperMethods,
+          OllamaHttpClient ollamaClient,
+          OracleEBSQuery oracleEBSQuery,
+          RerankerService rerankerService,
+          QueryIntentAnalyzer queryIntentAnalyzer,
+          IServiceProvider serviceProvider,
+          AgentPlanner agentPlanner,
+          AgentExecutor agentExecutor,
+          SelfVerifier selfVerifier,
+          AgentDecisionLogger agentLogger,
+          ConversationHistoryService historyService,
+          AppreciatedAnswerStore appreciatedAnswerStore)
         {
             _modelManager = modelManager;
             _collectionManager = collectionManager;
@@ -136,7 +136,7 @@ namespace MEAI_GPT_API.Services
             _conversationStorage = conversationStorage;
             _abbreviationService = abbreviationService;
             _cacheCleanupTimer = new Timer(CleanupEmbeddingCache, null,
-                                    TimeSpan.FromMinutes(15), TimeSpan.FromMinutes(15));
+              TimeSpan.FromMinutes(15), TimeSpan.FromMinutes(15));
 
             _stringProcessor = stringProcessor;
             _policyAnalysis = policyAnalysis;
@@ -208,17 +208,18 @@ namespace MEAI_GPT_API.Services
             if (!File.Exists(abbreviationsPath))
             {
                 var abbreviationContent = @"HR Policy Abbreviations:
-CL = Casual Leave
-SL = Sick Leave
-COFF = Compensatory Off
-EL = Earned Leave
-PL = Privilege Leave
-ML = Maternity Leave
-PL = Paternity Leave
+              CL = Casual Leave
+        SL = Sick Leave
+        COFF = Compensatory Off
+        EL = Earned Leave
+        PL = Privilege Leave
+        ML = Maternity Leave
+        PL = Paternity Leave
 
-These abbreviations are standard across all MEAI HR policies and should be interpreted consistently.";
-
-                File.WriteAllText(abbreviationsPath, abbreviationContent);
+        These abbreviations are standard across all MEAI HR policies and should be interpreted consistently.
+              ";
+      
+        File.WriteAllText(abbreviationsPath, abbreviationContent);
                 _logger.LogInformation("Created abbreviations context file");
             }
         }
@@ -228,17 +229,21 @@ These abbreviations are standard across all MEAI HR policies and should be inter
             foreach (var plant in _plants.Plants.Keys)
             {
                 var plantOrgPath = Path.Combine(
-                    _chromaOptions.ContextFolder,
-                    $"organization-{plant.ToLower()}.txt"
+                  _chromaOptions.ContextFolder,$"organization-{plant.ToLower()}.txt"
                 );
 
                 if (!File.Exists(plantOrgPath))
                 {
                     var plantOrgContent = $@"MEAI {plant} Plant - Organization Details
-
-These are the fixed organizational details for {plant} plant.";
-
-                    File.WriteAllText(plantOrgPath, plantOrgContent);
+        
+          These are the fixed organizational details
+          for {
+                            plant
+          }
+                    plant.
+                  ";
+        
+          File.WriteAllText(plantOrgPath, plantOrgContent);
                     _logger.LogInformation($"Created organization context file for {plant}");
                 }
             }
@@ -249,7 +254,7 @@ These are the fixed organizational details for {plant} plant.";
             if (string.IsNullOrEmpty(_config.DefaultEmbeddingModel))
             {
                 var embeddingModel = availableModels.FirstOrDefault(m =>
-                    m.Type == "embedding");
+                  m.Type == "embedding");
 
                 if (embeddingModel != null)
                 {
@@ -261,7 +266,7 @@ These are the fixed organizational details for {plant} plant.";
             if (string.IsNullOrEmpty(_config.DefaultGenerationModel))
             {
                 var generationModel = availableModels.FirstOrDefault(m =>
-                     m.Type == "generation");
+                  m.Type == "generation");
 
                 if (generationModel != null)
                 {
@@ -280,8 +285,7 @@ These are the fixed organizational details for {plant} plant.";
 
             _logger.LogInformation($"📄 Processing {policyFiles.Count} policy files + {contextFiles.Count} context files for {embeddingModels.Count} embedding models");
 
-            var tasks = embeddingModels.Select(async model =>
-            {
+            var tasks = embeddingModels.Select(async model => {
                 _logger.LogInformation($"🔄 Processing documents for model: {model.Name}");
 
                 var collectionId = await _collectionManager.GetOrCreateCollectionAsync(model);
@@ -317,7 +321,6 @@ These are the fixed organizational details for {plant} plant.";
             return contextFiles;
         }
 
-
         private List<string> GetPolicyFiles(string plant)
         {
             var policyFiles = new List<string>();
@@ -327,8 +330,8 @@ These are the fixed organizational details for {plant} plant.";
             if (Directory.Exists(plantSpecificPath))
             {
                 policyFiles.AddRange(Directory.GetFiles(plantSpecificPath, "*.*", SearchOption.AllDirectories)
-                    .Where(f => _chromaOptions.SupportedExtensions.Contains(
-                        Path.GetExtension(f).ToLowerInvariant())));
+                  .Where(f => _chromaOptions.SupportedExtensions.Contains(
+                    Path.GetExtension(f).ToLowerInvariant())));
 
                 _logger.LogInformation($"📁 Found {policyFiles.Count} plant-specific files for {plant}");
             }
@@ -338,23 +341,20 @@ These are the fixed organizational details for {plant} plant.";
             if (Directory.Exists(centralizedPath))
             {
                 var centralizedFiles = Directory.GetFiles(centralizedPath, "*.*", SearchOption.AllDirectories)
-                    .Where(f => _chromaOptions.SupportedExtensions.Contains(
-                        Path.GetExtension(f).ToLowerInvariant()));
+                  .Where(f => _chromaOptions.SupportedExtensions.Contains(
+                    Path.GetExtension(f).ToLowerInvariant()));
 
                 policyFiles.AddRange(centralizedFiles);
                 _logger.LogInformation($"📁 Found {centralizedFiles.Count()} centralized policy files");
             }
 
-
             _logger.LogInformation($"📋 Total files for {plant}: {policyFiles.Count}");
             return policyFiles;
         }
 
-
         // This cache tracks processed files with their last write time to skip unchanged files
         private readonly ConcurrentDictionary<string, DateTime> processedFilesCache = new();
         // In your ProcessFileForModelAsync method, ensure you're using proper document processing
-
 
         /// <summary>
         /// Check if embeddings already exist for this file in ChromaDB
@@ -368,27 +368,33 @@ These are the fixed organizational details for {plant} plant.";
                 // Query ChromaDB for any embeddings with this source file
                 var queryData = new
                 {
-                    where = new Dictionary<string, object>
-            {
-                { "source_file", new Dictionary<string, object>
-                    {
-                        { "$eq", filePath }
-                    }
+                    where = new Dictionary<string, object> {
+              {
+                "source_file",
+                new Dictionary < string,
+                object > {
+                  {
+                    "$eq",
+                    filePath
+                  }
                 }
+              }
             },
                     limit = 1 // Just check if any exist
                 };
 
                 var response = await _chromaClient.PostAsJsonAsync(
-                    $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/get",
-                    queryData);
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/get",
+                  queryData);
 
                 if (response.IsSuccessStatusCode)
                 {
                     var content = await response.Content.ReadAsStringAsync();
-                    using var doc = JsonDocument.Parse(content);
+                    using
+                    var doc = JsonDocument.Parse(content);
 
-                    if (doc.RootElement.TryGetProperty("ids", out var idsArray))
+                    if (doc.RootElement.TryGetProperty("ids", out
+                        var idsArray))
                     {
                         var hasEmbeddings = idsArray.GetArrayLength() > 0;
 
@@ -481,10 +487,10 @@ These are the fixed organizational details for {plant} plant.";
         //    }
 
         private async Task ProcessFileForModelAsync(
-    string filePath,
-    ModelConfiguration model,
-    string collectionId,
-    string plant)
+          string filePath,
+          ModelConfiguration model,
+          string collectionId,
+          string plant)
         {
             try
             {
@@ -492,7 +498,8 @@ These are the fixed organizational details for {plant} plant.";
                 var cacheKey = $"{filePath}:{model.Name}";
 
                 // ✅ ENHANCED: Check both cache AND database for existing embeddings
-                if (processedFilesCache.TryGetValue(cacheKey, out var cachedWriteTime))
+                if (processedFilesCache.TryGetValue(cacheKey, out
+                    var cachedWriteTime))
                 {
                     if (cachedWriteTime >= fileInfo.LastWriteTime)
                     {
@@ -550,13 +557,13 @@ These are the fixed organizational details for {plant} plant.";
                 }
 
                 var successCount = await ProcessChunkBatchForModelAsync(
-                    chunks, model, collectionId, fileInfo.LastWriteTime, plant);
+                  chunks, model, collectionId, fileInfo.LastWriteTime, plant);
 
                 if (successCount > 0)
                 {
                     processedFilesCache[cacheKey] = fileInfo.LastWriteTime;
                     _logger.LogInformation(
-                        $"✅ Successfully processed & CACHED {successCount}/{chunks.Count} chunks from {fileInfo.Name}");
+            $"✅ Successfully processed & CACHED {successCount}/{chunks.Count} chunks from {fileInfo.Name}");
                 }
                 else
                 {
@@ -595,8 +602,8 @@ These are the fixed organizational details for {plant} plant.";
             if (corruptionRatio > 0.01) // More than 1% corruption
             {
                 _logger.LogError(
-                    $"❌ File appears corrupted: {fileName} " +
-                    $"({replacementCharCount} replacement characters, {corruptionRatio:P1})");
+          $"❌ File appears corrupted: {fileName} " +
+                  $"({replacementCharCount} replacement characters, {corruptionRatio:P1})");
                 return false;
             }
 
@@ -605,21 +612,26 @@ These are the fixed organizational details for {plant} plant.";
             if (alphanumericRatio < 0.65) // Increased from 0.5
             {
                 _logger.LogWarning(
-                    $"❌ Low quality text: {fileName} " +
-                    $"(only {alphanumericRatio:P0} alphanumeric characters)");
+          $"❌ Low quality text: {fileName} " +
+                  $"(only {alphanumericRatio:P0} alphanumeric characters)");
                 return false;
             }
 
             // Check 5: Meaningful words count
-            var words = content.Split(new[] { ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            var words = content.Split(new[] {
+        ' ',
+        '\n',
+        '\r',
+        '\t'
+      }, StringSplitOptions.RemoveEmptyEntries);
             var meaningfulWords = words.Count(w =>
-                w.Length >= 3 &&
-                Regex.IsMatch(w, @"^[a-zA-Z]+$"));
+              w.Length >= 3 &&
+              Regex.IsMatch(w, @"^[a-zA-Z]+$"));
 
             if (meaningfulWords < 50)
             {
                 _logger.LogWarning(
-                    $"❌ Too few meaningful words ({meaningfulWords}): {fileName}");
+          $"❌ Too few meaningful words ({meaningfulWords}): {fileName}");
                 return false;
             }
 
@@ -632,8 +644,8 @@ These are the fixed organizational details for {plant} plant.";
                 if (uniqueRatio < 0.05) // Less than 30% unique words
                 {
                     _logger.LogWarning(
-                        $"❌ Excessive repetition detected: {fileName} " +
-                        $"(only {uniqueWords}/{words.Length} unique words, {uniqueRatio:P0})");
+            $"❌ Excessive repetition detected: {fileName} " +
+                      $"(only {uniqueWords}/{words.Length} unique words, {uniqueRatio:P0})");
                     return false;
                 }
             }
@@ -641,7 +653,6 @@ These are the fixed organizational details for {plant} plant.";
             _logger.LogDebug($"✅ Content validation passed: {fileName}");
             return true;
         }
-
 
         /// <summary>
         /// Delete all embeddings for a specific file from ChromaDB
@@ -656,19 +667,23 @@ These are the fixed organizational details for {plant} plant.";
                 // ChromaDB delete by metadata filter
                 var deleteRequest = new
                 {
-                    where = new Dictionary<string, object>
-                    {
-                        { "source_file", new Dictionary<string, object>
-                            {
-                                { "$eq", filePath }
-                            }
-                        }
-                    }
+                    where = new Dictionary<string, object> {
+            {
+              "source_file",
+              new Dictionary < string,
+              object > {
+                {
+                  "$eq",
+                  filePath
+                }
+              }
+            }
+          }
                 };
 
                 var response = await _chromaClient.PostAsJsonAsync(
-                    $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/delete",
-                    deleteRequest);
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/delete",
+                  deleteRequest);
 
                 if (response.IsSuccessStatusCode)
                 {
@@ -687,23 +702,24 @@ These are the fixed organizational details for {plant} plant.";
             }
         }
 
-
         private QueryResponse CreateSuccessResponse(
-    string answer,
-    string source,
-    long processingTimeMs,
-    double confidence,
-    string? sessionId = null,
-    bool isFromCorrection = false,
-    List<RelevantChunk>? relevantChunks = null,
-    Dictionary<string, string>? modelsUsed = null,
-    string? plant = null)
+          string answer,
+          string source,
+          long processingTimeMs,
+          double confidence,
+          string? sessionId = null,
+          bool isFromCorrection = false,
+          List<RelevantChunk>? relevantChunks = null,
+          Dictionary<string, string>? modelsUsed = null,
+          string? plant = null)
         {
             return new QueryResponse
             {
                 Answer = answer,
                 IsFromCorrection = isFromCorrection,
-                Sources = new List<string> { source },
+                Sources = new List<string> {
+            source
+          },
                 Confidence = confidence,
                 ProcessingTimeMs = processingTimeMs,
                 RelevantChunks = relevantChunks ?? new List<RelevantChunk>(),
@@ -714,37 +730,36 @@ These are the fixed organizational details for {plant} plant.";
             };
         }
 
-
         private string CleanupContextReferences(string response)
         {
             // Replace [Context 1], [Context 2], etc. with just the source document
             var pattern = @"\[Context \d+\]:\s*([^\]]+\.docx)";
             var cleaned = System.Text.RegularExpressions.Regex.Replace(
-                response,
-                pattern,
-                "[Source: $1]"
+              response,
+              pattern,
+              "[Source: $1]"
             );
 
             // Remove standalone [Context X] references
             cleaned = System.Text.RegularExpressions.Regex.Replace(
-                cleaned,
-                @"\[Context \d+\]",
-                ""
+              cleaned,
+              @"\[Context \d+\]",
+              ""
             );
 
             return cleaned;
         }
 
         public async Task<QueryResponse> ProcessQueryAsync(
-    string question,
-    string plant,
-    string? generationModel = null,
-    string? embeddingModel = null,
-    int maxResults = 10,
-    bool meaiInfo = true,
-    string? sessionId = null,
-    string? userId = null,
-    bool useReRanking = true)
+          string question,
+          string plant,
+          string? generationModel = null,
+          string? embeddingModel = null,
+          int maxResults = 10,
+          bool meaiInfo = true,
+          string? sessionId = null,
+          string? userId = null,
+          bool useReRanking = true)
         {
             var stopwatch = Stopwatch.StartNew();
 
@@ -756,19 +771,19 @@ These are the fixed organizational details for {plant} plant.";
             {
                 // Select models (use defaults for MEAI queries)
                 if (string.IsNullOrEmpty(generationModel))
-                    generationModel = _config.DefaultGenerationModel
-                        ?? throw new InvalidOperationException("Default generation model not configured.");
+                    generationModel = _config.DefaultGenerationModel ??
+                    throw new InvalidOperationException("Default generation model not configured.");
 
                 if (string.IsNullOrEmpty(embeddingModel))
-                    embeddingModel = _config.DefaultEmbeddingModel
-                        ?? throw new InvalidOperationException("Default embedding model not configured.");
+                    embeddingModel = _config.DefaultEmbeddingModel ??
+                    throw new InvalidOperationException("Default embedding model not configured.");
 
                 // Create or load conversation context
-                var actualUserId = userId ?? "system";  // Fallback to "system" if not provided
+                var actualUserId = userId ?? "system"; // Fallback to "system" if not provided
                 var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
-                    sessionId ?? Guid.NewGuid().ToString(),
-                    actualUserId,  // Use the passed userId
-                    plant);
+                  sessionId ?? Guid.NewGuid().ToString(),
+                  actualUserId, // Use the passed userId
+                  plant);
 
                 var context = _conversation.GetOrCreateConversationContext(dbSession.SessionId);
 
@@ -778,7 +793,7 @@ These are the fixed organizational details for {plant} plant.";
                 {
                     _logger.LogInformation("⚡ Early return: Using appreciated answer");
                     return CreateSuccessResponse(appreciated.Value.Answer, "Appreciated Answer",
-                        stopwatch.ElapsedMilliseconds, 0.95);
+                      stopwatch.ElapsedMilliseconds, 0.95);
                 }
 
                 var correction = await CheckCorrectionsAsync(question);
@@ -786,10 +801,10 @@ These are the fixed organizational details for {plant} plant.";
                 {
                     _logger.LogInformation("⚡ Early return: Using correction");
                     var rephrased = await _helperMethods.RephraseWithLLMAsync(
-                        correction.Answer, generationModel);
+                      correction.Answer, generationModel);
 
                     return CreateSuccessResponse(rephrased, "User Correction",
-                        stopwatch.ElapsedMilliseconds, 1.0, isFromCorrection: true);
+                      stopwatch.ElapsedMilliseconds, 1.0, isFromCorrection: true);
                 }
 
                 // 2️⃣ Clear history if requested
@@ -811,11 +826,11 @@ These are the fixed organizational details for {plant} plant.";
                     embModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
                 }
 
-
                 _logger.LogInformation($"Processing MEAI query with models - Gen: {generationModel}, Emb: {embeddingModel}");
 
                 // Embedding cache for this query
-                var _perRequestEmbeddings = new ConcurrentDictionary<string, Task<List<float>>>(StringComparer.Ordinal);
+                var _perRequestEmbeddings = new ConcurrentDictionary<string,
+                  Task<List<float>>>(StringComparer.Ordinal);
 
                 async Task<List<float>> GetPerRequestEmbeddingAsync(string text)
                 {
@@ -836,7 +851,7 @@ These are the fixed organizational details for {plant} plant.";
                 // 🧠 Semantic similarity reuse from DB (fast lookup)
                 var questionEmbedding = await GetPerRequestEmbeddingAsync(question);
                 var similarConversations = await _conversationStorage.SearchSimilarConversationsAsync(
-                    questionEmbedding, plant, threshold: 0.85, limit: 2);
+                  questionEmbedding, plant, threshold: 0.85, limit: 2);
 
                 if (similarConversations.Any())
                 {
@@ -846,10 +861,10 @@ These are the fixed organizational details for {plant} plant.";
                         _logger.LogInformation($"💡 Reusing appreciated answer from DB (ID: {best.Entry.Id})");
 
                         await SaveConversationToDatabase(
-                            dbSession.SessionId, question, best.Entry.Answer,
-                            new List<RelevantChunk>(), genModel, embModel,
-                            best.Similarity, stopwatch.ElapsedMilliseconds,
-                            false, null, plant);
+                          dbSession.SessionId, question, best.Entry.Answer,
+                          new List<RelevantChunk>(), genModel, embModel,
+                          best.Similarity, stopwatch.ElapsedMilliseconds,
+                          false, null, plant);
 
                         return new QueryResponse
                         {
@@ -884,35 +899,36 @@ These are the fixed organizational details for {plant} plant.";
                 {
                     _logger.LogInformation($"🎯 Detected section query: {sectionQuery.DocumentType} - Section {sectionQuery.SectionNumber}");
                     relevantChunks = await SearchForSpecificSection(
-                        sectionQuery, embModel, maxResults, plant,
-                        await _collectionManager.GetOrCreateCollectionAsync(embModel));
+                      sectionQuery, embModel, maxResults, plant,
+                      await _collectionManager.GetOrCreateCollectionAsync(embModel));
                 }
                 else
                 {
                     var contextualQuery = _conversationAnalysis.BuildContextualQuery(question, context.History);
                     relevantChunks = await GetRelevantChunksWithExpansionAsync(
-                        contextualQuery, embModel, maxResults,
-                        meaiInfo, context, useReRanking, genModel, plant);
+                      contextualQuery, embModel, maxResults,
+                      meaiInfo, context, useReRanking, genModel, plant);
 
                     if (useReRanking && relevantChunks.Count > 3)
                     {
                         relevantChunks = await _rerankerService.RerankAsync(
-                            question,
-                            relevantChunks,
-                            "qllama/bge-reranker-v2-m3:f16",
-                            topK: 5);
+                          question,
+                          relevantChunks,
+                          "qllama/bge-reranker-v2-m3:f16",
+                          topK: 5);
                     }
                 }
 
                 // Generate final answer
                 var parentId = context.History.Any() &&
-                               dbSession.Metadata.TryGetValue("lastConversationId", out var lastId) &&
-                               _conversationAnalysis.IsFollowUpQuestion(question, context)
-                               ? Convert.ToInt32(lastId)
-                               : (int?)null;
+                  dbSession.Metadata.TryGetValue("lastConversationId", out
+                    var lastId) &&
+                  _conversationAnalysis.IsFollowUpQuestion(question, context) ?
+                  Convert.ToInt32(lastId) :
+                  (int?)null;
 
                 var answer = await GenerateChatResponseAsync(
-                    question, genModel, context.History, relevantChunks, context, meaiInfo, plant);
+                  question, genModel, context.History, relevantChunks, context, meaiInfo, plant);
 
                 answer = CleanupContextReferences(answer);
 
@@ -922,19 +938,16 @@ These are the fixed organizational details for {plant} plant.";
                 // 🔍 Select the chunks we report as Sources/RelevantChunks, and derive                // Confidence from them.                //                // Previously this compared the *generated answer's* embedding against                // each chunk and overwrote chunk.Similarity with that score. That measures                // "does the answer sound like this chunk", not "was this chunk the honest                // basis for the answer" — a hallucinated answer that happens to echo a                // chunk's wording would score as confidently grounded, while a chunk that                // genuinely fed the answer but got paraphrased differently could be dropped.                // It also silently discarded the true retrieval Similarity.                //                // Instead, rank/filter using the retrieval-time signal: the reranker's                // score when available (RerankScore), otherwise raw cosine Similarity.                // Confidence is then the average raw Similarity of what was actually                // retrieved and used as context — an honest reflection of retrieval                // quality, not of how well the model's own wording matches it.
                 var rankedChunks = relevantChunks.OrderByDescending(c => c.RerankScore ?? c.Similarity).ToList();
 
-
-
                 // 🔍 Rank top chunks
                 var scored = await Task.WhenAll(
-                    relevantChunks.OrderByDescending(x => x.Similarity)
-                        .Take(5)
-                        .Select(async chunk =>
-                        {
-                            var emb = await GetPerRequestEmbeddingAsync(chunk.Text);
-                            var sim = CosineSimilarity(answerEmbedding, emb);
-                            chunk.Similarity = sim;
-                            return (chunk, sim);
-                        }));
+                  relevantChunks.OrderByDescending(x => x.Similarity)
+                  .Take(5)
+                  .Select(async chunk => {
+                      var emb = await GetPerRequestEmbeddingAsync(chunk.Text);
+                      var sim = CosineSimilarity(answerEmbedding, emb);
+                      chunk.Similarity = sim;
+                      return (chunk, sim);
+                  }));
 
                 // ── In ProcessQueryAsync — the confidence calculation ────────────────────────
                 // This MUST stay on raw Similarity, not RelevanceScore.
@@ -944,18 +957,22 @@ These are the fixed organizational details for {plant} plant.";
                 var topChunks = rankedChunks.Where(c => c.Similarity > dynamicThreshold).Take(5).ToList();
 
                 // If thresholding filtered out everything (e.g. a section-specific query                // with few, weaker matches), fall back to the best few we actually                // retrieved rather than reporting zero sources/confidence.
-                if (!topChunks.Any() && rankedChunks.Any()) { topChunks = rankedChunks.Take(3).ToList(); }
+                if (!topChunks.Any() && rankedChunks.Any())
+                {
+                    topChunks = rankedChunks.Take(3).ToList();
+                }
 
-                var confidence = topChunks.Any()
-                    ? topChunks.Average(c => c.Similarity)  // ← raw cosine average, correct
-                    : 0;
+                var confidence = topChunks.Any() ?
+                  topChunks.Average(c => c.Similarity) // ← raw cosine average, correct
+                  :
+                  0;
 
                 // Entity extraction and persistence
                 var entities = await _entityExtraction.ExtractEntitiesAsync(answer);
                 var conversationId = await SaveConversationToDatabaseFast(
-                    dbSession.SessionId, question, answer, topChunks,
-                    genModel, embModel, confidence, stopwatch.ElapsedMilliseconds,
-                    false, parentId, plant, questionEmbedding, answerEmbedding, entities);
+                  dbSession.SessionId, question, answer, topChunks,
+                  genModel, embModel, confidence, stopwatch.ElapsedMilliseconds,
+                  false, parentId, plant, questionEmbedding, answerEmbedding, entities);
 
                 dbSession.Metadata["lastConversationId"] = conversationId;
                 await _conversationStorage.UpdateSessionAsync(dbSession);
@@ -995,21 +1012,20 @@ These are the fixed organizational details for {plant} plant.";
             }
         }
 
-
         // Add this to your class
         private readonly ConcurrentDictionary<string, (List<float> Embedding, DateTime Cached)> _sessionEmbeddingCache = new();
         private async Task<int> SaveConversationToDatabase(
-    string sessionId,
-    string question,
-    string answer,
-    List<RelevantChunk> chunks,
-    ModelConfiguration generationModel,
-    ModelConfiguration embeddingModel,
-    double confidence,
-    long processingTimeMs,
-    bool isFromCorrection,
-    int? parentId,
-    string plant)
+          string sessionId,
+          string question,
+          string answer,
+          List<RelevantChunk> chunks,
+          ModelConfiguration generationModel,
+          ModelConfiguration embeddingModel,
+          double confidence,
+          long processingTimeMs,
+          bool isFromCorrection,
+          int? parentId,
+          string plant)
         {
             try
             {
@@ -1057,20 +1073,20 @@ These are the fixed organizational details for {plant} plant.";
         }
 
         private async Task<int> SaveConversationToDatabaseFast(
-            string sessionId,
-            string question,
-            string answer,
-            List<RelevantChunk> chunks,
-            ModelConfiguration generationModel,
-            ModelConfiguration embeddingModel,
-            double confidence,
-            long processingTimeMs,
-            bool isFromCorrection,
-            int? parentId,
-            string plant,
-            List<float> questionEmbedding,
-            List<float> answerEmbedding,
-            List<string> namedEntities)
+          string sessionId,
+          string question,
+          string answer,
+          List<RelevantChunk> chunks,
+          ModelConfiguration generationModel,
+          ModelConfiguration embeddingModel,
+          double confidence,
+          long processingTimeMs,
+          bool isFromCorrection,
+          int? parentId,
+          string plant,
+          List<float> questionEmbedding,
+          List<float> answerEmbedding,
+          List<string> namedEntities)
         {
             try
             {
@@ -1131,21 +1147,21 @@ These are the fixed organizational details for {plant} plant.";
             catch (Exception ex)
             {
                 _logger.LogError(ex, "❌ Failed to save conversation to database - Session: {SessionId}, Question: {Question}",
-                    sessionId,
-                    question?.Substring(0, Math.Min(50, question?.Length ?? 0)));
+                  sessionId,
+                  question?.Substring(0, Math.Min(50, question?.Length ?? 0)));
                 return 0;
             }
         }
 
         private async Task<int> SaveNonMeaiConversationToDatabase(
-     string sessionId,
-     string question,
-     string answer,
-     ModelConfiguration generationModel,
-     double confidence,
-     long processingTimeMs,
-     bool isFromCorrection,
-     string plant)
+          string sessionId,
+          string question,
+          string answer,
+          ModelConfiguration generationModel,
+          double confidence,
+          long processingTimeMs,
+          bool isFromCorrection,
+          string plant)
         {
             try
             {
@@ -1202,9 +1218,13 @@ These are the fixed organizational details for {plant} plant.";
                     Confidence = confidence,
                     ProcessingTimeMs = processingTimeMs,
                     RelevantChunksCount = 0,
-                    Sources = isFromCorrection
-                        ? new List<string> { "User Correction" }
-                        : new List<string> { "General Knowledge" },
+                    Sources = isFromCorrection ?
+                    new List<string> {
+              "User Correction"
+                    } :
+                    new List<string> {
+              "General Knowledge"
+                    },
                     IsFromCorrection = isFromCorrection,
                     Plant = plant ?? "general"
                 };
@@ -1226,11 +1246,11 @@ These are the fixed organizational details for {plant} plant.";
         }
 
         private Task UpdateConversationHistoryFast(
-    ConversationContext context,
-    string question,
-    string answer,
-    List<RelevantChunk> relevantChunks,
-    List<string> namedEntities)
+          ConversationContext context,
+          string question,
+          string answer,
+          List<RelevantChunk> relevantChunks,
+          List<string> namedEntities)
         {
             try
             {
@@ -1257,8 +1277,8 @@ These are the fixed organizational details for {plant} plant.";
                 var currentTopics = _conversationAnalysis.ExtractKeyTopics(question);
                 if (currentTopics.Any())
                 {
-                    var isMainTopic = !_conversationAnalysis.IsQuestionPatternContinuation(question, context)
-                                      && question.Split(' ').Length >= 4;
+                    var isMainTopic = !_conversationAnalysis.IsQuestionPatternContinuation(question, context) &&
+                      question.Split(' ').Length >= 4;
                     if (isMainTopic)
                     {
                         context.LastTopicAnchor = question;
@@ -1294,7 +1314,7 @@ These are the fixed organizational details for {plant} plant.";
                 // Find the conversation in database
                 var conversations = await _conversationStorage.GetSessionConversationsAsync(sessionId);
                 var conversation = conversations.LastOrDefault(c =>
-                    c.Question.Equals(question, StringComparison.OrdinalIgnoreCase));
+                  c.Question.Equals(question, StringComparison.OrdinalIgnoreCase));
 
                 if (conversation != null)
                 {
@@ -1303,10 +1323,11 @@ These are the fixed organizational details for {plant} plant.";
                 }
 
                 // Also update in-memory cache for immediate use
-                if (_sessionContexts.TryGetValue(sessionId, out var context))
+                if (_sessionContexts.TryGetValue(sessionId, out
+                    var context))
                 {
                     var turn = context.History.LastOrDefault(t =>
-                        t.Question.Equals(question, StringComparison.OrdinalIgnoreCase));
+                      t.Question.Equals(question, StringComparison.OrdinalIgnoreCase));
                     if (turn != null)
                     {
                         var chunks = ConvertToRelevantChunks(context.RelevantChunks ?? new List<EmbeddingData>());
@@ -1330,7 +1351,7 @@ These are the fixed organizational details for {plant} plant.";
             {
                 var conversations = await _conversationStorage.GetSessionConversationsAsync(sessionId);
                 var conversation = conversations.LastOrDefault(c =>
-                    c.Question.Equals(question, StringComparison.OrdinalIgnoreCase));
+                  c.Question.Equals(question, StringComparison.OrdinalIgnoreCase));
 
                 if (conversation != null)
                 {
@@ -1390,16 +1411,16 @@ These are the fixed organizational details for {plant} plant.";
                     var newBag = new ConcurrentBag<CorrectionEntry>();
 
                     foreach (var entry in correctedEntries
-                        .Where(c => !string.IsNullOrEmpty(c.QuestionEmbeddingJson))
-                        .Select(c => new CorrectionEntry
-                        {
-                            Id = c.Id.ToString(),
-                            Question = c.Question,
-                            Answer = c.CorrectedAnswer!,
-                            Embedding = c.QuestionEmbedding,
-                            Model = c.GenerationModel,
-                            Date = c.CreatedAt
-                        }))
+                      .Where(c => !string.IsNullOrEmpty(c.QuestionEmbeddingJson))
+                      .Select(c => new CorrectionEntry
+                      {
+                          Id = c.Id.ToString(),
+                          Question = c.Question,
+                          Answer = c.CorrectedAnswer!,
+                          Embedding = c.QuestionEmbedding,
+                          Model = c.GenerationModel,
+                          Date = c.CreatedAt
+                      }))
                     {
                         newBag.Add(entry);
                     }
@@ -1412,8 +1433,6 @@ These are the fixed organizational details for {plant} plant.";
                         _correctionsCache.Add(item); // repopulate it
                     }
                 }
-
-
 
                 _logger.LogInformation($"✅ Loaded {_correctionsCache.Count} corrections into cache");
             }
@@ -1447,13 +1466,13 @@ These are the fixed organizational details for {plant} plant.";
             return dot / (Math.Sqrt(normA) * Math.Sqrt(normB));
         }
         private async Task<string> GenerateChatResponseAsync(
-    string question,
-    ModelConfiguration generationModel,
-    List<ConversationTurn> history,
-    List<RelevantChunk> chunks,
-    ConversationContext context,
-    bool ismeai = true,
-    string plant = "")
+          string question,
+          ModelConfiguration generationModel,
+          List<ConversationTurn> history,
+          List<RelevantChunk> chunks,
+          ConversationContext context,
+          bool ismeai = true,
+          string plant = "")
         {
             var messages = new List<object>();
 
@@ -1473,16 +1492,23 @@ These are the fixed organizational details for {plant} plant.";
             {
                 role = "system",
                 content = ismeai ?
-                    await _systemPromptBuilder.BuildMeaiSystemPrompt(plant, chunks, question) : // Add await
-                    _systemPromptBuilder.BuildGeneralSystemPrompt()
+                await _systemPromptBuilder.BuildMeaiSystemPrompt(plant, chunks, question) : // Add await
+                _systemPromptBuilder.BuildGeneralSystemPrompt()
             });
-
 
             // OPTIMIZED: Limited conversation history (reduce token usage)
             foreach (var turn in history.TakeLast(4)) // Reduced from 6
             {
-                messages.Add(new { role = "user", content = turn.Question });
-                messages.Add(new { role = "assistant", content = turn.Answer });
+                messages.Add(new
+                {
+                    role = "user",
+                    content = turn.Question
+                });
+                messages.Add(new
+                {
+                    role = "assistant",
+                    content = turn.Answer
+                });
             }
 
             // OPTIMIZED: Build context only when needed and more efficiently
@@ -1494,7 +1520,11 @@ These are the fixed organizational details for {plant} plant.";
 
             // Add current question
             question = _conversationAnalysis.ResolvePronouns(question, context);
-            messages.Add(new { role = "user", content = question });
+            messages.Add(new
+            {
+                role = "user",
+                content = question
+            });
 
             // OPTIMIZED: Request configuration
             var requestData = new
@@ -1503,16 +1533,30 @@ These are the fixed organizational details for {plant} plant.";
                 messages,
                 temperature = 0.1,
                 stream = false,
-                options = new Dictionary<string, object>
-    {
-        //{ "num_ctx", 16384  },       // ✅ Increased from 4000
-        //{ "num_predict", 16000 },   // ✅ Increased from 2000
-         { "num_ctx", 32768 },      // ← was 16384
-        { "num_predict", 8192 },   // ← was 16000
-        { "top_p", 0.9 },
-        { "repeat_penalty", 1.05 },
-        { "stop", new string[] {} }
-    }
+                options = new Dictionary<string, object> {
+            //{ "num_ctx", 16384  },       // ✅ Increased from 4000
+            //{ "num_predict", 16000 },   // ✅ Increased from 2000
+            {
+              "num_ctx",
+              32768
+            }, // ← was 16384
+            {
+              "num_predict",
+              8192
+            }, // ← was 16000
+            {
+              "top_p",
+              0.9
+            },
+            {
+              "repeat_penalty",
+              1.05
+            },
+            {
+              "stop",
+              new string[] {}
+            }
+          }
             };
 
             try
@@ -1520,7 +1564,8 @@ These are the fixed organizational details for {plant} plant.";
                 _logger.LogInformation($"🤖 Generating response with model: {generationModel.Name}");
 
                 // OPTIMIZED: Reduced timeout
-                using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(20));
+                using
+                var cts = new CancellationTokenSource(TimeSpan.FromMinutes(20));
                 var response = await _ollamaClient.PostAsJsonAsync("/api/chat", requestData, cts.Token);
 
                 if (!response.IsSuccessStatusCode)
@@ -1539,7 +1584,6 @@ These are the fixed organizational details for {plant} plant.";
                 //    messages.Add(new { role = "system", content = contextContent });
                 //}
 
-
                 // OPTIMIZED: Simplified response parsing
                 return await ParseLLMResponse(json, ismeai, plant);
             }
@@ -1557,12 +1601,6 @@ These are the fixed organizational details for {plant} plant.";
 
         // OPTIMIZED: Separate method for building MEAI system prompt
 
-
-
-
-
-
-
         // In your BuildOptimizedContext method, ensure critical policy information is highlighted
         private string BuildOptimizedContext(List<RelevantChunk> chunks, string plant)
         {
@@ -1577,10 +1615,10 @@ These are the fixed organizational details for {plant} plant.";
             // but sort by RelevanceScore so the most relevant chunks surface first.
 
             var topChunks = chunks
-                .Where(c => c.Similarity >= 0.3)          // threshold on raw cosine
-                .OrderByDescending(c => c.RelevanceScore) // order by boosted score
-                .Take(5)
-                .ToList();
+              .Where(c => c.Similarity >= 0.3) // threshold on raw cosine
+              .OrderByDescending(c => c.RelevanceScore) // order by boosted score
+              .Take(5)
+              .ToList();
 
             foreach (var chunk in topChunks)
             {
@@ -1589,8 +1627,8 @@ These are the fixed organizational details for {plant} plant.";
                 // Highlight important restrictions/rules
                 var text = chunk.Text;
                 if (text.Contains("cannot", StringComparison.OrdinalIgnoreCase) ||
-                    text.Contains("not allowed", StringComparison.OrdinalIgnoreCase) ||
-                    text.Contains("restricted", StringComparison.OrdinalIgnoreCase))
+                  text.Contains("not allowed", StringComparison.OrdinalIgnoreCase) ||
+                  text.Contains("restricted", StringComparison.OrdinalIgnoreCase))
                 {
                     contextBuilder.AppendLine("⚠️ IMPORTANT RESTRICTION:");
                 }
@@ -1613,9 +1651,12 @@ These are the fixed organizational details for {plant} plant.";
                 }
 
                 // Parse normal JSON response
-                using var doc = JsonDocument.Parse(json);
-                if (doc.RootElement.TryGetProperty("message", out var messageElement) &&
-                    messageElement.TryGetProperty("content", out var contentElement))
+                using
+                var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("message", out
+                    var messageElement) &&
+                  messageElement.TryGetProperty("content", out
+                    var contentElement))
                 {
                     var content = contentElement.GetString() ?? "";
                     if (string.IsNullOrWhiteSpace(content))
@@ -1659,9 +1700,12 @@ These are the fixed organizational details for {plant} plant.";
 
                 try
                 {
-                    using var doc = JsonDocument.Parse(trimmedLine);
-                    if (doc.RootElement.TryGetProperty("message", out var msgElem) &&
-                        msgElem.TryGetProperty("content", out var contentElem))
+                    using
+                    var doc = JsonDocument.Parse(trimmedLine);
+                    if (doc.RootElement.TryGetProperty("message", out
+                        var msgElem) &&
+                      msgElem.TryGetProperty("content", out
+                        var contentElem))
                     {
                         var content = contentElem.GetString();
                         if (!string.IsNullOrEmpty(content))
@@ -1679,8 +1723,8 @@ These are the fixed organizational details for {plant} plant.";
 
             var result = contentBuilder.ToString();
             return string.IsNullOrWhiteSpace(result) ?
-                "I apologize, but I couldn't process the response properly. Please try again." :
-                result;
+              "I apologize, but I couldn't process the response properly. Please try again." :
+              result;
         }
 
         // OPTIMIZED: Response cleaning
@@ -1691,8 +1735,8 @@ These are the fixed organizational details for {plant} plant.";
 
             // Remove HTML/XML tags
             var cleaned = System.Text.RegularExpressions.Regex.Replace(
-                response, @"<[^>]*>", "",
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+              response, @"<[^>]*>", "",
+              System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
             // Clean excessive whitespace
             cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"\n\s*\n\s*\n", "\n\n");
@@ -1704,23 +1748,23 @@ These are the fixed organizational details for {plant} plant.";
         // Helper methods for error messages
         private string GetFallbackMessage(bool ismeai, string plant)
         {
-            return ismeai
-                ? $"I apologize, but I'm having trouble generating a response right now. Please contact your supervisor or HR department for assistance regarding {plant} policies."
-                : "I apologize, but I'm having trouble generating a response right now. Please try again.";
+            return ismeai ?
+            $"I apologize, but I'm having trouble generating a response right now. Please contact your supervisor or HR department for assistance regarding {plant} policies." :
+        "I apologize, but I'm having trouble generating a response right now. Please try again.";
         }
 
         private string GetTimeoutMessage(bool ismeai, string plant)
         {
-            return ismeai
-                ? $"The response generation timed out. Please contact your supervisor or HR department for assistance regarding {plant} policies."
-                : "The response generation timed out. Please try a simpler question.";
+            return ismeai ?
+            $"The response generation timed out. Please contact your supervisor or HR department for assistance regarding {plant} policies." :
+        "The response generation timed out. Please try a simpler question.";
         }
 
         private string GetErrorMessage(bool ismeai, string plant)
         {
-            return ismeai
-                ? $"I apologize, but I'm having trouble generating a response right now. Please contact your supervisor or HR department for assistance regarding {plant} policies."
-                : "I apologize, but I'm having trouble generating a response right now. Please try again.";
+            return ismeai ?
+            $"I apologize, but I'm having trouble generating a response right now. Please contact your supervisor or HR department for assistance regarding {plant} policies." :
+        "I apologize, but I'm having trouble generating a response right now. Please try again.";
         }
         // API endpoint to get available models
         public async Task<List<ModelConfiguration>> GetAvailableModelsAsync()
@@ -1785,12 +1829,13 @@ These are the fixed organizational details for {plant} plant.";
             try
             {
                 var response = await _chromaClient.GetAsync(
-                    $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/count");
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/count");
 
                 if (response.IsSuccessStatusCode)
                 {
                     var result = await response.Content.ReadAsStringAsync();
-                    using var doc = JsonDocument.Parse(result);
+                    using
+                    var doc = JsonDocument.Parse(result);
                     return doc.RootElement.GetInt32();
                 }
 
@@ -1811,27 +1856,27 @@ These are the fixed organizational details for {plant} plant.";
             return $"{fileName}_{textHash}_{timeStamp}_{modelHash}";
         }
 
-
         private void InitializeSessionCleanup()
         {
             var timer = new System.Threading.Timer(
-                callback: _ => CleanupExpiredSessions(),
-                state: null,
-                dueTime: TimeSpan.FromMinutes(30),
-                period: TimeSpan.FromMinutes(30));
+              callback: _ => CleanupExpiredSessions(),
+              state: null,
+              dueTime: TimeSpan.FromMinutes(30),
+              period: TimeSpan.FromMinutes(30));
         }
         private void CleanupExpiredSessions()
         {
             try
             {
                 var expiredSessions = _sessionContexts
-                    .Where(kvp => DateTime.Now - kvp.Value.LastAccessed > TimeSpan.FromHours(2))
-                    .Select(kvp => kvp.Key)
-                    .ToList();
+                  .Where(kvp => DateTime.Now - kvp.Value.LastAccessed > TimeSpan.FromHours(2))
+                  .Select(kvp => kvp.Key)
+                  .ToList();
 
                 foreach (var sessionId in expiredSessions)
                 {
-                    if (_sessionContexts.TryRemove(sessionId, out var context))
+                    if (_sessionContexts.TryRemove(sessionId, out
+                        var context))
                     {
                         _logger.LogInformation($"Cleaned up expired session: {sessionId}");
                     }
@@ -1845,7 +1890,13 @@ These are the fixed organizational details for {plant} plant.";
         // Implement other required methods from IRAGService
         private bool IsHistoryClearRequest(string question)
         {
-            var clearKeywords = new[] { "clear", "delete", "history", "reset", "start over" };
+            var clearKeywords = new[] {
+        "clear",
+        "delete",
+        "history",
+        "reset",
+        "start over"
+      };
             return clearKeywords.Any(keyword => question.ToLower().Contains(keyword));
         }
         private async Task<QueryResponse> HandleHistoryClearRequest(ConversationContext context, string? sessionId)
@@ -1917,7 +1968,8 @@ These are the fixed organizational details for {plant} plant.";
                 var inputEmbedding = await GetEmbeddingAsync(question, embeddingModel);
                 if (inputEmbedding == null || inputEmbedding.Count == 0) return null;
 
-                (string Answer, List<RelevantChunk> Chunks, double Sim) best = default;
+                (string Answer, List<RelevantChunk> Chunks, double Sim) best =
+                  default;
 
                 foreach (var entry in _appreciatedAnswerStore.All())
                 {
@@ -1930,7 +1982,7 @@ These are the fixed organizational details for {plant} plant.";
                 if (best.Answer != null)
                 {
                     _logger.LogInformation("Appreciated answer match (sim={Sim:F2}) for: {Q}",
-                        best.Sim, question);
+                      best.Sim, question);
                     return (best.Answer, best.Chunks);
                 }
                 return null;
@@ -1949,11 +2001,12 @@ These are the fixed organizational details for {plant} plant.";
         /// stream reader.
         /// </summary>
         public async IAsyncEnumerable<string> StreamGenerateWithHistoryAsync(
-            string model,
-            string systemPrompt,
-            List<ConversationTurn> history,
-            string userQuestion,
-            [EnumeratorCancellation] CancellationToken ct = default)
+          string model,
+          string systemPrompt,
+          List<ConversationTurn> history,
+          string userQuestion,
+          [EnumeratorCancellation] CancellationToken ct =
+          default)
         {
             // FIX 5 — Build full message list WITH history
             var messages = BuildMessageList(systemPrompt, history, userQuestion);
@@ -1967,32 +2020,37 @@ These are the fixed organizational details for {plant} plant.";
                 {
                     temperature = 0.7,
                     //num_predict = 16000,
-                    num_predict = 8192,    // ← was 16000
+                    num_predict = 8192, // ← was 16000
                     top_p = 0.9,
                     //num_ctx = 16384,
-                    num_ctx = 32768,       // ← was 16384
+                    num_ctx = 32768, // ← was 16384
                     repeat_penalty = 1.1
                 }
             };
 
             // FIX 3 — 'using' keeps response alive until the iterator is done
-            using var response = await _ollamaClient.SendAsync(
-                new HttpRequestMessage(HttpMethod.Post, "/api/chat")
-                {
-                    Content = JsonContent.Create(requestBody)
-                },
-                HttpCompletionOption.ResponseHeadersRead,
-                ct);
+            using
+            var response = await _ollamaClient.SendAsync(
+              new HttpRequestMessage(HttpMethod.Post, "/api/chat")
+              {
+                  Content = JsonContent.Create(requestBody)
+              },
+              HttpCompletionOption.ResponseHeadersRead,
+              ct);
 
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogError("Ollama {Status} for model {Model}", response.StatusCode, model);
-                yield return "__ERROR__:Ollama request failed";
-                yield break;
+                yield
+                return "__ERROR__:Ollama request failed";
+                yield
+                break;
             }
 
-            using var stream = await response.Content.ReadAsStreamAsync(ct);
-            using var reader = new StreamReader(stream);
+            using
+            var stream = await response.Content.ReadAsStreamAsync(ct);
+            using
+            var reader = new StreamReader(stream);
 
             while (!reader.EndOfStream && !ct.IsCancellationRequested)
             {
@@ -2000,35 +2058,55 @@ These are the fixed organizational details for {plant} plant.";
                 if (string.IsNullOrWhiteSpace(line)) continue;
 
                 OllamaStreamResponse? chunk;
-                try { chunk = JsonSerializer.Deserialize<OllamaStreamResponse>(line); }
-                catch { continue; }
+                try
+                {
+                    chunk = JsonSerializer.Deserialize<OllamaStreamResponse>(line);
+                }
+                catch
+                {
+                    continue;
+                }
 
                 var token = chunk?.Message?.Content ?? chunk?.Response;
                 if (!string.IsNullOrEmpty(token))
-                    yield return token;
+                    yield
+                  return token;
 
                 if (chunk?.Done == true) break;
             }
         }
 
         private static List<object> BuildMessageList(
-            string systemPrompt,
-            List<ConversationTurn> history,
-            string userQuestion)
+          string systemPrompt,
+          List<ConversationTurn> history,
+          string userQuestion)
         {
-            var messages = new List<object>
-            {
-                new { role = "system", content = systemPrompt }
-            };
+            var messages = new List<object> {
+        new {
+          role = "system", content = systemPrompt
+        }
+      };
 
             // Include last 8 turns (4 Q+A pairs) for context window safety
             foreach (var turn in history.TakeLast(8))
             {
-                messages.Add(new { role = "user", content = turn.Question });
-                messages.Add(new { role = "assistant", content = turn.Answer });
+                messages.Add(new
+                {
+                    role = "user",
+                    content = turn.Question
+                });
+                messages.Add(new
+                {
+                    role = "assistant",
+                    content = turn.Answer
+                });
             }
 
-            messages.Add(new { role = "user", content = userQuestion });
+            messages.Add(new
+            {
+                role = "user",
+                content = userQuestion
+            });
             return messages;
         }
 
@@ -2053,11 +2131,11 @@ These are the fixed organizational details for {plant} plant.";
             }
         }
         private async Task<bool> AddToChromaDBAsync(
-    string collectionId,
-    List<string> ids,
-    List<List<float>> embeddings,
-    List<string> documents,
-    List<Dictionary<string, object>> metadatas)
+          string collectionId,
+          List<string> ids,
+          List<List<float>> embeddings,
+          List<string> documents,
+          List<Dictionary<string, object>> metadatas)
         {
             try
             {
@@ -2078,8 +2156,8 @@ These are the fixed organizational details for {plant} plant.";
                 };
 
                 var response = await _chromaClient.PostAsJsonAsync(
-                    $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/add",
-                    addData);
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/add",
+                  addData);
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -2152,18 +2230,18 @@ These are the fixed organizational details for {plant} plant.";
         }
 
         private async Task<QueryResponse> ProcessNonMeaiQueryFast(
-            string question,
-            string? sessionId,
-            string? generationModel,
-            string userId,
-            Stopwatch stopwatch)
+          string question,
+          string? sessionId,
+          string? generationModel,
+          string userId,
+          Stopwatch stopwatch)
         {
             try
             {
                 _logger.LogInformation("🚀 Processing NON-MEAI query (direct LLM path)");
 
                 var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
-                    sessionId ?? Guid.NewGuid().ToString(), userId);
+                  sessionId ?? Guid.NewGuid().ToString(), userId);
 
                 var context = _conversation.GetOrCreateConversationContext(dbSession.SessionId);
 
@@ -2183,7 +2261,7 @@ These are the fixed organizational details for {plant} plant.";
                     try
                     {
                         finalAnswer = await _helperMethods.RephraseWithLLMAsync(
-                            correction.Answer, generationModel ?? _config.DefaultGenerationModel);
+                          correction.Answer, generationModel ?? _config.DefaultGenerationModel);
                     }
                     catch (Exception ex)
                     {
@@ -2195,7 +2273,9 @@ These are the fixed organizational details for {plant} plant.";
                     {
                         Answer = finalAnswer,
                         IsFromCorrection = true,
-                        Sources = new List<string> { "User Correction" },
+                        Sources = new List<string> {
+                "User Correction"
+              },
                         Confidence = 1.0,
                         ProcessingTimeMs = stopwatch.ElapsedMilliseconds,
                         RelevantChunks = new List<RelevantChunk>(),
@@ -2210,13 +2290,13 @@ These are the fixed organizational details for {plant} plant.";
 
                 // Generate response
                 var genModel = await _modelManager.GetModelAsync(
-                    generationModel ?? _config.DefaultGenerationModel);
+                  generationModel ?? _config.DefaultGenerationModel);
 
                 // **FIX: Use direct answer generation without intro**
                 var answer = await GenerateDirectAnswerAsync(
-                    question,
-                    genModel.Name!,
-                    context.History);
+                  question,
+                  genModel.Name!,
+                  context.History);
 
                 stopwatch.Stop();
 
@@ -2224,7 +2304,9 @@ These are the fixed organizational details for {plant} plant.";
                 {
                     Answer = answer,
                     IsFromCorrection = false,
-                    Sources = new List<string> { "General Knowledge" },
+                    Sources = new List<string> {
+              "General Knowledge"
+            },
                     Confidence = 0.8,
                     ProcessingTimeMs = stopwatch.ElapsedMilliseconds,
                     RelevantChunks = new List<RelevantChunk>(),
@@ -2244,9 +2326,9 @@ These are the fixed organizational details for {plant} plant.";
         }
 
         private async Task<string> GenerateDirectAnswerAsync(
-    string question,
-    string modelName,
-    List<ConversationTurn> history)
+          string question,
+          string modelName,
+          List<ConversationTurn> history)
         {
             var messages = new List<object>();
 
@@ -2257,23 +2339,37 @@ These are the fixed organizational details for {plant} plant.";
             {
                 role = "system",
                 content = @"You are a helpful AI assistant.
-
-CRITICAL: For simple factual questions (Who/What/When/Where/Which), answer in ONE SENTENCE only.
-
-Only provide detailed explanations when explicitly requested.
-
-Answer directly without introducing yourself."
+      
+        CRITICAL: For simple factual questions(Who / What / When / Where / Which),
+                answer in ONE SENTENCE only.
+      
+        Only provide detailed explanations when explicitly requested.
+      
+        Answer directly without introducing yourself.
+              "
             });
 
             // Add conversation history (last 4 turns for context)
             foreach (var turn in history.TakeLast(4))
             {
-                messages.Add(new { role = "user", content = turn.Question });
-                messages.Add(new { role = "assistant", content = turn.Answer });
+                messages.Add(new
+                {
+                    role = "user",
+                    content = turn.Question
+                });
+                messages.Add(new
+                {
+                    role = "assistant",
+                    content = turn.Answer
+                });
             }
 
             // Add current question
-            messages.Add(new { role = "user", content = question });
+            messages.Add(new
+            {
+                role = "user",
+                content = question
+            });
 
             var requestData = new
             {
@@ -2281,18 +2377,32 @@ Answer directly without introducing yourself."
                 messages,
                 temperature = 0.3,
                 stream = false,
-                options = new Dictionary<string, object>
-        {
-            { "num_ctx", 8192 },
-            { "num_predict", numPredict },  // ✅ Dynamic based on question type
-            { "top_p", 0.9 },
-            { "stop", new[] { "\n\n" } }
-        }
+                options = new Dictionary<string, object> {
+            {
+              "num_ctx",
+              8192
+            },
+            {
+              "num_predict",
+              numPredict
+            }, // ✅ Dynamic based on question type
+            {
+              "top_p",
+              0.9
+            },
+            {
+              "stop",
+              new [] {
+                "\n\n"
+              }
+            }
+          }
             };
 
             try
             {
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                using
+                var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                 var response = await _ollamaClient.PostAsJsonAsync("/api/chat", requestData, cts.Token);
 
                 if (!response.IsSuccessStatusCode)
@@ -2302,10 +2412,13 @@ Answer directly without introducing yourself."
                 }
 
                 var json = await response.Content.ReadAsStringAsync();
-                using var doc = JsonDocument.Parse(json);
+                using
+                var doc = JsonDocument.Parse(json);
 
-                if (doc.RootElement.TryGetProperty("message", out var message) &&
-                    message.TryGetProperty("content", out var content))
+                if (doc.RootElement.TryGetProperty("message", out
+                    var message) &&
+                  message.TryGetProperty("content", out
+                    var content))
                 {
                     return content.GetString()?.Trim() ?? "No response generated.";
                 }
@@ -2320,9 +2433,9 @@ Answer directly without introducing yourself."
         }
         // ADD THIS METHOD - Chat response generator for non-MEAI queries
         private async Task<string> GenerateNonMeaiChatResponseAsync(
-            string question,
-            string? modelName,
-            List<ConversationTurn> history)
+          string question,
+          string? modelName,
+          List<ConversationTurn> history)
         {
             var messages = new List<object>();
 
@@ -2332,27 +2445,45 @@ Answer directly without introducing yourself."
                 role = "system",
                 content = @"You are a helpful and knowledgeable AI assistant.
 
-🎯 INSTRUCTIONS:
-1. Provide accurate, helpful, and engaging responses on any topic
-2. Be conversational and natural in your tone  
-3. For general knowledge questions, use your training knowledge
-4. For suggestions/recommendations, provide practical and useful options
-5. Keep responses well-structured and informative
-6. If you don't know something, say so honestly
-7. You can discuss any topic - you are NOT limited to any specific domain
+        🎯 INSTRUCTIONS:
+          1.Provide accurate,
+                helpful,
+                and engaging responses on any topic
+              2.Be conversational and natural in your tone
+              3.For general knowledge questions,
+                use your training knowledge
+              4.For suggestions / recommendations,
+                provide practical and useful options
+              5.Keep responses well - structured and informative
+              6.If you don 't know something, say so honestly
+              7.You can discuss any topic - you are NOT limited to any specific domain
 
-✨ Be helpful, friendly, and informative!"
+        ✨ Be helpful,
+                friendly,
+                and informative!"
             });
 
             // Add recent conversation history (limited for speed)
             foreach (var turn in history.TakeLast(6))
             {
-                messages.Add(new { role = "user", content = turn.Question });
-                messages.Add(new { role = "assistant", content = turn.Answer });
+                messages.Add(new
+                {
+                    role = "user",
+                    content = turn.Question
+                });
+                messages.Add(new
+                {
+                    role = "assistant",
+                    content = turn.Answer
+                });
             }
 
             // Add current question
-            messages.Add(new { role = "user", content = question });
+            messages.Add(new
+            {
+                role = "user",
+                content = question
+            });
 
             var requestData = new
             {
@@ -2360,11 +2491,16 @@ Answer directly without introducing yourself."
                 messages,
                 temperature = 0.7,
                 stream = true,
-                options = new Dictionary<string, object>
-        {
-            { "num_ctx", 4096 }, // Reduced context for faster processing
-            { "top_p", 0.9 }
-        }
+                options = new Dictionary<string, object> {
+            {
+              "num_ctx",
+              4096
+            }, // Reduced context for faster processing
+            {
+              "top_p",
+              0.9
+            }
+          }
             };
 
             try
@@ -2373,7 +2509,8 @@ Answer directly without introducing yourself."
                 response.EnsureSuccessStatusCode();
 
                 var json = await response.Content.ReadAsStringAsync();
-                using var doc = JsonDocument.Parse(json);
+                using
+                var doc = JsonDocument.Parse(json);
                 var content = doc.RootElement.GetProperty("message").GetProperty("content").GetString() ?? "";
 
                 return content.Trim();
@@ -2419,7 +2556,7 @@ Answer directly without introducing yourself."
                 // Find the conversation in database
                 var conversations = await _conversationStorage.GetSessionConversationsAsync(sessionId);
                 var conversation = conversations.LastOrDefault(c =>
-                    c.Question.Equals(question, StringComparison.OrdinalIgnoreCase));
+                  c.Question.Equals(question, StringComparison.OrdinalIgnoreCase));
 
                 if (conversation != null)
                 {
@@ -2428,10 +2565,11 @@ Answer directly without introducing yourself."
                 }
 
                 // Update in-memory corrections cache
-                if (_sessionContexts.TryGetValue(sessionId, out var context))
+                if (_sessionContexts.TryGetValue(sessionId, out
+                    var context))
                 {
                     var turn = context.History.LastOrDefault(t =>
-                        t.Question.Equals(question, StringComparison.OrdinalIgnoreCase));
+                      t.Question.Equals(question, StringComparison.OrdinalIgnoreCase));
                     if (turn != null)
                     {
                         // 🆕 For non-MEAI corrections, we can use a simpler approach
@@ -2504,8 +2642,8 @@ Answer directly without introducing yourself."
 
                         // Method 1: Semantic similarity (if embeddings available)
                         if (inputEmbedding.Count > 0 &&
-                            correction.Embedding != null &&
-                            correction.Embedding.Count == inputEmbedding.Count)
+                          correction.Embedding != null &&
+                          correction.Embedding.Count == inputEmbedding.Count)
                         {
                             similarity = CosineSimilarity(inputEmbedding, correction.Embedding);
                         }
@@ -2556,13 +2694,13 @@ Answer directly without introducing yourself."
                     NonMeaiCorrections = nonMeaiConversations.Count(c => c.IsFromCorrection),
                     NonMeaiAppreciated = nonMeaiConversations.Count(c => c.WasAppreciated),
                     AverageProcessingTime = nonMeaiConversations.Any() ?
-                        nonMeaiConversations.Average(c => c.ProcessingTimeMs) : 0,
+                    nonMeaiConversations.Average(c => c.ProcessingTimeMs) : 0,
                     TopGeneralTopics = nonMeaiConversations
-                        .Where(c => !string.IsNullOrEmpty(c.TopicTag))
-                        .GroupBy(c => c.TopicTag)
-                        .OrderByDescending(g => g.Count())
-                        .Take(5)
-                        .ToDictionary(g => g.Key!, g => g.Count())
+                    .Where(c => !string.IsNullOrEmpty(c.TopicTag))
+                    .GroupBy(c => c.TopicTag)
+                    .OrderByDescending(g => g.Count())
+                    .Take(5)
+                    .ToDictionary(g => g.Key!, g => g.Count())
                 };
             }
             catch (Exception ex)
@@ -2573,11 +2711,11 @@ Answer directly without introducing yourself."
         }
 
         private async Task<int> ProcessChunkBatchForModelAsync(
-    List<(string Text, string SourceFile, string SectionId, string Title)> chunks,
-    ModelConfiguration model,
-    string collectionId,
-    DateTime lastModified,
-    string plant)
+          List<(string Text, string SourceFile, string SectionId, string Title)> chunks,
+          ModelConfiguration model,
+          string collectionId,
+          DateTime lastModified,
+          string plant)
         {
             try
             {
@@ -2585,17 +2723,16 @@ Answer directly without introducing yourself."
 
                 // Filter and prepare chunks
                 var validChunks = chunks
-                    .Where(chunk => !string.IsNullOrWhiteSpace(chunk.Text))
-                    .Select(chunk => new
-                    {
-                        Text = _stringProcessor.CleanText(chunk.Text),
-                        SourceFile = chunk.SourceFile,
-                        ChunkId = GenerateChunkId(chunk.SourceFile, chunk.Text, lastModified, model.Name),
-                        SectionId = chunk.SectionId,
-                        Title = chunk.Title
-                    })
-                    .Where(chunk => !string.IsNullOrWhiteSpace(chunk.Text) && chunk.Text.Length >= 20)
-                    .ToList();
+                  .Where(chunk => !string.IsNullOrWhiteSpace(chunk.Text))
+                  .Select(chunk => new {
+                      Text = _stringProcessor.CleanText(chunk.Text),
+                      SourceFile = chunk.SourceFile,
+                      ChunkId = GenerateChunkId(chunk.SourceFile, chunk.Text, lastModified, model.Name),
+                      SectionId = chunk.SectionId,
+                      Title = chunk.Title
+                  })
+                  .Where(chunk => !string.IsNullOrWhiteSpace(chunk.Text) && chunk.Text.Length >= 20)
+                  .ToList();
 
                 if (!validChunks.Any())
                 {
@@ -2658,7 +2795,7 @@ Answer directly without introducing yourself."
 
                 // Log summary
                 _logger.LogInformation(
-                    $"📊 Embedding generation complete: {successfulChunks.Count} succeeded, {failedChunks.Count} failed");
+          $"📊 Embedding generation complete: {successfulChunks.Count} succeeded, {failedChunks.Count} failed");
 
                 if (failedChunks.Any())
                 {
@@ -2680,7 +2817,7 @@ Answer directly without introducing yourself."
                 var ids = successfulChunks.Select(c => c.ChunkId).ToList();
                 var embeddings = successfulChunks.Select(c => c.Embedding).ToList();
                 var metadatas = successfulChunks.Select(c =>
-                    CreateChunkMetadata(c.SourceFile, lastModified, model.Name, c.Text, plant, c.SectionId, c.Title)).ToList();
+                  CreateChunkMetadata(c.SourceFile, lastModified, model.Name, c.Text, plant, c.SectionId, c.Title)).ToList();
 
                 _logger.LogInformation($"💾 Saving {successfulChunks.Count} chunks to ChromaDB collection: {collectionId}");
 
@@ -2706,9 +2843,9 @@ Answer directly without introducing yourself."
         }
 
         private async Task<List<float>?> GetEmbeddingWithRetryAsync(
-    string text,
-    ModelConfiguration model,
-    int maxRetries = 3)
+          string text,
+          ModelConfiguration model,
+          int maxRetries = 3)
         {
             Exception? lastException = null;
 
@@ -2729,8 +2866,8 @@ Answer directly without introducing yourself."
                     }
 
                     _logger.LogWarning(
-                        $"⚠️ Invalid embedding on attempt {attempt}/{maxRetries}: " +
-                        $"got {embedding?.Count ?? 0} dimensions, expected {model.EmbeddingDimension}");
+            $"⚠️ Invalid embedding on attempt {attempt}/{maxRetries}: " +
+                      $"got {embedding?.Count ?? 0} dimensions, expected {model.EmbeddingDimension}");
                 }
                 catch (Exception ex)
                 {
@@ -2750,8 +2887,6 @@ Answer directly without introducing yourself."
             _logger.LogError(lastException, $"❌ All {maxRetries} attempts failed to generate embedding");
             return null;
         }
-
-
 
         //private async Task ProcessChunkBatchForModelAsync(List<(string Text, string SourceFile, string SectionId, string Title)> chunks, ModelConfiguration model, string collectionId, DateTime lastModified, string plant)
         //{
@@ -2846,19 +2981,23 @@ Answer directly without introducing yourself."
                     var request = new
                     {
                         ids = batch,
-                        include = new[] { "metadatas" }
+                        include = new[] {
+                "metadatas"
+              }
                     };
 
                     var response = await _chromaClient.PostAsJsonAsync(
-                        $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/get",
-                        request);
+            $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/get",
+                      request);
 
                     if (response.IsSuccessStatusCode)
                     {
                         var json = await response.Content.ReadAsStringAsync();
-                        using var doc = JsonDocument.Parse(json);
+                        using
+                        var doc = JsonDocument.Parse(json);
 
-                        if (doc.RootElement.TryGetProperty("ids", out var idsArray))
+                        if (doc.RootElement.TryGetProperty("ids", out
+                            var idsArray))
                         {
                             foreach (var id in idsArray.EnumerateArray())
                             {
@@ -2881,29 +3020,27 @@ Answer directly without introducing yourself."
         private readonly ConcurrentDictionary<string, (List<RelevantChunk> Results, DateTime Timestamp)> _searchCache = new();
         public static void ConfigureOptimizedHttpClient(IServiceCollection services)
         {
-            services.AddHttpClient("OllamaAPI", client =>
-            {
+            services.AddHttpClient("OllamaAPI", client => {
                 client.Timeout = TimeSpan.FromSeconds(60);
                 client.DefaultRequestHeaders.Add("Connection", "keep-alive");
             })
-            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
-            {
-                MaxConnectionsPerServer = 10,
-                UseCookies = false
-            });
+              .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+              {
+                  MaxConnectionsPerServer = 10,
+                  UseCookies = false
+              });
 
-            services.AddHttpClient("ChromaDB", client =>
-            {
+            services.AddHttpClient("ChromaDB", client => {
                 client.Timeout = TimeSpan.FromSeconds(15); // Reduced from 30
                 client.DefaultRequestHeaders.Add("Connection", "keep-alive");
                 client.DefaultRequestHeaders.Add("Keep-Alive", "timeout=30, max=100");
             })
-            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
-            {
-                MaxConnectionsPerServer = 50, // Increased
-                UseCookies = false,
-                UseProxy = false // Disable proxy if not needed
-            });
+              .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+              {
+                  MaxConnectionsPerServer = 50, // Increased
+                  UseCookies = false,
+                  UseProxy = false // Disable proxy if not needed
+              });
         }
         public async Task WarmUpEmbeddingsAsync()
         {
@@ -2914,15 +3051,13 @@ Answer directly without introducing yourself."
                 var models = await _modelManager.DiscoverAvailableModelsAsync();
                 var embeddingModels = models.Where(m => m.Type == "embedding").ToList();
 
-                var warmUpTexts = new[]
-                {
-            "Sample text for warm-up",
-            "Another sample for model initialization",
-            "HR policy warm-up text"
+                var warmUpTexts = new[] {
+          "Sample text for warm-up",
+          "Another sample for model initialization",
+          "HR policy warm-up text"
         };
 
-                var tasks = embeddingModels.Select(async model =>
-                {
+                var tasks = embeddingModels.Select(async model => {
                     try
                     {
                         foreach (var text in warmUpTexts)
@@ -2948,9 +3083,9 @@ Answer directly without introducing yourself."
         public async Task<QueryResponse> ProcessQueryWithCoverageCheck(string question, string plant)
         {
             var response = await ProcessQueryAsync(
-                question: question,
-                plant: plant,
-                meaiInfo: true
+              question: question,
+              plant: plant,
+              meaiInfo: true
             );
 
             // Check if we need to show additional UI elements
@@ -2971,7 +3106,6 @@ Answer directly without introducing yourself."
         //    var relevantChunks = new List<RelevantChunk>();
 
         //    var policyIntent = _queryIntentAnalyzer.DetectPolicyIntent(originalQuery);
-
 
         //    if (root.TryGetProperty("documents", out var documentsArray) &&
         //        documentsArray.GetArrayLength() > 0 &&
@@ -3055,18 +3189,19 @@ Answer directly without introducing yourself."
         //}
 
         private List<RelevantChunk> ParseSearchResults(
-    JsonElement root,
-    int maxResults,
-    string currentPlant,
-    string originalQuery)
+          JsonElement root,
+          int maxResults,
+          string currentPlant,
+          string originalQuery)
         {
             var relevantChunks = new List<RelevantChunk>();
 
             var policyIntent = _queryIntentAnalyzer.DetectPolicyIntent(originalQuery);
 
-            if (!root.TryGetProperty("documents", out var documentsArray) ||
-                documentsArray.GetArrayLength() == 0 ||
-                documentsArray[0].GetArrayLength() == 0)
+            if (!root.TryGetProperty("documents", out
+                var documentsArray) ||
+              documentsArray.GetArrayLength() == 0 ||
+              documentsArray[0].GetArrayLength() == 0)
             {
                 _logger.LogWarning("ParseSearchResults: no documents in ChromaDB response");
                 return relevantChunks;
@@ -3091,12 +3226,13 @@ Answer directly without introducing yourself."
                 var metadata = metadatas[i];
                 var documentText = documents[i].GetString() ?? "";
 
-                var sourceFile = metadata.TryGetProperty("source_file", out var sf)
-                    ? Path.GetFileName(sf.GetString() ?? "")
-                    : "Unknown";
+                var sourceFile = metadata.TryGetProperty("source_file", out
+                    var sf) ?
+                  Path.GetFileName(sf.GetString() ?? "") :
+                  "Unknown";
 
                 var policyType = _policyAnalysis.DeterminePolicyType(
-                    metadata, sourceFile, currentPlant);
+                  metadata, sourceFile, currentPlant);
 
                 // ── Relevance score (ranking only, never shown to user) ──────────────
                 // Start from the raw similarity so the scale is anchored in reality,
@@ -3106,29 +3242,29 @@ Answer directly without introducing yourself."
 
                 // Exact policy-type match — strongest signal
                 if (policyIntent.IntendedPolicyType != null &&
-                    policyType.Equals(
-                        policyIntent.IntendedPolicyType,
-                        StringComparison.OrdinalIgnoreCase))
+                  policyType.Equals(
+                    policyIntent.IntendedPolicyType,
+                    StringComparison.OrdinalIgnoreCase))
                 {
                     boost += 0.50;
                     _logger.LogInformation(
-                        "Exact policy match: {Type} +0.50 → raw={Raw:F3}",
-                        policyType, rawSimilarity);
+                      "Exact policy match: {Type} +0.50 → raw={Raw:F3}",
+                      policyType, rawSimilarity);
                 }
                 // High-confidence intent but different policy — penalise
                 else if (policyIntent.IntendedPolicyType != null &&
-                         policyIntent.Confidence >= 0.7)
+                  policyIntent.Confidence >= 0.7)
                 {
-                    boost -= 0.25;   // penalise rather than multiply so scale stays sane
+                    boost -= 0.25; // penalise rather than multiply so scale stays sane
                     _logger.LogInformation(
-                        "Non-matching policy: {Type} -0.25 → raw={Raw:F3}",
-                        policyType, rawSimilarity);
+                      "Non-matching policy: {Type} -0.25 → raw={Raw:F3}",
+                      policyType, rawSimilarity);
                 }
 
                 // Abbreviation / context files always float to the top
                 var lowerSource = sourceFile.ToLowerInvariant();
                 if (lowerSource.Contains("abbreviation") ||
-                    lowerSource.Contains("context"))
+                  lowerSource.Contains("context"))
                 {
                     boost += 0.15;
                 }
@@ -3144,11 +3280,34 @@ Answer directly without introducing yourself."
                     boost += 0.60; // strong boost for exact phrase match
                 }
 
+                // ✅ NEW: exact metadata match for annexure references. This is
+                // a much stronger, more reliable signal than embedding similarity
+                // for "Annexure N" style queries, since it's an exact lookup
+                // against numbers extracted from the chunk at index time
+                // (see CreateChunkMetadata), not a similarity guess.
+                var annexureRefsMeta = metadata.TryGetProperty("annexure_refs", out
+                    var arProp) ?
+                  arProp.GetString() ?? "" :
+                  "";
+
+                if (!string.IsNullOrEmpty(annexureRefsMeta))
+                {
+                    var queryAnnexNumbers = Regex.Matches(originalQuery, @"annex(?:ure)?\s*(?:no\.?)?\s*(\d+)", RegexOptions.IgnoreCase)
+                      .Select(m => m.Groups[1].Value);
+                    var chunkAnnexNumbers = annexureRefsMeta.Split(',', StringSplitOptions.RemoveEmptyEntries);
+
+                    if (queryAnnexNumbers.Any(n => chunkAnnexNumbers.Contains(n)))
+                    {
+                        boost += 0.70;
+                        _logger.LogInformation("Exact annexure metadata match → raw={Raw:F3}", rawSimilarity);
+                    }
+                }
+
                 // General policy-document signal (weaker)
                 var isPolicyDocument =
-                    lowerSource.Contains("policy") ||
-                    lowerSource.Contains("hr") ||
-                    documentText.Contains("policy", StringComparison.OrdinalIgnoreCase);
+                  lowerSource.Contains("policy") ||
+                  lowerSource.Contains("hr") ||
+                  documentText.Contains("policy", StringComparison.OrdinalIgnoreCase);
 
                 if (isPolicyDocument)
                 {
@@ -3163,27 +3322,32 @@ Answer directly without introducing yourself."
                 {
                     Text = documentText,
                     Source = sourceFile,
-                    Similarity = rawSimilarity,    // ← always the raw cosine value
-                    RelevanceScore = relevanceScore,  // ← used for ordering only
+                    Similarity = rawSimilarity, // ← always the raw cosine value
+                    RelevanceScore = relevanceScore, // ← used for ordering only
                     PolicyType = policyType,
+                    SectionNumber = metadata.TryGetProperty("section_number", out
+                      var snProp) ? snProp.GetString() : null,
+                    SectionTitle = metadata.TryGetProperty("section_title", out
+                      var stProp) ? stProp.GetString() : null,
+                    AnnexureRefs = string.IsNullOrEmpty(annexureRefsMeta) ? null : annexureRefsMeta,
                 });
             }
 
             // Sort by RelevanceScore for ranking, but Similarity is what gets reported
             var results = relevantChunks
-                .OrderByDescending(c => c.RelevanceScore)
-                .Take(maxResults)
-                .ToList();
+              .OrderByDescending(c => c.RelevanceScore)
+              .Take(maxResults)
+              .ToList();
 
             _logger.LogInformation(
-                "ParseSearchResults: {Count} chunks for plant '{Plant}'",
-                results.Count, currentPlant);
+              "ParseSearchResults: {Count} chunks for plant '{Plant}'",
+              results.Count, currentPlant);
 
             foreach (var chunk in results.Take(3))
             {
                 _logger.LogInformation(
-                    "  {Source} ({PolicyType}) raw={Sim:F3} boosted={Score:F3}",
-                    chunk.Source, chunk.PolicyType, chunk.Similarity, chunk.RelevanceScore);
+                  "  {Source} ({PolicyType}) raw={Sim:F3} boosted={Score:F3}",
+                  chunk.Source, chunk.PolicyType, chunk.Similarity, chunk.RelevanceScore);
             }
 
             return results;
@@ -3298,7 +3462,8 @@ Answer directly without introducing yourself."
         }
         private async Task<Dictionary<string, Dictionary<string, string>>> DiscoverPolicySectionsFromDocuments()
         {
-            var dynamicMappings = new Dictionary<string, Dictionary<string, string>>();
+            var dynamicMappings = new Dictionary<string,
+              Dictionary<string, string>>();
 
             try
             {
@@ -3337,33 +3502,46 @@ Answer directly without introducing yourself."
         }
         private async Task<Dictionary<string, Dictionary<string, string>>> DiscoverSectionsInCollection(string collectionId)
         {
-            var sectionMappings = new Dictionary<string, Dictionary<string, string>>();
+            var sectionMappings = new Dictionary<string,
+              Dictionary<string, string>>();
 
             try
             {
                 // Query ChromaDB for documents with section metadata
                 var queryData = new
                 {
-                    query_texts = new[] { "section policy procedure" },
+                    query_texts = new[] {
+              "section policy procedure"
+            },
                     n_results = 1000, // Get many documents
-                    include = new[] { "metadatas", "documents" },
+                    include = new[] {
+              "metadatas",
+              "documents"
+            },
                     where = new Dictionary<string, object>
                     {
-                        ["section_id"] = new Dictionary<string, object> { ["$ne"] = null }
+                        ["section_id"] = new Dictionary<string,
+                      object>
+                        {
+                            ["$ne"] = null
+                        }
                     }
                 };
 
                 var response = await _chromaClient.PostAsJsonAsync(
-                    $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
-                    queryData);
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+                  queryData);
 
                 if (response.IsSuccessStatusCode)
                 {
                     var content = await response.Content.ReadAsStringAsync();
-                    using var doc = JsonDocument.Parse(content);
+                    using
+                    var doc = JsonDocument.Parse(content);
 
-                    if (doc.RootElement.TryGetProperty("metadatas", out var metadatasArray) &&
-                        doc.RootElement.TryGetProperty("documents", out var documentsArray))
+                    if (doc.RootElement.TryGetProperty("metadatas", out
+                        var metadatasArray) &&
+                      doc.RootElement.TryGetProperty("documents", out
+                        var documentsArray))
                     {
                         var metadatas = metadatasArray[0].EnumerateArray().ToArray();
                         var documents = documentsArray[0].EnumerateArray().ToArray();
@@ -3405,7 +3583,8 @@ Answer directly without introducing yourself."
             // Minimal fallback mappings for when discovery fails
             return new Dictionary<string, Dictionary<string, string>>
             {
-                ["General"] = new Dictionary<string, string>
+                ["General"] = new Dictionary<string,
+              string>
                 {
                     ["1"] = "introduction, purpose, overview",
                     ["2"] = "scope, application",
@@ -3417,60 +3596,106 @@ Answer directly without introducing yourself."
         }
         private static readonly ConcurrentDictionary<string, Regex> _sectionPatternCache = new();
 
-        private bool IsExactSectionMatch(string lowerText, string sectionNumber) { if (string.IsNullOrWhiteSpace(sectionNumber)) return false; var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num => { var escaped = Regex.Escape(num); return new Regex($@"\b(?:section|clause|part)\.?\s*{escaped}(?:\.\d+)*\b" + $@"|(?:^|\n)\s*{escaped}\.(?:\d+\.?)*\s", RegexOptions.IgnoreCase | RegexOptions.Compiled); }); return pattern.IsMatch(lowerText); }
-        private async Task<List<RelevantChunk>> SearchForSpecificSection(
-    SectionQuery sectionQuery, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId)
+        private bool IsExactSectionMatch(string lowerText, string sectionNumber)
+        {
+            if (string.IsNullOrWhiteSpace(sectionNumber)) return false;
+            var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num => {
+                var escaped = Regex.Escape(num);
+                return new Regex($@"\b(?:section|clause|part)\.?\s*{escaped}(?:\.\d+)*\b" + $@"|(?:^|\n)\s*{escaped}\.(?:\d+\.?)*\s", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            });
+            return pattern.IsMatch(lowerText);
+        }
+        private async Task<List<RelevantChunk>> SearchForSpecificSection(SectionQuery sectionQuery, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId)
         {
             string combinedQuery;
 
             if (sectionQuery.IsAnnexure)
             {
-                // Annexure topics from GetDynamicSectionTopics are meaningless here —
-                // that method is tuned for ISO-style numbered sections, not annexures.
-                // Keep the query short and literal; we rely on exact-match filtering
-                // below, not embedding precision, to find the right chunk.
+                // ✅ FIX: this used to hardcode "Section {N} ..." and expand it
+                // with GetDynamicSectionTopics(), which is tuned for ISO-style
+                // numbered sections (scope/definitions/etc), not annexures. That
+                // built an embedding query semantically about "Section 2" topics
+                // when the user asked for "Annexure 2" — the correct chunk never
+                // made it into the candidate pool for IsExactAnnexureMatch to
+                // evaluate. Keep the query short and literal instead; precision
+                // here comes from the exact-match filter below, not from the
+                // embedding search being smart about annexure semantics.
                 combinedQuery = $"Annexure {sectionQuery.SectionNumber} form approval technical baseline";
             }
             else
             {
+                // Create a single comprehensive search query instead of multiple
                 combinedQuery = $"Section {sectionQuery.SectionNumber} {sectionQuery.DocumentType} " +
-                    string.Join(" ", _policyAnalysis.GetDynamicSectionTopics(sectionQuery.SectionNumber, sectionQuery.DocumentType));
+                  string.Join(" ", _policyAnalysis.GetDynamicSectionTopics(sectionQuery.SectionNumber, sectionQuery.DocumentType));
             }
 
-            // Annexure mentions are often buried as one line inside a large,
-            // topically-unrelated chunk (as in your example). Cast a much wider
-            // net since we're filtering by exact text match afterward, not
-            // relying on the initial ranking to be precise.
-            var candidatePoolSize = sectionQuery.IsAnnexure
-                ? Math.Max(maxResults * 6, 40)
-                : maxResults * 2;
+            // ✅ Annexure mentions are often a single line buried inside a large,
+            // topically-unrelated chunk (e.g. a numbered list item covering
+            // several unrelated procedures). We rely on exact-text filtering
+            // afterward, not on the initial embedding ranking being precise, so
+            // cast a much wider net for annexure lookups than for normal
+            // section queries, where embedding similarity is a fairly reliable
+            // signal on its own.
+            var candidatePoolSize = sectionQuery.IsAnnexure ?
+              Math.Max(maxResults * 6, 40) :
+              maxResults * 2;
 
+            // Single search instead of multiple
             var results = await PerformChromaSearch(combinedQuery, embeddingModel, candidatePoolSize, plant, collectionId);
 
+            // Filter results after retrieval
             return results
-                .Where(r => IsSectionContentDynamic(r.Text, r.Source, sectionQuery))
-                .OrderByDescending(r => CalculateDynamicSectionRelevance(r, sectionQuery))
-                .Take(maxResults)
-                .ToList();
+              .Where(r => IsSectionContentDynamic(r.Text, r.Source, sectionQuery))
+              .OrderByDescending(r => CalculateDynamicSectionRelevance(r, sectionQuery))
+              .Take(maxResults)
+              .ToList();
         }
         private double CalculateDynamicSectionRelevance(RelevantChunk chunk, SectionQuery sectionQuery)
         {
-            double relevance = chunk.Similarity; var lowerText = chunk.Text.ToLowerInvariant(); var lowerSource = chunk.Source.ToLowerInvariant();             // Boost for exact section match
-            if (sectionQuery.IsAnnexure && IsExactAnnexureMatch(lowerText, sectionQuery.SectionNumber))
+            double relevance = chunk.Similarity;
+            var lowerText = chunk.Text.ToLowerInvariant();
+            var lowerSource = chunk.Source.ToLowerInvariant();
+
+            // ✅ FIX: this previously only ever checked IsExactSectionMatch, even
+            // when sectionQuery.IsAnnexure was true — so among the already-filtered
+            // annexure-matching chunks, ranking gave no extra credit for the exact
+            // annexure match itself. Branch on query type, same as IsSectionContentDynamic.
+            if (sectionQuery.IsAnnexure)
             {
-                relevance += 0.4;
+                if (IsExactAnnexureMatch(lowerText, sectionQuery.SectionNumber))
+                {
+                    relevance += 0.4;
+                }
             }
-            else if (!sectionQuery.IsAnnexure && IsExactSectionMatch(lowerText, sectionQuery.SectionNumber))
+            // Boost for exact section match
+            else if (IsExactSectionMatch(lowerText, sectionQuery.SectionNumber))
             {
                 relevance += 0.4;
-            }          // Boost for document type match
-            if (!string.IsNullOrEmpty(sectionQuery.DocumentType)) { if (lowerSource.Contains(sectionQuery.DocumentType.ToLowerInvariant())) { relevance += 0.3; } }
+            } // Boost for document type match
+            if (!string.IsNullOrEmpty(sectionQuery.DocumentType))
+            {
+                if (lowerSource.Contains(sectionQuery.DocumentType.ToLowerInvariant()))
+                {
+                    relevance += 0.3;
+                }
+            }
             // Boost for expected section content
-            var expectedTopics = _policyAnalysis.GetDynamicSectionTopics(sectionQuery.SectionNumber, sectionQuery.DocumentType); var topicMatches = expectedTopics.Count(topic => lowerText.Contains(topic.ToLowerInvariant())); if (topicMatches > 0)
+            var expectedTopics = _policyAnalysis.GetDynamicSectionTopics(sectionQuery.SectionNumber, sectionQuery.DocumentType);
+            var topicMatches = expectedTopics.Count(topic => lowerText.Contains(topic.ToLowerInvariant()));
+            if (topicMatches > 0)
             {
                 relevance += 0.2 * Math.Min(topicMatches, 3); // Up to 0.6 boost
-            }             // Boost for structural indicators
-            var structuralKeywords = new[] { "policy", "procedure", "requirement", "shall", "must", "should" }; var structuralMatches = structuralKeywords.Count(keyword => lowerText.Contains(keyword)); if (structuralMatches > 0)
+            } // Boost for structural indicators
+            var structuralKeywords = new[] {
+        "policy",
+        "procedure",
+        "requirement",
+        "shall",
+        "must",
+        "should"
+      };
+            var structuralMatches = structuralKeywords.Count(keyword => lowerText.Contains(keyword));
+            if (structuralMatches > 0)
             {
                 relevance += 0.1 * Math.Min(structuralMatches, 2); // Up to 0.2 boost
             }
@@ -3497,8 +3722,8 @@ Answer directly without introducing yourself."
             {
                 var sourceFileName = Path.GetFileNameWithoutExtension(source).ToLowerInvariant();
                 if (!sourceFileName.Contains(documentType.ToLowerInvariant()) &&
-                    !sourceFileName.Contains("general") &&
-                    !sourceFileName.Contains("centralized"))
+                  !sourceFileName.Contains("general") &&
+                  !sourceFileName.Contains("centralized"))
                 {
                     return false;
                 }
@@ -3518,13 +3743,12 @@ Answer directly without introducing yourself."
         private bool IsExactAnnexureMatch(string lowerText, string annexureNumber)
         {
             var escaped = Regex.Escape(annexureNumber);
-            var patterns = new[]
-            {
+            var patterns = new[] {
         $@"annexure\s*{escaped}\b",
-        $@"annexure[\s\-]+{escaped}\b",
-        $@"annex\s*{escaped}\b",
-        $@"annexure\s*no\.?\s*{escaped}\b"
-    };
+          $@"annexure[\s\-]+{escaped}\b",
+          $@"annex\s*{escaped}\b",
+          $@"annexure\s*no\.?\s*{escaped}\b"
+      };
             return patterns.Any(p => Regex.IsMatch(lowerText, p));
         }
         // Supporting class for section queries
@@ -3535,15 +3759,33 @@ Answer directly without introducing yourself."
             var folderPath = Path.GetDirectoryName(sourceFile)?.ToLowerInvariant() ?? "";
             var normalizedPlant = plant.ToLowerInvariant();
 
-            var metadata = new Dictionary<string, object>
-    {
-        { "source_file", sourceFile },
-        { "last_modified", lastModified.ToString("O") },
-        { "model", modelName },
-        { "chunk_size", text.Length },
-        { "processed_at", DateTime.Now.ToString("O") },
-        { "processed_by", _currentUser }
-    };
+            var metadata = new Dictionary<string,
+              object> {
+          {
+            "source_file",
+            sourceFile
+          },
+          {
+            "last_modified",
+            lastModified.ToString("O")
+          },
+          {
+            "model",
+            modelName
+          },
+          {
+            "chunk_size",
+            text.Length
+          },
+          {
+            "processed_at",
+            DateTime.Now.ToString("O")
+          },
+          {
+            "processed_by",
+            _currentUser
+          }
+        };
 
             // Add section information
             if (!string.IsNullOrEmpty(sectionId))
@@ -3560,6 +3802,28 @@ Answer directly without introducing yourself."
             if (!string.IsNullOrEmpty(documentType))
             {
                 metadata["document_type"] = documentType;
+            }
+
+            // ✅ NEW: Extract Annexure references present in this chunk's text
+            // and store them as searchable metadata. Annexure/Form/Appendix-style
+            // numbered references are exact-lookup queries where dense embedding
+            // similarity is unreliable (a short, low-information query phrase
+            // competing against a large, multi-topic chunk). Storing the exact
+            // numbers as metadata lets retrieval fall back to a precise metadata
+            // filter for these queries instead of relying only on similarity.
+            var annexureNumbers = Regex.Matches(text, @"annex(?:ure)?\s*(?:no\.?)?\s*(\d+)", RegexOptions.IgnoreCase)
+              .Select(m => m.Groups[1].Value)
+              .Distinct()
+              .ToList();
+
+            if (annexureNumbers.Any())
+            {
+                // Chroma string metadata doesn't support array types here, so
+                // store as a comma-delimited string; callers doing an exact
+                // lookup for annexure N should filter client-side by checking
+                // this field .Split(',').Contains(N), or switch to a $contains
+                // filter if/when the collection schema enables document FTS.
+                metadata["annexure_refs"] = string.Join(",", annexureNumbers);
             }
 
             // Plant classification (existing logic)
@@ -3613,11 +3877,11 @@ Answer directly without introducing yourself."
 
                 // 4. Deduplicate and rank by similarity
                 var uniqueChunks = allChunks
-                    .GroupBy(c => c.Text)
-                    .Select(g => g.OrderByDescending(c => c.RelevanceScore).First())
-                    .OrderByDescending(c => c.RelevanceScore)   // rank by boosted score
-                    .Take(maxResults)
-                    .ToList();
+                  .GroupBy(c => c.Text)
+                  .Select(g => g.OrderByDescending(c => c.RelevanceScore).First())
+                  .OrderByDescending(c => c.RelevanceScore) // rank by boosted score
+                  .Take(maxResults)
+                  .ToList();
 
                 _logger.LogInformation($"🔍 Multi-query search: {originalChunks.Count} original + {allChunks.Count - originalChunks.Count} expanded = {uniqueChunks.Count} final chunks");
 
@@ -3630,22 +3894,22 @@ Answer directly without introducing yourself."
             }
         }
         private async Task<List<RelevantChunk>> GetRelevantChunksWithExpansionAsync(
-    string originalQuery,
-    string expandedQuery,
-    string contextualQuery,
-    ModelConfiguration embeddingModel,
-    int maxResults,
-    string plant,
-    bool useReRanking,
-    ConversationContext? context = null)
+          string originalQuery,
+          string expandedQuery,
+          string contextualQuery,
+          ModelConfiguration embeddingModel,
+          int maxResults,
+          string plant,
+          bool useReRanking,
+          ConversationContext? context = null)
         {
             try
             {
                 _logger.LogInformation("🔍 Starting knowledge base retrieval");
 
-                var effectiveQuery = !string.IsNullOrWhiteSpace(contextualQuery)
-                    ? contextualQuery
-                    : expandedQuery;
+                var effectiveQuery = !string.IsNullOrWhiteSpace(contextualQuery) ?
+                  contextualQuery :
+                  expandedQuery;
 
                 var queryEmbedding = await GetEmbeddingAsync(effectiveQuery, embeddingModel);
 
@@ -3659,21 +3923,30 @@ Answer directly without introducing yourself."
 
                 var searchPayload = new
                 {
-                    query_embeddings = new[] { queryEmbedding },
+                    query_embeddings = new[] {
+              queryEmbedding
+            },
                     n_results = maxResults * 2,
-                    include = new[] { "documents", "metadatas", "distances" },
-                    where = new Dictionary<string, object>
-            {
-                { "plant", plant }
+                    include = new[] {
+              "documents",
+              "metadatas",
+              "distances"
+            },
+                    where = new Dictionary<string, object> {
+              {
+                "plant",
+                plant
+              }
             }
                 };
 
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                using
+                var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
                 var response = await _chromaClient.PostAsJsonAsync(
-                    $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
-                    searchPayload,
-                    cts.Token);
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+                  searchPayload,
+                  cts.Token);
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -3699,11 +3972,13 @@ Answer directly without introducing yourself."
 
                 _logger.LogDebug($"📄 Received JSON response: {json.Substring(0, Math.Min(200, json.Length))}...");
 
-                using var doc = JsonDocument.Parse(json);
+                using
+                var doc = JsonDocument.Parse(json);
 
                 var chunks = new List<RelevantChunk>();
 
-                if (!doc.RootElement.TryGetProperty("documents", out var documentsProperty))
+                if (!doc.RootElement.TryGetProperty("documents", out
+                    var documentsProperty))
                 {
                     _logger.LogWarning("⚠️ No 'documents' property in response");
                     return chunks;
@@ -3723,24 +3998,26 @@ Answer directly without introducing yourself."
 
                     chunks.Add(new RelevantChunk
                     {
-                        Id = metadata.TryGetProperty("chunk_id", out var idProp)
-                                ? idProp.GetString() ?? Guid.NewGuid().ToString()
-                                : Guid.NewGuid().ToString(),
+                        Id = metadata.TryGetProperty("chunk_id", out
+                          var idProp) ?
+                        idProp.GetString() ?? Guid.NewGuid().ToString() :
+                        Guid.NewGuid().ToString(),
                         Text = text,
-                        Source = metadata.TryGetProperty("source_file", out var src)
-                                ? src.GetString() ?? "Unknown"
-                                : "Unknown",
+                        Source = metadata.TryGetProperty("source_file", out
+                          var src) ?
+                        src.GetString() ?? "Unknown" :
+                        "Unknown",
                         Similarity = 1.0 - distance,
                         Bm25Score = 0
                     });
                 }
 
                 chunks = chunks
-                    .GroupBy(c => c.Id)
-                    .Select(g => g.First())
-                    .OrderByDescending(c => c.Similarity)
-                    .Take(maxResults)
-                    .ToList();
+                  .GroupBy(c => c.Id)
+                  .Select(g => g.First())
+                  .OrderByDescending(c => c.Similarity)
+                  .Take(maxResults)
+                  .ToList();
 
                 _logger.LogInformation($"✅ Retrieved {chunks.Count} relevant chunks");
 
@@ -3765,30 +4042,63 @@ Answer directly without introducing yourself."
                 }
 
                 var normalizedPlant = plant.ToLowerInvariant();
-                var whereFilter = new Dictionary<string, object>
-        {
-            { "$or", new List<Dictionary<string, object>>
-                {
-                    new Dictionary<string, object> { { "plant", normalizedPlant } },
-                    new Dictionary<string, object> { { "plant", "centralized" } },
-                    new Dictionary<string, object> { { "plant", "context" } },
-                    new Dictionary<string, object> { { "plant", "general" } }
+                var whereFilter = new Dictionary<string,
+                  object> {
+            {
+              "$or",
+              new List < Dictionary < string,
+              object >> {
+                new Dictionary < string,
+                object > {
+                  {
+                    "plant",
+                    normalizedPlant
+                  }
+                },
+                new Dictionary < string,
+                object > {
+                  {
+                    "plant",
+                    "centralized"
+                  }
+                },
+                new Dictionary < string,
+                object > {
+                  {
+                    "plant",
+                    "context"
+                  }
+                },
+                new Dictionary < string,
+                object > {
+                  {
+                    "plant",
+                    "general"
+                  }
                 }
+              }
             }
-        };
+          };
 
                 var searchData = new
                 {
-                    query_embeddings = new List<List<float>> { queryEmbedding },
+                    query_embeddings = new List<List<float>> {
+              queryEmbedding
+            },
                     n_results = maxResults,
-                    include = new[] { "documents", "metadatas", "distances" },
+                    include = new[] {
+              "documents",
+              "metadatas",
+              "distances"
+            },
                     where = whereFilter
                 };
 
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                using
+                var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                 var response = await _chromaClient.PostAsJsonAsync(
-                    $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
-                    searchData, cts.Token);
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+                  searchData, cts.Token);
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -3798,7 +4108,8 @@ Answer directly without introducing yourself."
                 }
 
                 var responseContent = await response.Content.ReadAsStringAsync();
-                using var doc = JsonDocument.Parse(responseContent);
+                using
+                var doc = JsonDocument.Parse(responseContent);
                 return ParseSearchResults(doc.RootElement, maxResults, plant, query);
             }
             catch (Exception ex)
@@ -3823,34 +4134,67 @@ Answer directly without introducing yourself."
                 var normalizedPlant = plant.ToLowerInvariant();
 
                 // Broader search criteria for general queries
-                var whereFilter = new Dictionary<string, object>
-        {
-            { "$or", new List<Dictionary<string, object>>
-                {
-                    new Dictionary<string, object> { { "plant", normalizedPlant } },
-                    new Dictionary<string, object> { { "plant", "centralized" } },
-                    new Dictionary<string, object> { { "plant", "context" } },
-                    new Dictionary<string, object> { { "plant", "general" } }
+                var whereFilter = new Dictionary<string,
+                  object> {
+            {
+              "$or",
+              new List < Dictionary < string,
+              object >> {
+                new Dictionary < string,
+                object > {
+                  {
+                    "plant",
+                    normalizedPlant
+                  }
+                },
+                new Dictionary < string,
+                object > {
+                  {
+                    "plant",
+                    "centralized"
+                  }
+                },
+                new Dictionary < string,
+                object > {
+                  {
+                    "plant",
+                    "context"
+                  }
+                },
+                new Dictionary < string,
+                object > {
+                  {
+                    "plant",
+                    "general"
+                  }
                 }
+              }
             }
-        };
+          };
 
                 var searchData = new
                 {
-                    query_embeddings = new List<List<float>> { queryEmbedding },
+                    query_embeddings = new List<List<float>> {
+              queryEmbedding
+            },
                     n_results = Math.Min(maxResults * 2, 50), // Get more results for general search
-                    include = new[] { "documents", "metadatas", "distances" },
+                    include = new[] {
+              "documents",
+              "metadatas",
+              "distances"
+            },
                     where = whereFilter
                 };
 
                 var response = await _chromaClient.PostAsJsonAsync(
-                    $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
-                    searchData);
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+                  searchData);
 
                 if (response.IsSuccessStatusCode)
                 {
                     var responseContent = await response.Content.ReadAsStringAsync();
-                    using var doc = JsonDocument.Parse(responseContent);
+                    using
+                    var doc = JsonDocument.Parse(responseContent);
                     var results = ParseSearchResults(doc.RootElement, maxResults, plant, originalQuery);
 
                     _logger.LogInformation($"🔍 General search found {results.Count} results");
@@ -4011,6 +4355,13 @@ Answer directly without introducing yourself."
                 var models = await _modelManager.DiscoverAvailableModelsAsync();
                 await ConfigureDefaultModelsAsync(models);
 
+                // ✅ NEW: Validate every model this app depends on is actually
+                // pulled on Ollama, and log loudly if not. Missing models used
+                // to fail silently deep in a request (e.g. reranker 404 wiping
+                // out already-retrieved chunks) with no indication at startup
+                // that anything was wrong. This turns that into a boot-time signal.
+                await ValidateCriticalModelsAsync();
+
                 EnsureDirectoriesExist();
                 EnsureAbbreviationContext();
                 EnsurePlantSpecificOrganizationContext();
@@ -4024,7 +4375,8 @@ Answer directly without introducing yourself."
                 // ✅ FIX 2: Process plants sequentially to avoid parallel DbContext issues
                 foreach (var plant in _plants.Plants.Keys)
                 {
-                    if (_plantInitialized.TryGetValue(plant, out var initialized) && initialized)
+                    if (_plantInitialized.TryGetValue(plant, out
+                        var initialized) && initialized)
                     {
                         _logger.LogInformation($"✓ Plant '{plant}' already initialized");
 
@@ -4054,6 +4406,55 @@ Answer directly without introducing yourself."
             }
         }
 
+        /// <summary>
+        /// Checks every model this application depends on against what's
+        /// actually pulled on the Ollama server, and logs a clear, loud
+        /// error for anything missing. Does not throw — the app can still
+        /// start and serve non-affected functionality — but makes a
+        /// misconfigured/missing model visible at boot instead of surfacing
+        /// only as an empty-chunks bug several requests later.
+        /// </summary>
+        private async Task ValidateCriticalModelsAsync()
+        {
+            var criticalModels = new (string Name, string Purpose)[] {
+        (_config.DefaultEmbeddingModel ?? "", "default embedding model"),
+        (_config.DefaultGenerationModel ?? "", "default generation model"),
+        ("qllama/bge-reranker-v2-m3:f16", "reranker model"),
+      };
+
+            var missing = new List<string>();
+
+            foreach (var (name, purpose) in criticalModels)
+            {
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    _logger.LogError("❌ STARTUP CHECK: No {Purpose} configured in appsettings.json", purpose);
+                    continue;
+                }
+
+                var available = await _modelManager.IsModelActuallyAvailableAsync(name);
+                if (!available)
+                {
+                    _logger.LogError(
+                      "❌ STARTUP CHECK: Model '{Model}' (configured as {Purpose}) is NOT pulled on Ollama. " +
+                      "Requests depending on it will fail or silently return empty results. Run: ollama pull {Model}",
+                      name, purpose, name);
+                    missing.Add($"{name} ({purpose})");
+                }
+                else
+                {
+                    _logger.LogInformation("✅ STARTUP CHECK: {Purpose} '{Model}' is available", purpose, name);
+                }
+            }
+
+            if (missing.Any())
+            {
+                _logger.LogWarning(
+                  "⚠️ STARTUP CHECK SUMMARY: {Count} critical model(s) missing on Ollama: {Missing}",
+                  missing.Count, string.Join(", ", missing));
+            }
+        }
+
         /// ✅ NEW: Only check and process files that have changed
         /// </summary>
         private async Task CheckForChangedFilesAsync(string plant, List<ModelConfiguration> embeddingModels)
@@ -4070,7 +4471,8 @@ Answer directly without introducing yourself."
                     var lastModified = fileInfo.LastWriteTime;
 
                     // Check if file was modified after last scan
-                    if (_plantLastScan.TryGetValue(plant, out var lastScan))
+                    if (_plantLastScan.TryGetValue(plant, out
+                        var lastScan))
                     {
                         if (lastModified > lastScan)
                         {
@@ -4156,8 +4558,8 @@ Answer directly without introducing yourself."
 
                 // Load essential caches
                 await Task.WhenAll(
-                    LoadCorrectionCacheAsync(),
-                    LoadHistoricalAppreciatedAnswersAsync()
+                  LoadCorrectionCacheAsync(),
+                  LoadHistoricalAppreciatedAnswersAsync()
                 );
 
                 // Mark system as initialized (prevents full init)
@@ -4216,7 +4618,8 @@ Answer directly without introducing yourself."
         /// <summary>        /// Stable, effectively-collision-free hash for embedding cache keys.        /// string.GetHashCode() is only a 32-bit hash with no uniqueness        /// guarantee — two unrelated chunks/queries can produce the same        /// value and silently share a cached embedding, returning the wrong        /// vector for a piece of text. SHA-256 makes accidental collisions        /// practically impossible.        /// </summary>        
         private static string ComputeContentHash(string text)
         {
-            var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(text)); return Convert.ToHexString(bytes);
+            var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(text));
+            return Convert.ToHexString(bytes);
         }
         private async Task<List<float>> GetEmbeddingAsync(string text, ModelConfiguration model)
         {
@@ -4235,7 +4638,8 @@ Answer directly without introducing yourself."
             var cacheKey = $"{model.Name}:{text.GetHashCode():X}";
 
             // Check cache first
-            if (_optimizedEmbeddingCache.TryGetValue(cacheKey, out var cached))
+            if (_optimizedEmbeddingCache.TryGetValue(cacheKey, out
+                var cached))
             {
                 if (DateTime.Now - cached.Cached < TimeSpan.FromHours(24))
                 {
@@ -4257,7 +4661,8 @@ Answer directly without introducing yourself."
                     return new List<float>();
                 }
 
-                var maxEmbeddingChars = (int)(model.MaxContextLength * 3.5 * 0.9); if (maxEmbeddingChars < 500) maxEmbeddingChars = 500;
+                var maxEmbeddingChars = (int)(model.MaxContextLength * 3.5 * 0.9);
+                if (maxEmbeddingChars < 500) maxEmbeddingChars = 500;
                 if (processedText.Length > maxEmbeddingChars)
                 {
                     var originalLength = processedText.Length;
@@ -4270,11 +4675,12 @@ Answer directly without introducing yourself."
                 var request = new
                 {
                     model = model.Name,
-                    prompt = processedText,  // Keep "prompt" - it's standard across Ollama versions
+                    prompt = processedText, // Keep "prompt" - it's standard across Ollama versions
                     options = new Dictionary<string, object>() // Empty options to avoid conflicts
                 };
 
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+                using
+                var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
                 var response = await _ollamaClient.PostAsJsonAsync("/api/embeddings", request, cts.Token);
 
                 if (!response.IsSuccessStatusCode)
@@ -4295,14 +4701,16 @@ Answer directly without introducing yourself."
                 }
 
                 // ✅ Parse response
-                using var doc = JsonDocument.Parse(json);
+                using
+                var doc = JsonDocument.Parse(json);
 
                 // Try standard format
-                if (doc.RootElement.TryGetProperty("embedding", out var embeddingProperty))
+                if (doc.RootElement.TryGetProperty("embedding", out
+                    var embeddingProperty))
                 {
                     var embedding = embeddingProperty.EnumerateArray()
-                        .Select(x => x.GetSingle())
-                        .ToList();
+                      .Select(x => x.GetSingle())
+                      .ToList();
 
                     if (embedding.Count > 0)
                     {
@@ -4345,33 +4753,32 @@ Answer directly without introducing yourself."
             var cleaned = text;
 
             // ✅ 1. Remove ALL special token patterns (exhaustive list)
-            var specialTokenPatterns = new[]
-            {
+            var specialTokenPatterns = new[] {
         // LLaMA/Mistral tokens
         @"<\|im_start\|>", @"<\|im_end\|>", @"<\|im_sep\|>",
-        @"<\|endoftext\|>", @"<\|startoftext\|>",
-        
-        // Instruction format tokens
-        @"\[INST\]", @"\[/INST\]",
-        @"<<SYS>>", @"<</SYS>>",
-        
-        // Generic model tokens
-        @"<s>", @"</s>",
-        @"<\|user\|>", @"<\|assistant\|>", @"<\|system\|>",
-        @"<assistant>", @"</assistant>",
-        @"<user>", @"</user>",
-        @"<system>", @"</system>",
-        
-        // Chat-ML tokens
-        @"<\|begin_of_text\|>", @"<\|end_of_text\|>",
-        @"<\|start_header_id\|>", @"<\|end_header_id\|>",
-        
-        // Other potential tokens
-        @"<\|pad\|>", @"<\|eos\|>", @"<\|bos\|>",
-        
-        // Remove any remaining angle bracket tokens
-        @"<\|[^>]+\|>"
-    };
+          @"<\|endoftext\|>", @"<\|startoftext\|>",
+
+          // Instruction format tokens
+          @"\[INST\]", @"\[/INST\]",
+          @"<<SYS>>", @"<</SYS>>",
+
+          // Generic model tokens
+          @"<s>", @"</s>",
+          @"<\|user\|>", @"<\|assistant\|>", @"<\|system\|>",
+          @"<assistant>", @"</assistant>",
+          @"<user>", @"</user>",
+          @"<system>", @"</system>",
+
+          // Chat-ML tokens
+          @"<\|begin_of_text\|>", @"<\|end_of_text\|>",
+          @"<\|start_header_id\|>", @"<\|end_header_id\|>",
+
+          // Other potential tokens
+          @"<\|pad\|>", @"<\|eos\|>", @"<\|bos\|>",
+
+          // Remove any remaining angle bracket tokens
+          @"<\|[^>]+\|>"
+      };
 
             foreach (var pattern in specialTokenPatterns)
             {
@@ -4383,12 +4790,16 @@ Answer directly without introducing yourself."
             cleaned = cleaned.Replace("```", "");
 
             // ✅ 3. Remove common instruction prefixes that might trigger token detection
-            var instructionPrefixes = new[]
-            {
-        "### Instruction:", "### Response:", "### System:",
-        "Human:", "Assistant:", "AI:",
-        "Question:", "Answer:"
-    };
+            var instructionPrefixes = new[] {
+        "### Instruction:",
+        "### Response:",
+        "### System:",
+        "Human:",
+        "Assistant:",
+        "AI:",
+        "Question:",
+        "Answer:"
+      };
 
             foreach (var prefix in instructionPrefixes)
             {
@@ -4411,7 +4822,7 @@ Answer directly without introducing yourself."
 
             // ✅ 8. Ensure text is plain and safe
             if (cleaned.Contains("<|") || cleaned.Contains("|>") ||
-                cleaned.Contains("[INST]") || cleaned.Contains("<<"))
+              cleaned.Contains("[INST]") || cleaned.Contains("<<"))
             {
                 _logger.LogWarning($"⚠️ Text still contains suspicious tokens after cleaning!");
                 _logger.LogWarning($"Text preview: {cleaned.Substring(0, Math.Min(200, cleaned.Length))}");
@@ -4432,10 +4843,10 @@ Answer directly without introducing yourself."
             {
                 // Keep alphanumeric, whitespace, and common punctuation
                 if (char.IsLetterOrDigit(c) ||
-                    char.IsWhiteSpace(c) ||
-                    c == '.' || c == ',' || c == '!' || c == '?' ||
-                    c == ';' || c == ':' || c == '-' || c == '(' ||
-                    c == ')' || c == '\'' || c == '"' || c == '/')
+                  char.IsWhiteSpace(c) ||
+                  c == '.' || c == ',' || c == '!' || c == '?' ||
+                  c == ';' || c == ':' || c == '-' || c == '(' ||
+                  c == ')' || c == '\'' || c == '"' || c == '/')
                 {
                     result.Append(c);
                 }
@@ -4462,9 +4873,9 @@ Answer directly without introducing yourself."
             {
                 var cutoff = DateTime.Now.AddHours(-12);
                 var itemsToRemove = _optimizedEmbeddingCache
-                    .Where(kvp => kvp.Value.Cached < cutoff || kvp.Value.AccessCount < 2) // LFU + time-based
-                    .Select(kvp => kvp.Key)
-                    .ToList();
+                  .Where(kvp => kvp.Value.Cached < cutoff || kvp.Value.AccessCount < 2) // LFU + time-based
+                  .Select(kvp => kvp.Key)
+                  .ToList();
 
                 foreach (var key in itemsToRemove)
                 {
@@ -4504,30 +4915,41 @@ Answer directly without introducing yourself."
                 }
             }
 
-            public void RecordSuccess() { lock (_lock) { _failureCount = 0; } }
-            public void RecordFailure() { lock (_lock) { _failureCount++; _lastFailureTime = DateTime.Now; } }
+            public void RecordSuccess()
+            {
+                lock (_lock)
+                {
+                    _failureCount = 0;
+                }
+            }
+            public void RecordFailure()
+            {
+                lock (_lock)
+                {
+                    _failureCount++;
+                    _lastFailureTime = DateTime.Now;
+                }
+            }
         }
-
 
         private async Task<string> AutoSelectGenerationModel(string question)
         {
             var wc = question.Split(' ').Length;
 
             var candidate =
-                wc <= 12 ? "llama3.2:1b" :
-                wc <= 40 ? "llama3.1:8b" :
-                "qwen3:8b";
+              wc <= 12 ? "llama3.2:1b" :
+              wc <= 40 ? "llama3.1:8b" :
+              "qwen3:8b";
 
             if (await _modelManager.ValidateModelAsync(candidate))
                 return candidate;
 
             _logger.LogWarning(
-                "Auto-selected generation model '{Candidate}' is not available; falling back to configured default '{Default}'",
-                candidate, _config.DefaultGenerationModel);
+              "Auto-selected generation model '{Candidate}' is not available; falling back to configured default '{Default}'",
+              candidate, _config.DefaultGenerationModel);
 
             return _config.DefaultGenerationModel;
         }
-
 
         //public async IAsyncEnumerable<StreamChunk> ProcessQueryStreamAsync(
         //    string question,
@@ -4918,17 +5340,18 @@ Answer directly without introducing yourself."
         //}
 
         private async IAsyncEnumerable<string> GenerateNonMeaiStreamDirectAsync(
-    string question,
-    string modelName,
-    string sessionId,
-    [EnumeratorCancellation] CancellationToken ct = default)
+          string question,
+          string modelName,
+          string sessionId,
+          [EnumeratorCancellation] CancellationToken ct =
+          default)
         {
             var history = _historyService.GetHistory(sessionId);
 
             _logger.LogInformation(
-                "Non-MEAI stream: session={S} historyTurns={N} question='{Q}'",
-                sessionId, history.Count,
-                question.Substring(0, Math.Min(60, question.Length)));
+              "Non-MEAI stream: session={S} historyTurns={N} question='{Q}'",
+              sessionId, history.Count,
+              question.Substring(0, Math.Min(60, question.Length)));
 
             // Resolve pronouns using most recent answer
             var processedQuestion = question;
@@ -4943,15 +5366,16 @@ Answer directly without introducing yourself."
             }
 
             var systemPrompt =
-                "You are a helpful AI assistant. " +
-                "Answer factual questions concisely. " +
-                "For complex questions provide thorough explanations. " +
-                "Never fabricate information.";
+              "You are a helpful AI assistant. " +
+              "Answer factual questions concisely. " +
+              "For complex questions provide thorough explanations. " +
+              "Never fabricate information.";
 
             await foreach (var token in StreamGenerateWithHistoryAsync(
-                modelName, systemPrompt, history, processedQuestion, ct))
+              modelName, systemPrompt, history, processedQuestion, ct))
             {
-                yield return token;
+                yield
+                return token;
             }
         }
 
@@ -4966,17 +5390,16 @@ Answer directly without introducing yourself."
                 var cleanAnswer = answer.Trim();
 
                 // Pattern 1: "X is a [profession]" - MOST RELIABLE
-                var patterns = new[]
-                {
-            // "Elon Musk is a business magnate"
-            @"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+is\s+a(?:n)?\s+",
-            
+                var patterns = new[] {
+          // "Elon Musk is a business magnate"
+          @"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+is\s+a(?:n)?\s+",
+
             // "Elon Musk is the CEO"
             @"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+is\s+the\s+",
-            
+
             // "Elon Musk, born in..."
             @"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}),",
-            
+
             // At start: "Elon Musk has/was/became..."
             @"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+(?:has|was|were|became|founded|created|invented)",
         };
@@ -5020,187 +5443,777 @@ Answer directly without introducing yourself."
         }
 
         private static readonly HashSet<string> _commonWords = new HashSet<string>(
-            StringComparer.OrdinalIgnoreCase)
-        {
-            // Articles & Determiners
-            "The", "A", "An", "This", "That", "These", "Those",
+          StringComparer.OrdinalIgnoreCase) {
+      // Articles & Determiners
+      "The",
+      "A",
+      "An",
+      "This",
+      "That",
+      "These",
+      "Those",
 
-            // Response Words
-            "Yes", "No", "Maybe", "Perhaps", "Certainly", "Indeed", "Sure",
+      // Response Words
+      "Yes",
+      "No",
+      "Maybe",
+      "Perhaps",
+      "Certainly",
+      "Indeed",
+      "Sure",
 
-            // Titles & Positions
-            "Mr", "Mrs", "Ms", "Dr", "Prof", "Sir", "Madam", "Lord", "Lady",
-            "Prime", "Minister", "President", "Vice", "Deputy", "Chief",
-            "Executive", "Officer", "Director", "Manager", "Secretary",
-            "Chairman", "Chairwoman", "Chairperson", "Head", "Leader",
-            "Governor", "Mayor", "Senator", "Representative", "Congressman",
-            "Congresswoman", "Justice", "Judge", "Attorney", "General",
-            "Commissioner", "Ambassador", "Consul", "Chancellor", "Rector",
-            "Dean", "Principal", "Superintendent", "Captain", "Colonel",
-            "General", "Admiral", "Commander", "Lieutenant", "Sergeant",
-            "Corporal", "Major", "King", "Queen", "Prince", "Princess",
-            "Duke", "Duchess", "Count", "Countess", "Baron", "Baroness",
-            "Emperor", "Empress", "Sultan", "Caliph", "Sheikh", "Emir",
+      // Titles & Positions
+      "Mr",
+      "Mrs",
+      "Ms",
+      "Dr",
+      "Prof",
+      "Sir",
+      "Madam",
+      "Lord",
+      "Lady",
+      "Prime",
+      "Minister",
+      "President",
+      "Vice",
+      "Deputy",
+      "Chief",
+      "Executive",
+      "Officer",
+      "Director",
+      "Manager",
+      "Secretary",
+      "Chairman",
+      "Chairwoman",
+      "Chairperson",
+      "Head",
+      "Leader",
+      "Governor",
+      "Mayor",
+      "Senator",
+      "Representative",
+      "Congressman",
+      "Congresswoman",
+      "Justice",
+      "Judge",
+      "Attorney",
+      "General",
+      "Commissioner",
+      "Ambassador",
+      "Consul",
+      "Chancellor",
+      "Rector",
+      "Dean",
+      "Principal",
+      "Superintendent",
+      "Captain",
+      "Colonel",
+      "General",
+      "Admiral",
+      "Commander",
+      "Lieutenant",
+      "Sergeant",
+      "Corporal",
+      "Major",
+      "King",
+      "Queen",
+      "Prince",
+      "Princess",
+      "Duke",
+      "Duchess",
+      "Count",
+      "Countess",
+      "Baron",
+      "Baroness",
+      "Emperor",
+      "Empress",
+      "Sultan",
+      "Caliph",
+      "Sheikh",
+      "Emir",
 
-            // Professional Titles
-            "Doctor", "Professor", "Engineer", "Architect", "Lawyer",
-            "Teacher", "Lecturer", "Instructor", "Coach", "Trainer",
-            "Consultant", "Advisor", "Analyst", "Specialist", "Expert",
-            "Technician", "Assistant", "Associate", "Partner", "Member",
+      // Professional Titles
+      "Doctor",
+      "Professor",
+      "Engineer",
+      "Architect",
+      "Lawyer",
+      "Teacher",
+      "Lecturer",
+      "Instructor",
+      "Coach",
+      "Trainer",
+      "Consultant",
+      "Advisor",
+      "Analyst",
+      "Specialist",
+      "Expert",
+      "Technician",
+      "Assistant",
+      "Associate",
+      "Partner",
+      "Member",
 
-            // Corporate Titles
-            "CEO", "CFO", "CTO", "COO", "CIO", "CMO", "VP", "SVP", "EVP",
-            "Chairman", "Chairwoman", "Board", "Trustee", "Stakeholder",
+      // Corporate Titles
+      "CEO",
+      "CFO",
+      "CTO",
+      "COO",
+      "CIO",
+      "CMO",
+      "VP",
+      "SVP",
+      "EVP",
+      "Chairman",
+      "Chairwoman",
+      "Board",
+      "Trustee",
+      "Stakeholder",
 
-            // Government & Politics
-            "Government", "Parliament", "Congress", "Senate", "Assembly",
-            "Council", "Cabinet", "Ministry", "Department", "Agency",
-            "Bureau", "Commission", "Committee", "Party", "Opposition",
-            "Coalition", "Alliance", "Union", "Federation", "Republic",
-            "Democracy", "Monarchy", "Kingdom", "Empire", "State",
+      // Government & Politics
+      "Government",
+      "Parliament",
+      "Congress",
+      "Senate",
+      "Assembly",
+      "Council",
+      "Cabinet",
+      "Ministry",
+      "Department",
+      "Agency",
+      "Bureau",
+      "Commission",
+      "Committee",
+      "Party",
+      "Opposition",
+      "Coalition",
+      "Alliance",
+      "Union",
+      "Federation",
+      "Republic",
+      "Democracy",
+      "Monarchy",
+      "Kingdom",
+      "Empire",
+      "State",
 
-            // Geographic Terms
-            "Country", "Nation", "State", "Province", "Territory", "Region",
-            "District", "County", "City", "Town", "Village", "Municipality",
-            "Capital", "Metropolis", "Urban", "Rural", "Suburban",
-            "North", "South", "East", "West", "Northern", "Southern",
-            "Eastern", "Western", "Central", "Northeast", "Northwest",
-            "Southeast", "Southwest", "Midwest", "Atlantic", "Pacific",
+      // Geographic Terms
+      "Country",
+      "Nation",
+      "State",
+      "Province",
+      "Territory",
+      "Region",
+      "District",
+      "County",
+      "City",
+      "Town",
+      "Village",
+      "Municipality",
+      "Capital",
+      "Metropolis",
+      "Urban",
+      "Rural",
+      "Suburban",
+      "North",
+      "South",
+      "East",
+      "West",
+      "Northern",
+      "Southern",
+      "Eastern",
+      "Western",
+      "Central",
+      "Northeast",
+      "Northwest",
+      "Southeast",
+      "Southwest",
+      "Midwest",
+      "Atlantic",
+      "Pacific",
 
-            // Continents & Major Regions
-            "Asia", "Europe", "Africa", "America", "Americas", "Australia",
-            "Antarctica", "Oceania", "Caribbean", "Mediterranean", "Baltic",
-            "Scandinavia", "Balkans", "Caucasus", "Middle", "Far",
+      // Continents & Major Regions
+      "Asia",
+      "Europe",
+      "Africa",
+      "America",
+      "Americas",
+      "Australia",
+      "Antarctica",
+      "Oceania",
+      "Caribbean",
+      "Mediterranean",
+      "Baltic",
+      "Scandinavia",
+      "Balkans",
+      "Caucasus",
+      "Middle",
+      "Far",
 
-            // Major Countries (commonly used in titles)
-            "India", "China", "Japan", "Russia", "Germany", "France",
-            "Britain", "England", "Scotland", "Wales", "Ireland",
-            "Spain", "Italy", "Greece", "Turkey", "Egypt", "Iran",
-            "Iraq", "Syria", "Israel", "Palestine", "Jordan", "Lebanon",
-            "Saudi", "Arabia", "Kuwait", "Qatar", "Bahrain", "Oman",
-            "Yemen", "Pakistan", "Bangladesh", "Nepal", "Bhutan", "Myanmar",
-            "Thailand", "Vietnam", "Malaysia", "Singapore", "Indonesia",
-            "Philippines", "Korea", "Taiwan", "Mongolia", "Afghanistan",
-            "Brazil", "Mexico", "Canada", "Argentina", "Chile", "Peru",
-            "Colombia", "Venezuela", "Ecuador", "Bolivia", "Uruguay",
-            "Paraguay", "Australia", "Zealand", "Fiji", "Samoa",
-            "South", "Africa", "Nigeria", "Kenya", "Ethiopia", "Ghana",
-            "Morocco", "Algeria", "Tunisia", "Libya", "Sudan", "Uganda",
-            "Pakistan", "Bangladesh", "Sri", "Lanka", "Nepal", "Bhutan",
-            "United States of America", "United Kingdom", "United Arab Emirates", "Saudi Arabia",
-            "Nepal", "Sri Lanka", "North Korea", "South Korea", "New Zealand",
+      // Major Countries (commonly used in titles)
+      "India",
+      "China",
+      "Japan",
+      "Russia",
+      "Germany",
+      "France",
+      "Britain",
+      "England",
+      "Scotland",
+      "Wales",
+      "Ireland",
+      "Spain",
+      "Italy",
+      "Greece",
+      "Turkey",
+      "Egypt",
+      "Iran",
+      "Iraq",
+      "Syria",
+      "Israel",
+      "Palestine",
+      "Jordan",
+      "Lebanon",
+      "Saudi",
+      "Arabia",
+      "Kuwait",
+      "Qatar",
+      "Bahrain",
+      "Oman",
+      "Yemen",
+      "Pakistan",
+      "Bangladesh",
+      "Nepal",
+      "Bhutan",
+      "Myanmar",
+      "Thailand",
+      "Vietnam",
+      "Malaysia",
+      "Singapore",
+      "Indonesia",
+      "Philippines",
+      "Korea",
+      "Taiwan",
+      "Mongolia",
+      "Afghanistan",
+      "Brazil",
+      "Mexico",
+      "Canada",
+      "Argentina",
+      "Chile",
+      "Peru",
+      "Colombia",
+      "Venezuela",
+      "Ecuador",
+      "Bolivia",
+      "Uruguay",
+      "Paraguay",
+      "Australia",
+      "Zealand",
+      "Fiji",
+      "Samoa",
+      "South",
+      "Africa",
+      "Nigeria",
+      "Kenya",
+      "Ethiopia",
+      "Ghana",
+      "Morocco",
+      "Algeria",
+      "Tunisia",
+      "Libya",
+      "Sudan",
+      "Uganda",
+      "Pakistan",
+      "Bangladesh",
+      "Sri",
+      "Lanka",
+      "Nepal",
+      "Bhutan",
+      "United States of America",
+      "United Kingdom",
+      "United Arab Emirates",
+      "Saudi Arabia",
+      "Nepal",
+      "Sri Lanka",
+      "North Korea",
+      "South Korea",
+      "New Zealand",
 
-            // US States (commonly used)
-            "California", "Texas", "Florida", "York", "Illinois", "Pennsylvania",
-            "Ohio", "Georgia", "Michigan", "Carolina", "Jersey", "Virginia",
-            "Washington", "Massachusetts", "Arizona", "Indiana", "Tennessee",
-            "Missouri", "Maryland", "Wisconsin", "Minnesota", "Colorado",
-            "Alabama", "Louisiana", "Kentucky", "Oregon", "Oklahoma",
-            "Connecticut", "Iowa", "Mississippi", "Arkansas", "Kansas",
-            "Utah", "Nevada", "Mexico", "Nebraska", "Virginia", "Idaho",
-            "Hawaii", "Hampshire", "Maine", "Montana", "Island", "Delaware",
-            "Dakota", "Alaska", "Vermont", "Wyoming", "Columbia",
+      // US States (commonly used)
+      "California",
+      "Texas",
+      "Florida",
+      "York",
+      "Illinois",
+      "Pennsylvania",
+      "Ohio",
+      "Georgia",
+      "Michigan",
+      "Carolina",
+      "Jersey",
+      "Virginia",
+      "Washington",
+      "Massachusetts",
+      "Arizona",
+      "Indiana",
+      "Tennessee",
+      "Missouri",
+      "Maryland",
+      "Wisconsin",
+      "Minnesota",
+      "Colorado",
+      "Alabama",
+      "Louisiana",
+      "Kentucky",
+      "Oregon",
+      "Oklahoma",
+      "Connecticut",
+      "Iowa",
+      "Mississippi",
+      "Arkansas",
+      "Kansas",
+      "Utah",
+      "Nevada",
+      "Mexico",
+      "Nebraska",
+      "Virginia",
+      "Idaho",
+      "Hawaii",
+      "Hampshire",
+      "Maine",
+      "Montana",
+      "Island",
+      "Delaware",
+      "Dakota",
+      "Alaska",
+      "Vermont",
+      "Wyoming",
+      "Columbia",
 
-            // Indian States & Cities
-            "Maharashtra", "Gujarat", "Karnataka", "Kerala", "Punjab",
-            "Haryana", "Rajasthan", "Pradesh", "Bengal", "Bihar",
-            "Odisha", "Assam", "Chhattisgarh", "Jharkhand", "Uttarakhand",
-            "Himachal", "Jammu", "Kashmir", "Goa", "Sikkim", "Tripura",
-            "Meghalaya", "Manipur", "Mizoram", "Nagaland", "Arunachal",
-            "Mumbai", "Delhi", "Bangalore", "Hyderabad", "Chennai",
-            "Kolkata", "Pune", "Ahmedabad", "Surat", "Jaipur", "Lucknow",
-            "Kanpur", "Nagpur", "Indore", "Thane", "Bhopal", "Visakhapatnam",
-            "Pimpri", "Patna", "Vadodara", "Ghaziabad", "Ludhiana",
-            "Agra", "Nashik", "Faridabad", "Meerut", "Rajkot", "Varanasi",
+      // Indian States & Cities
+      "Maharashtra",
+      "Gujarat",
+      "Karnataka",
+      "Kerala",
+      "Punjab",
+      "Haryana",
+      "Rajasthan",
+      "Pradesh",
+      "Bengal",
+      "Bihar",
+      "Odisha",
+      "Assam",
+      "Chhattisgarh",
+      "Jharkhand",
+      "Uttarakhand",
+      "Himachal",
+      "Jammu",
+      "Kashmir",
+      "Goa",
+      "Sikkim",
+      "Tripura",
+      "Meghalaya",
+      "Manipur",
+      "Mizoram",
+      "Nagaland",
+      "Arunachal",
+      "Mumbai",
+      "Delhi",
+      "Bangalore",
+      "Hyderabad",
+      "Chennai",
+      "Kolkata",
+      "Pune",
+      "Ahmedabad",
+      "Surat",
+      "Jaipur",
+      "Lucknow",
+      "Kanpur",
+      "Nagpur",
+      "Indore",
+      "Thane",
+      "Bhopal",
+      "Visakhapatnam",
+      "Pimpri",
+      "Patna",
+      "Vadodara",
+      "Ghaziabad",
+      "Ludhiana",
+      "Agra",
+      "Nashik",
+      "Faridabad",
+      "Meerut",
+      "Rajkot",
+      "Varanasi",
 
-            // Time & Temporal
-            "Current", "Former", "Incumbent", "Acting", "Interim", "Elect",
-            "Designate", "Emeritus", "Retired", "Late", "Present", "Past",
-            "Future", "Recent", "New", "Old", "Ancient", "Modern",
-            "Contemporary", "Historical", "Previous", "Next", "Last",
+      // Time & Temporal
+      "Current",
+      "Former",
+      "Incumbent",
+      "Acting",
+      "Interim",
+      "Elect",
+      "Designate",
+      "Emeritus",
+      "Retired",
+      "Late",
+      "Present",
+      "Past",
+      "Future",
+      "Recent",
+      "New",
+      "Old",
+      "Ancient",
+      "Modern",
+      "Contemporary",
+      "Historical",
+      "Previous",
+      "Next",
+      "Last",
 
-            // Organizational
-            "Organization", "Organisation", "Institute", "Institution",
-            "Foundation", "Association", "Society", "Corporation", "Company",
-            "Firm", "Enterprise", "Business", "Group", "Consortium",
-            "Syndicate", "Cooperative", "Partnership", "Trust", "Fund",
-            "Center", "Centre", "Academy", "University", "College",
-            "School", "Hospital", "Clinic", "Laboratory", "Library",
-            "Museum", "Gallery", "Theater", "Theatre", "Stadium", "Arena",
+      // Organizational
+      "Organization",
+      "Organisation",
+      "Institute",
+      "Institution",
+      "Foundation",
+      "Association",
+      "Society",
+      "Corporation",
+      "Company",
+      "Firm",
+      "Enterprise",
+      "Business",
+      "Group",
+      "Consortium",
+      "Syndicate",
+      "Cooperative",
+      "Partnership",
+      "Trust",
+      "Fund",
+      "Center",
+      "Centre",
+      "Academy",
+      "University",
+      "College",
+      "School",
+      "Hospital",
+      "Clinic",
+      "Laboratory",
+      "Library",
+      "Museum",
+      "Gallery",
+      "Theater",
+      "Theatre",
+      "Stadium",
+      "Arena",
 
-            // Religious Terms
-            "Church", "Temple", "Mosque", "Synagogue", "Cathedral",
-            "Monastery", "Convent", "Abbey", "Shrine", "Sanctuary",
-            "Pope", "Bishop", "Archbishop", "Cardinal", "Priest",
-            "Pastor", "Reverend", "Father", "Brother", "Sister",
-            "Imam", "Mullah", "Ayatollah", "Rabbi", "Monk", "Nun",
-            "Saint", "Blessed", "Holy", "Divine", "Sacred",
+      // Religious Terms
+      "Church",
+      "Temple",
+      "Mosque",
+      "Synagogue",
+      "Cathedral",
+      "Monastery",
+      "Convent",
+      "Abbey",
+      "Shrine",
+      "Sanctuary",
+      "Pope",
+      "Bishop",
+      "Archbishop",
+      "Cardinal",
+      "Priest",
+      "Pastor",
+      "Reverend",
+      "Father",
+      "Brother",
+      "Sister",
+      "Imam",
+      "Mullah",
+      "Ayatollah",
+      "Rabbi",
+      "Monk",
+      "Nun",
+      "Saint",
+      "Blessed",
+      "Holy",
+      "Divine",
+      "Sacred",
 
-            // Military & Security
-            "Army", "Navy", "Force", "Forces", "Marine", "Corps",
-            "Regiment", "Battalion", "Brigade", "Division", "Squadron",
-            "Fleet", "Platoon", "Company", "Unit", "Troops", "Soldiers",
-            "Military", "Defense", "Defence", "Security", "Intelligence",
-            "Police", "Officer", "Constable", "Inspector", "Superintendent",
+      // Military & Security
+      "Army",
+      "Navy",
+      "Force",
+      "Forces",
+      "Marine",
+      "Corps",
+      "Regiment",
+      "Battalion",
+      "Brigade",
+      "Division",
+      "Squadron",
+      "Fleet",
+      "Platoon",
+      "Company",
+      "Unit",
+      "Troops",
+      "Soldiers",
+      "Military",
+      "Defense",
+      "Defence",
+      "Security",
+      "Intelligence",
+      "Police",
+      "Officer",
+      "Constable",
+      "Inspector",
+      "Superintendent",
 
-            // Academic & Research
-            "Research", "Study", "Studies", "Science", "Technology",
-            "Engineering", "Mathematics", "Physics", "Chemistry", "Biology",
-            "Medicine", "Law", "Economics", "Business", "Management",
-            "Arts", "Humanities", "Social", "Natural", "Applied",
-            "Theoretical", "Practical", "Experimental", "Clinical",
+      // Academic & Research
+      "Research",
+      "Study",
+      "Studies",
+      "Science",
+      "Technology",
+      "Engineering",
+      "Mathematics",
+      "Physics",
+      "Chemistry",
+      "Biology",
+      "Medicine",
+      "Law",
+      "Economics",
+      "Business",
+      "Management",
+      "Arts",
+      "Humanities",
+      "Social",
+      "Natural",
+      "Applied",
+      "Theoretical",
+      "Practical",
+      "Experimental",
+      "Clinical",
 
-            // Media & Communication
-            "News", "Media", "Press", "Journalism", "Broadcasting",
-            "Television", "Radio", "Newspaper", "Magazine", "Journal",
-            "Reporter", "Journalist", "Editor", "Correspondent", "Anchor",
-            "Producer", "Publisher", "Writer", "Author", "Columnist",
+      // Media & Communication
+      "News",
+      "Media",
+      "Press",
+      "Journalism",
+      "Broadcasting",
+      "Television",
+      "Radio",
+      "Newspaper",
+      "Magazine",
+      "Journal",
+      "Reporter",
+      "Journalist",
+      "Editor",
+      "Correspondent",
+      "Anchor",
+      "Producer",
+      "Publisher",
+      "Writer",
+      "Author",
+      "Columnist",
 
-            // Legal Terms
-            "Law", "Legal", "Court", "Supreme", "High", "District",
-            "Trial", "Appeal", "Justice", "Judicial", "Judiciary",
-            "Magistrate", "Advocate", "Barrister", "Solicitor", "Counsel",
+      // Legal Terms
+      "Law",
+      "Legal",
+      "Court",
+      "Supreme",
+      "High",
+      "District",
+      "Trial",
+      "Appeal",
+      "Justice",
+      "Judicial",
+      "Judiciary",
+      "Magistrate",
+      "Advocate",
+      "Barrister",
+      "Solicitor",
+      "Counsel",
 
-            // Economic Terms
-            "Economy", "Economic", "Finance", "Financial", "Banking",
-            "Market", "Stock", "Exchange", "Trade", "Commerce",
-            "Industry", "Industrial", "Manufacturing", "Production",
-            "Agriculture", "Farming", "Mining", "Construction",
+      // Economic Terms
+      "Economy",
+      "Economic",
+      "Finance",
+      "Financial",
+      "Banking",
+      "Market",
+      "Stock",
+      "Exchange",
+      "Trade",
+      "Commerce",
+      "Industry",
+      "Industrial",
+      "Manufacturing",
+      "Production",
+      "Agriculture",
+      "Farming",
+      "Mining",
+      "Construction",
 
-            // Common Adjectives (that might appear before names)
-            "Great", "Grand", "Supreme", "Superior", "Senior", "Junior",
-            "First", "Second", "Third", "Fourth", "Fifth", "Last",
-            "Main", "Primary", "Secondary", "Principal", "Major", "Minor",
-            "Upper", "Lower", "Higher", "Lesser", "Greater", "Smaller",
-            "Larger", "Bigger", "Better", "Best", "Worst", "Finest",
-            "Leading", "Top", "Bottom", "Front", "Back", "Side",
+      // Common Adjectives (that might appear before names)
+      "Great",
+      "Grand",
+      "Supreme",
+      "Superior",
+      "Senior",
+      "Junior",
+      "First",
+      "Second",
+      "Third",
+      "Fourth",
+      "Fifth",
+      "Last",
+      "Main",
+      "Primary",
+      "Secondary",
+      "Principal",
+      "Major",
+      "Minor",
+      "Upper",
+      "Lower",
+      "Higher",
+      "Lesser",
+      "Greater",
+      "Smaller",
+      "Larger",
+      "Bigger",
+      "Better",
+      "Best",
+      "Worst",
+      "Finest",
+      "Leading",
+      "Top",
+      "Bottom",
+      "Front",
+      "Back",
+      "Side",
 
-            // Common Nouns (to avoid false positives)
-            "People", "Person", "Man", "Woman", "Men", "Women", "Child",
-            "Children", "Boy", "Girl", "Male", "Female", "Human", "Humans",
-            "Individual", "Group", "Team", "Staff", "Crew", "Personnel",
-            "Public", "Private", "Citizen", "Resident", "Native", "Local",
-            "National", "International", "Global", "Regional", "Provincial",
+      // Common Nouns (to avoid false positives)
+      "People",
+      "Person",
+      "Man",
+      "Woman",
+      "Men",
+      "Women",
+      "Child",
+      "Children",
+      "Boy",
+      "Girl",
+      "Male",
+      "Female",
+      "Human",
+      "Humans",
+      "Individual",
+      "Group",
+      "Team",
+      "Staff",
+      "Crew",
+      "Personnel",
+      "Public",
+      "Private",
+      "Citizen",
+      "Resident",
+      "Native",
+      "Local",
+      "National",
+      "International",
+      "Global",
+      "Regional",
+      "Provincial",
 
-            // Miscellaneous Common Words
-            "Information", "Data", "Report", "Document", "Record", "File",
-            "System", "Process", "Method", "Procedure", "Policy", "Rule",
-            "Regulation", "Standard", "Guideline", "Protocol", "Framework",
-            "Structure", "Model", "Pattern", "Format", "Style", "Type",
-            "Kind", "Sort", "Category", "Class", "Grade", "Level",
-            "Rank", "Position", "Status", "Role", "Function", "Duty",
-            "Responsibility", "Authority", "Power", "Control", "Management",
+      // Miscellaneous Common Words
+      "Information",
+      "Data",
+      "Report",
+      "Document",
+      "Record",
+      "File",
+      "System",
+      "Process",
+      "Method",
+      "Procedure",
+      "Policy",
+      "Rule",
+      "Regulation",
+      "Standard",
+      "Guideline",
+      "Protocol",
+      "Framework",
+      "Structure",
+      "Model",
+      "Pattern",
+      "Format",
+      "Style",
+      "Type",
+      "Kind",
+      "Sort",
+      "Category",
+      "Class",
+      "Grade",
+      "Level",
+      "Rank",
+      "Position",
+      "Status",
+      "Role",
+      "Function",
+      "Duty",
+      "Responsibility",
+      "Authority",
+      "Power",
+      "Control",
+      "Management",
 
-            // Common Prepositions & Conjunctions (shouldn't be part of name)
-            "Of", "In", "On", "At", "To", "For", "With", "By", "From",
-            "About", "Into", "Through", "During", "Before", "After",
-            "Between", "Among", "Against", "Under", "Over", "Above",
-            "Below", "Across", "Along", "Around", "Behind", "Beyond",
-            "And", "Or", "But", "If", "When", "Where", "While", "Until",
-            "Since", "Because", "Although", "Though", "Unless", "Whether"
+      // Common Prepositions & Conjunctions (shouldn't be part of name)
+      "Of",
+      "In",
+      "On",
+      "At",
+      "To",
+      "For",
+      "With",
+      "By",
+      "From",
+      "About",
+      "Into",
+      "Through",
+      "During",
+      "Before",
+      "After",
+      "Between",
+      "Among",
+      "Against",
+      "Under",
+      "Over",
+      "Above",
+      "Below",
+      "Across",
+      "Along",
+      "Around",
+      "Behind",
+      "Beyond",
+      "And",
+      "Or",
+      "But",
+      "If",
+      "When",
+      "Where",
+      "While",
+      "Until",
+      "Since",
+      "Because",
+      "Although",
+      "Though",
+      "Unless",
+      "Whether"
 
-        };
-
+    };
 
         private static bool IsCommonWord(string word)
         {
@@ -5213,35 +6226,87 @@ Answer directly without introducing yourself."
             if (string.IsNullOrWhiteSpace(text))
                 return false;
 
-            var excludedWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
+            var excludedWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
         // Same list as IsCommonWord for consistency
         // Articles & Determiners
-        "The", "A", "An", "This", "That", "These", "Those",
-        
-        // Response Words
-        "Yes", "No", "Maybe", "Perhaps", "Certainly", "Indeed",
-        
-        // Common Titles
-        "Mr", "Mrs", "Ms", "Dr", "Prof", "Prime", "Minister",
-        "President", "Vice", "Chief", "Executive", "Officer",
-        "Director", "Manager", "Secretary", "Chairman", "Governor",
-        "Mayor", "Senator", "Judge", "General", "Captain",
-        
-        // Generic Terms
-        "Government", "Parliament", "Congress", "Ministry",
-        "Department", "Agency", "Committee", "Party", "Country",
-        "State", "City", "Town", "Region", "District",
-        
-        // Time References
-        "Current", "Former", "Incumbent", "Acting", "Interim",
-        
-        // Organizational
-        "Organization", "Institute", "Foundation", "Association",
-        "Corporation", "Company", "University", "College", "School"
-    };
+        "The",
+        "A",
+        "An",
+        "This",
+        "That",
+        "These",
+        "Those",
 
-            var words = text.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        // Response Words
+        "Yes",
+        "No",
+        "Maybe",
+        "Perhaps",
+        "Certainly",
+        "Indeed",
+
+        // Common Titles
+        "Mr",
+        "Mrs",
+        "Ms",
+        "Dr",
+        "Prof",
+        "Prime",
+        "Minister",
+        "President",
+        "Vice",
+        "Chief",
+        "Executive",
+        "Officer",
+        "Director",
+        "Manager",
+        "Secretary",
+        "Chairman",
+        "Governor",
+        "Mayor",
+        "Senator",
+        "Judge",
+        "General",
+        "Captain",
+
+        // Generic Terms
+        "Government",
+        "Parliament",
+        "Congress",
+        "Ministry",
+        "Department",
+        "Agency",
+        "Committee",
+        "Party",
+        "Country",
+        "State",
+        "City",
+        "Town",
+        "Region",
+        "District",
+
+        // Time References
+        "Current",
+        "Former",
+        "Incumbent",
+        "Acting",
+        "Interim",
+
+        // Organizational
+        "Organization",
+        "Institute",
+        "Foundation",
+        "Association",
+        "Corporation",
+        "Company",
+        "University",
+        "College",
+        "School"
+      };
+
+            var words = text.Split(new[] {
+        ' '
+      }, StringSplitOptions.RemoveEmptyEntries);
 
             // Validation checks
             if (words.Length == 0 || words.Length > 4)
@@ -5267,9 +6332,9 @@ Answer directly without introducing yourself."
             if (words.Length == 1)
             {
                 return words[0].Length >= 3 &&
-                       !excludedWords.Contains(words[0]) &&
-                       char.IsUpper(words[0][0]) &&
-                       words[0].Skip(1).All(c => char.IsLower(c) || c == '\'' || c == '-');
+                  !excludedWords.Contains(words[0]) &&
+                  char.IsUpper(words[0][0]) &&
+                  words[0].Skip(1).All(c => char.IsLower(c) || c == '\'' || c == '-');
             }
 
             // 2. Two words: First + Last name pattern
@@ -5280,9 +6345,9 @@ Answer directly without introducing yourself."
 
                 // Both should be capitalized and not common words
                 return !excludedWords.Contains(firstName) &&
-                       !excludedWords.Contains(lastName) &&
-                       firstName.Length >= 2 &&
-                       lastName.Length >= 2;
+                  !excludedWords.Contains(lastName) &&
+                  firstName.Length >= 2 &&
+                  lastName.Length >= 2;
             }
 
             // 3. Three words: First + Middle + Last OR Title + First + Last
@@ -5310,17 +6375,16 @@ Answer directly without introducing yourself."
                 return false;
 
             // Common name patterns
-            var namePatterns = new[]
-            {
-        @"^[A-Z][a-z]+\s+[A-Z][a-z]+$",                          // First Last
-        @"^[A-Z][a-z]+\s+[A-Z][a-z]+\s+[A-Z][a-z]+$",            // First Middle Last
-        @"^[A-Z][a-z]+\s+[A-Z]\.\s+[A-Z][a-z]+$",                // First M. Last
-        @"^[A-Z]\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$",                // F. Middle Last
-        @"^Dr\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$",                   // Dr. First Last
-        @"^Mr\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$",                   // Mr. First Last
-        @"^Mrs\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$",                  // Mrs. First Last
-        @"^Ms\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$",                   // Ms. First Last
-    };
+            var namePatterns = new[] {
+        @"^[A-Z][a-z]+\s+[A-Z][a-z]+$", // First Last
+          @"^[A-Z][a-z]+\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // First Middle Last
+          @"^[A-Z][a-z]+\s+[A-Z]\.\s+[A-Z][a-z]+$", // First M. Last
+          @"^[A-Z]\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // F. Middle Last
+          @"^Dr\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // Dr. First Last
+          @"^Mr\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // Mr. First Last
+          @"^Mrs\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // Mrs. First Last
+          @"^Ms\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // Ms. First Last
+      };
 
             return namePatterns.Any(pattern => Regex.IsMatch(text, pattern));
         }
@@ -5328,31 +6392,101 @@ Answer directly without introducing yourself."
         // ✅ BONUS: Comprehensive list of world leaders' common last names
         private bool IsCommonLeaderName(string word)
         {
-            var leaderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
+            var leaderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
         // Current & Recent World Leaders (Last Names)
-        "Modi", "Biden", "Trump", "Obama", "Bush", "Clinton",
-        "Putin", "Xi", "Jinping", "Macron", "Merkel", "Scholz",
-        "Johnson", "Sunak", "Trudeau", "Bolsonaro", "Lula",
-        "Erdogan", "Netanyahu", "Abbas", "Khamenei", "Kim",
-        "Moon", "Kishida", "Abe", "Gandhi", "Nehru", "Singh",
-        "Khan", "Sharif", "Hasina", "Wickremesinghe", "Wickramasinghe",
-        "Marcos", "Duterte", "Widodo", "Anwar", "Hun", "Sen",
-        
+        "Modi",
+        "Biden",
+        "Trump",
+        "Obama",
+        "Bush",
+        "Clinton",
+        "Putin",
+        "Xi",
+        "Jinping",
+        "Macron",
+        "Merkel",
+        "Scholz",
+        "Johnson",
+        "Sunak",
+        "Trudeau",
+        "Bolsonaro",
+        "Lula",
+        "Erdogan",
+        "Netanyahu",
+        "Abbas",
+        "Khamenei",
+        "Kim",
+        "Moon",
+        "Kishida",
+        "Abe",
+        "Gandhi",
+        "Nehru",
+        "Singh",
+        "Khan",
+        "Sharif",
+        "Hasina",
+        "Wickremesinghe",
+        "Wickramasinghe",
+        "Marcos",
+        "Duterte",
+        "Widodo",
+        "Anwar",
+        "Hun",
+        "Sen",
+
         // Historical Leaders
-        "Churchill", "Roosevelt", "Kennedy", "Reagan", "Thatcher",
-        "Napoleon", "Caesar", "Alexander", "Genghis", "Khan",
-        "Washington", "Lincoln", "Jefferson", "Franklin",
-        "Lenin", "Stalin", "Mao", "Deng", "Castro", "Mandela",
-        "Gorbachev", "Yeltsin", "Brezhnev", "Khrushchev",
-        
+        "Churchill",
+        "Roosevelt",
+        "Kennedy",
+        "Reagan",
+        "Thatcher",
+        "Napoleon",
+        "Caesar",
+        "Alexander",
+        "Genghis",
+        "Khan",
+        "Washington",
+        "Lincoln",
+        "Jefferson",
+        "Franklin",
+        "Lenin",
+        "Stalin",
+        "Mao",
+        "Deng",
+        "Castro",
+        "Mandela",
+        "Gorbachev",
+        "Yeltsin",
+        "Brezhnev",
+        "Khrushchev",
+
         // Indian Political Names
-        "Vajpayee", "Advani", "Jaitley", "Shah", "Amit",
-        "Sonia", "Rahul", "Priyanka", "Akhilesh", "Mayawati",
-        "Mamata", "Banerjee", "Stalin", "Naidu", "Chandrababu",
-        "Jagan", "Reddy", "Rao", "Patnaik", "Kejriwal",
-        "Thackeray", "Pawar", "Fadnavis", "Yogi", "Adityanath"
-    };
+        "Vajpayee",
+        "Advani",
+        "Jaitley",
+        "Shah",
+        "Amit",
+        "Sonia",
+        "Rahul",
+        "Priyanka",
+        "Akhilesh",
+        "Mayawati",
+        "Mamata",
+        "Banerjee",
+        "Stalin",
+        "Naidu",
+        "Chandrababu",
+        "Jagan",
+        "Reddy",
+        "Rao",
+        "Patnaik",
+        "Kejriwal",
+        "Thackeray",
+        "Pawar",
+        "Fadnavis",
+        "Yogi",
+        "Adityanath"
+      };
 
             return leaderNames.Contains(word);
         }
@@ -5362,12 +6496,11 @@ Answer directly without introducing yourself."
             var lowerQuestion = question.ToLower().Trim();
 
             // Check for pronouns at word boundaries
-            var pronounPatterns = new[]
-            {
+            var pronounPatterns = new[] {
         @"\bhe\b", @"\bshe\b", @"\bhim\b", @"\bher\b",
-        @"\bhis\b", @"\bhers\b", @"\bthey\b", @"\bthem\b",
-        @"\btheir\b", @"\btheirs\b"
-    };
+          @"\bhis\b", @"\bhers\b", @"\bthey\b", @"\bthem\b",
+          @"\btheir\b", @"\btheirs\b"
+      };
 
             foreach (var pattern in pronounPatterns)
             {
@@ -5389,7 +6522,7 @@ Answer directly without introducing yourself."
             if (Regex.IsMatch(lowerQuestion, @"^is\s+(he|she)\s+"))
             {
                 var result = Regex.Replace(question, @"^(is\s+)(he|she)(\s+)",
-                    $"$1{subject}$3", RegexOptions.IgnoreCase);
+                  $"$1{subject}$3", RegexOptions.IgnoreCase);
                 return result;
             }
 
@@ -5397,7 +6530,7 @@ Answer directly without introducing yourself."
             if (Regex.IsMatch(lowerQuestion, @"^does\s+(he|she)\s+"))
             {
                 var result = Regex.Replace(question, @"^(does\s+)(he|she)(\s+)",
-                    $"$1{subject}$3", RegexOptions.IgnoreCase);
+                  $"$1{subject}$3", RegexOptions.IgnoreCase);
                 return result;
             }
 
@@ -5405,7 +6538,7 @@ Answer directly without introducing yourself."
             if (Regex.IsMatch(lowerQuestion, @"what\s+does\s+(he|she)\s+"))
             {
                 var result = Regex.Replace(question, @"(what\s+does\s+)(he|she)(\s+)",
-                    $"$1{subject}$3", RegexOptions.IgnoreCase);
+                  $"$1{subject}$3", RegexOptions.IgnoreCase);
                 return result;
             }
 
@@ -5413,13 +6546,14 @@ Answer directly without introducing yourself."
             if (Regex.IsMatch(lowerQuestion, @"where\s+is\s+(he|she)"))
             {
                 var result = Regex.Replace(question, @"(where\s+is\s+)(he|she)",
-                    $"$1{subject}", RegexOptions.IgnoreCase);
+                  $"$1{subject}", RegexOptions.IgnoreCase);
                 return result;
             }
 
             // Pattern 5: General replacement of pronouns
             var result2 = question;
-            var replacements = new Dictionary<string, string>
+            var replacements = new Dictionary<string,
+              string>
             {
                 [@"\bhe\b"] = subject,
                 [@"\bshe\b"] = subject,
@@ -5437,49 +6571,69 @@ Answer directly without introducing yourself."
             return result2;
         }
 
-
         private bool IsConciseAnswerQuestion(string question)
         {
             var lowerQuestion = question.Trim().ToLower();
 
             // Check if it starts with W-question words
-            var wQuestionStarters = new[]
-            {
-        "who is", "who are", "who was", "who were",
-        "what is", "what are", "what was", "what were",
-        "when is", "when was", "when did", "when does",
-        "where is", "where are", "where was", "where were",
-        "which is", "which are", "which was", "which were"
-    };
+            var wQuestionStarters = new[] {
+        "who is",
+        "who are",
+        "who was",
+        "who were",
+        "what is",
+        "what are",
+        "what was",
+        "what were",
+        "when is",
+        "when was",
+        "when did",
+        "when does",
+        "where is",
+        "where are",
+        "where was",
+        "where were",
+        "which is",
+        "which are",
+        "which was",
+        "which were"
+      };
 
             var startsWithWQuestion = wQuestionStarters.Any(starter =>
-                lowerQuestion.StartsWith(starter));
+              lowerQuestion.StartsWith(starter));
 
             // Check if it's a simple factual question (no complexity indicators)
-            var complexityIndicators = new[]
-            {
-        "explain", "how", "why", "elaborate", "tell me more",
-        "describe", "compare", "difference between", "step by step"
-    };
+            var complexityIndicators = new[] {
+        "explain",
+        "how",
+        "why",
+        "elaborate",
+        "tell me more",
+        "describe",
+        "compare",
+        "difference between",
+        "step by step"
+      };
 
             var isComplex = complexityIndicators.Any(indicator =>
-                lowerQuestion.Contains(indicator));
+              lowerQuestion.Contains(indicator));
 
             // It's a concise question if it starts with W-question and is not complex
             return startsWithWQuestion && !isComplex;
         }
 
         public async IAsyncEnumerable<StreamChunk> ProcessQueryStreamAsync(
-    string question,
-    string plant,
-    string? generationModel = null,
-    string? embeddingModel = null,
-    int maxResults = 10,
-    bool meaiInfo = true,
-    string? sessionId = null,
-    bool useReRanking = true,
-    string? userId = null,
-    [EnumeratorCancellation] CancellationToken cancellationToken = default)
+          string question,
+          string plant,
+          string? generationModel = null,
+          string? embeddingModel = null,
+          int maxResults = 10,
+          bool meaiInfo = true,
+          string? sessionId = null,
+          bool useReRanking = true,
+          string? userId = null,
+          [EnumeratorCancellation] CancellationToken cancellationToken =
+          default)
         {
             var stopwatch = Stopwatch.StartNew();
 
@@ -5487,12 +6641,18 @@ Answer directly without introducing yourself."
             // PRE-FLIGHT VALIDATION
             // ============================
             var validationResult = await ValidateAndInitializeAsync(
-                question, plant, sessionId, userId, generationModel, embeddingModel, cancellationToken);
+              question, plant, sessionId, userId, generationModel, embeddingModel, cancellationToken);
 
             if (!validationResult.Success)
             {
-                yield return new StreamChunk { Type = "error", Content = validationResult.ErrorMessage };
-                yield break;
+                yield
+                return new StreamChunk
+                {
+                    Type = "error",
+                    Content = validationResult.ErrorMessage
+                };
+                yield
+                break;
             }
 
             var agentContext = validationResult.Context!;
@@ -5508,7 +6668,12 @@ Answer directly without introducing yourself."
             var genModel = validationResult.GenerationModel!;
             var embModel = validationResult.EmbeddingModel!;
 
-            yield return new StreamChunk { Type = "status", Content = "Initializing agent..." };
+            yield
+            return new StreamChunk
+            {
+                Type = "status",
+                Content = "Initializing agent..."
+            };
 
             // ============================
             // CACHE CHECK
@@ -5519,11 +6684,18 @@ Answer directly without introducing yourself."
             {
                 await foreach (var chunk in StreamTextResponse(cacheResult.CachedAnswer!, cancellationToken))
                 {
-                    yield return chunk;
+                    yield
+                    return chunk;
                 }
 
-                yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
-                yield break;
+                yield
+                return new StreamChunk
+                {
+                    Type = "complete",
+                    ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+                };
+                yield
+                break;
             }
 
             // ============================
@@ -5628,17 +6800,27 @@ Answer directly without introducing yourself."
 
             if (!meaiInfo)
             {
-                yield return new StreamChunk { Type = "status", Content = "Generating response..." };
+                yield
+                return new StreamChunk
+                {
+                    Type = "status",
+                    Content = "Generating response..."
+                };
 
                 // Seed history from DB if session is cold
                 await EnsureHistorySeededAsync(agentContext.SessionId);
 
                 var full = new StringBuilder();
                 await foreach (var token in GenerateNonMeaiStreamDirectAsync(
-                    question, genModel.Name!, agentContext.SessionId, cancellationToken))
+                  question, genModel.Name!, agentContext.SessionId, cancellationToken))
                 {
                     full.Append(token);
-                    yield return new StreamChunk { Type = "response", Content = token };
+                    yield
+                    return new StreamChunk
+                    {
+                        Type = "response",
+                        Content = token
+                    };
                 }
 
                 if (!string.IsNullOrWhiteSpace(full.ToString()))
@@ -5650,32 +6832,44 @@ Answer directly without introducing yourself."
                     //    plant, null, stopwatch.ElapsedMilliseconds), cancellationToken);
 
                     _ = SaveConversationSafelyAsync(
-                                agentContext, question, full.ToString(),
-                                new List<RelevantChunk>(), genModel, embModel,
-                                plant, null, stopwatch.ElapsedMilliseconds);
+                      agentContext, question, full.ToString(),
+                      new List<RelevantChunk>(), genModel, embModel,
+                      plant, null, stopwatch.ElapsedMilliseconds);
                 }
 
-                yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
-                yield break;
+                yield
+                return new StreamChunk
+                {
+                    Type = "complete",
+                    ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+                };
+                yield
+                break;
             }
-
 
             // ============================
             // PLANNING
             // ============================
-            yield return new StreamChunk { Type = "status", Content = "Planning execution..." };
+            yield
+            return new StreamChunk
+            {
+                Type = "status",
+                Content = "Planning execution..."
+            };
 
             var planResult = await CreateExecutionPlanAsync(question, agentContext, meaiInfo);
 
             if (!planResult.Success)
             {
                 await foreach (var chunk in ExecuteDirectPathAsync(
-                    question, plant, agentContext, genModel, embModel,
-                    maxResults, meaiInfo, useReRanking, stopwatch, cancellationToken))
+                  question, plant, agentContext, genModel, embModel,
+                  maxResults, meaiInfo, useReRanking, stopwatch, cancellationToken))
                 {
-                    yield return chunk;
+                    yield
+                    return chunk;
                 }
-                yield break;
+                yield
+                break;
             }
 
             var plan = planResult.Plan!;
@@ -5683,10 +6877,15 @@ Answer directly without introducing yourself."
             // ============================
             // RETRIEVAL
             // ============================
-            yield return new StreamChunk { Type = "status", Content = "Searching knowledge base..." };
+            yield
+            return new StreamChunk
+            {
+                Type = "status",
+                Content = "Searching knowledge base..."
+            };
 
             var retrievalResult = await ExecuteRetrievalAsync(
-                question, embModel, maxResults, plant, agentContext, useReRanking, plan);
+              question, embModel, maxResults, plant, agentContext, useReRanking, plan);
 
             var finalChunks = retrievalResult.Chunks;
 
@@ -5695,7 +6894,8 @@ Answer directly without introducing yourself."
             // ============================
             if (finalChunks.Any())
             {
-                yield return new StreamChunk
+                yield
+                return new StreamChunk
                 {
                     Type = "sources",
                     Sources = finalChunks.Select(c => c.Source).Distinct().ToList()
@@ -5705,35 +6905,57 @@ Answer directly without introducing yourself."
             // ============================
             // RESPONSE GENERATION (FIXED)
             // ============================
-            yield return new StreamChunk { Type = "status", Content = "Generating response..." };
+            yield
+            return new StreamChunk
+            {
+                Type = "status",
+                Content = "Generating response..."
+            };
 
             var fullResponse = new StringBuilder();
 
             await foreach (var token in GenerateResponseFromContext(
-                question,
-                genModel.Name!,
-                agentContext,
-                finalChunks,
-                meaiInfo,
-                plant,
-                cancellationToken))
+              question,
+              genModel.Name!,
+              agentContext,
+              finalChunks,
+              meaiInfo,
+              plant,
+              cancellationToken))
             {
                 if (token.StartsWith("__ERROR__:"))
                 {
-                    yield return new StreamChunk { Type = "error", Content = token[10..] };
-                    yield break;
+                    yield
+                    return new StreamChunk
+                    {
+                        Type = "error",
+                        Content = token[10..]
+                    };
+                    yield
+                    break;
                 }
 
                 fullResponse.Append(token);
-                yield return new StreamChunk { Type = "response", Content = token };
+                yield
+                return new StreamChunk
+                {
+                    Type = "response",
+                    Content = token
+                };
             }
 
             var responseText = fullResponse.ToString();
 
             if (string.IsNullOrWhiteSpace(responseText))
             {
-                yield return new StreamChunk { Type = "error", Content = "Generated response was empty" };
-                yield break;
+                yield
+                return new StreamChunk
+                {
+                    Type = "error",
+                    Content = "Generated response was empty"
+                };
+                yield
+                break;
             }
 
             // ============================
@@ -5743,7 +6965,8 @@ Answer directly without introducing yourself."
 
             if (verification != null)
             {
-                yield return new StreamChunk
+                yield
+                return new StreamChunk
                 {
                     Type = "metadata",
                     Content = JsonSerializer.Serialize(new
@@ -5764,8 +6987,8 @@ Answer directly without introducing yourself."
             // SAVE TO DATABASE
             // ============================
             _ = SaveConversationSafelyAsync(
-                agentContext, question, responseText, finalChunks,
-                genModel, embModel, plant, verification, stopwatch.ElapsedMilliseconds);
+              agentContext, question, responseText, finalChunks,
+              genModel, embModel, plant, verification, stopwatch.ElapsedMilliseconds);
 
             stopwatch.Stop();
 
@@ -5774,7 +6997,8 @@ Answer directly without introducing yourself."
             // ============================
             LogAgentCompletion(verification?.OverallConfidence ?? 0.7, stopwatch.ElapsedMilliseconds);
 
-            yield return new StreamChunk
+            yield
+            return new StreamChunk
             {
                 Type = "complete",
                 ProcessingTimeMs = stopwatch.ElapsedMilliseconds
@@ -5791,18 +7015,18 @@ Answer directly without introducing yourself."
             {
                 var conversations = await _conversationStorage.GetSessionConversationsAsync(sessionId);
                 var turns = conversations
-                    .OrderBy(c => c.CreatedAt)
-                    .Select(c => new ConversationTurn
-                    {
-                        Question = c.Question,
-                        Answer = c.Answer,
-                        Timestamp = c.CreatedAt,
-                        Sources = c.Sources ?? new List<string>()
-                    });
+                  .OrderBy(c => c.CreatedAt)
+                  .Select(c => new ConversationTurn
+                  {
+                      Question = c.Question,
+                      Answer = c.Answer,
+                      Timestamp = c.CreatedAt,
+                      Sources = c.Sources ?? new List<string>()
+                  });
 
                 _historyService.SeedFromDatabase(sessionId, turns);
                 _logger.LogInformation("Seeded {N} turns for session {S} from DB",
-                    conversations.Count, sessionId);
+                  conversations.Count, sessionId);
             }
             catch (Exception ex)
             {
@@ -5810,13 +7034,13 @@ Answer directly without introducing yourself."
             }
         }
         private async IAsyncEnumerable<string> GenerateResponseFromContext(
-    string question,
-    string modelName,
-    AgentContext agentContext,
-    List<RelevantChunk> chunks,
-    bool meaiInfo,
-    string plant,
-    [EnumeratorCancellation] CancellationToken cancellationToken)
+          string question,
+          string modelName,
+          AgentContext agentContext,
+          List<RelevantChunk> chunks,
+          bool meaiInfo,
+          string plant,
+          [EnumeratorCancellation] CancellationToken cancellationToken)
         {
             // Get or create conversation context
             var conversationContext = _conversation.GetOrCreateConversationContext(agentContext.SessionId);
@@ -5832,25 +7056,27 @@ Answer directly without introducing yourself."
 
             // Call the existing method
             await foreach (var token in GenerateStreamingResponseSafe(
-                question,
-                modelName,
-                conversationContext,
-                chunks,
-                meaiInfo,
-                plant,
-                QuestionType.NewTopic,
-                false,
-                cancellationToken))
+              question,
+              modelName,
+              conversationContext,
+              chunks,
+              meaiInfo,
+              plant,
+              QuestionType.NewTopic,
+              false,
+              cancellationToken))
             {
-                yield return token;
+                yield
+                return token;
             }
         }
 
         private async Task<AgentContext> CreateAgentContextAsync(
-    string? sessionId,
-    string? userId,
-    string plant,
-    CancellationToken cancellationToken = default)
+          string? sessionId,
+          string? userId,
+          string plant,
+          CancellationToken cancellationToken =
+          default)
         {
             try
             {
@@ -5861,9 +7087,9 @@ Answer directly without introducing yourself."
 
                 // Get or create session
                 var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
-                    actualSessionId,
-                    actualUserId,
-                    plant
+                  actualSessionId,
+                  actualUserId,
+                  plant
                 );
 
                 _logger.LogInformation($"📂 Database session retrieved: {dbSession.SessionId}");
@@ -5888,16 +7114,16 @@ Answer directly without introducing yourself."
                 if (conversations.Any())
                 {
                     agentContext.History = conversations
-                        .OrderBy(c => c.CreatedAt)
-                        .TakeLast(10)
-                        .Select(c => new ConversationTurn
-                        {
-                            Question = c.Question,
-                            Answer = c.Answer,
-                            Timestamp = c.CreatedAt,
-                            Sources = c.Sources ?? new List<string>()
-                        })
-                        .ToList();
+                      .OrderBy(c => c.CreatedAt)
+                      .TakeLast(10)
+                      .Select(c => new ConversationTurn
+                      {
+                          Question = c.Question,
+                          Answer = c.Answer,
+                          Timestamp = c.CreatedAt,
+                          Sources = c.Sources ?? new List<string>()
+                      })
+                      .ToList();
 
                     _logger.LogInformation($"✅ Loaded {agentContext.History.Count} conversation turns into context");
 
@@ -5915,9 +7141,9 @@ Answer directly without introducing yourself."
 
                 // ✅ Extract named entities
                 agentContext.NamedEntities = conversations
-                    .SelectMany(c => c.NamedEntities ?? new List<string>())
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
+                  .SelectMany(c => c.NamedEntities ?? new List<string>())
+                  .Distinct(StringComparer.OrdinalIgnoreCase)
+                  .ToList();
 
                 _logger.LogInformation($"📌 Loaded {agentContext.NamedEntities.Count} named entities");
 
@@ -6001,23 +7227,44 @@ Answer directly without introducing yourself."
         // This method currently has no mutations — it just filters and returns.
         // But add a guard so it only filters by Source, never touches scores:
         private List<RelevantChunk> FilterByPolicyIntent(
-            List<RelevantChunk> chunks,
-            string question)
+          List<RelevantChunk> chunks,
+          string question)
         {
-            var policyKeywords = new Dictionary<string, string[]>
+            var policyKeywords = new Dictionary<string,
+              string[]>
             {
-                ["leave"] = new[] { "leave", "vacation", "absence" },
-                ["isms"] = new[] { "isms", "security", "information security" },
-                ["whistle"] = new[] { "whistle", "whistleblower", "complaint" },
-                ["safety"] = new[] { "safety", "ehs", "hazard" },
-                ["hr"] = new[] { "hr", "human resource", "personnel" }
+                ["leave"] = new[] {
+            "leave",
+            "vacation",
+            "absence"
+          },
+                ["isms"] = new[] {
+            "isms",
+            "security",
+            "information security"
+          },
+                ["whistle"] = new[] {
+            "whistle",
+            "whistleblower",
+            "complaint"
+          },
+                ["safety"] = new[] {
+            "safety",
+            "ehs",
+            "hazard"
+          },
+                ["hr"] = new[] {
+            "hr",
+            "human resource",
+            "personnel"
+          }
             };
 
             var questionLower = question.ToLowerInvariant();
             var targetPolicy = policyKeywords
-                .FirstOrDefault(kvp =>
-                    kvp.Value.Any(keyword => questionLower.Contains(keyword)))
-                .Key;
+              .FirstOrDefault(kvp =>
+                kvp.Value.Any(keyword => questionLower.Contains(keyword)))
+              .Key;
 
             if (string.IsNullOrEmpty(targetPolicy))
                 return chunks;
@@ -6025,17 +7272,17 @@ Answer directly without introducing yourself."
             _logger.LogInformation("Filtering for policy type: {Policy}", targetPolicy);
 
             var filtered = chunks
-                .Where(c => c.Source.ToLowerInvariant().Contains(targetPolicy))
-                .ToList();
+              .Where(c => c.Source.ToLowerInvariant().Contains(targetPolicy))
+              .ToList();
 
             // If filtering left too few results, pad with highest-RelevanceScore chunks
             if (filtered.Count < 3)
             {
                 var additional = chunks
-                    .Except(filtered)
-                    .Where(c => c.Similarity > 0.5)          // raw cosine threshold
-                    .OrderByDescending(c => c.RelevanceScore) // best ranked first
-                    .Take(3 - filtered.Count);
+                  .Except(filtered)
+                  .Where(c => c.Similarity > 0.5) // raw cosine threshold
+                  .OrderByDescending(c => c.RelevanceScore) // best ranked first
+                  .Take(3 - filtered.Count);
 
                 filtered.AddRange(additional);
             }
@@ -6047,13 +7294,13 @@ Answer directly without introducing yourself."
         // VALIDATION WRAPPER
         // ============================
         private async Task<ValidationResult> ValidateAndInitializeAsync(
-            string question,
-            string plant,
-            string? sessionId,
-            string? userId,
-            string? generationModel,
-            string? embeddingModel,
-            CancellationToken cancellationToken)
+          string question,
+          string plant,
+          string? sessionId,
+          string? userId,
+          string? generationModel,
+          string? embeddingModel,
+          CancellationToken cancellationToken)
         {
             try
             {
@@ -6151,8 +7398,8 @@ Answer directly without introducing yourself."
                     });
 
                     var rephrased = await _helperMethods.RephraseWithLLMAsync(
-                        correction.Answer,
-                        generationModel ?? _config.DefaultGenerationModel
+                      correction.Answer,
+                      generationModel ?? _config.DefaultGenerationModel
                     );
 
                     return new CacheResult
@@ -6162,12 +7409,18 @@ Answer directly without introducing yourself."
                     };
                 }
 
-                return new CacheResult { HasResult = false };
+                return new CacheResult
+                {
+                    HasResult = false
+                };
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Cache check failed, continuing without cache");
-                return new CacheResult { HasResult = false };
+                return new CacheResult
+                {
+                    HasResult = false
+                };
             }
         }
 
@@ -6175,9 +7428,9 @@ Answer directly without introducing yourself."
         // PLANNING WRAPPER
         // ============================
         private async Task<PlanResult> CreateExecutionPlanAsync(
-            string question,
-            AgentContext context,
-            bool meaiInfo)
+          string question,
+          AgentContext context,
+          bool meaiInfo)
         {
             try
             {
@@ -6191,7 +7444,11 @@ Answer directly without introducing yourself."
                     Confidence = 1.0
                 });
 
-                return new PlanResult { Success = true, Plan = plan };
+                return new PlanResult
+                {
+                    Success = true,
+                    Plan = plan
+                };
             }
             catch (Exception ex)
             {
@@ -6205,7 +7462,11 @@ Answer directly without introducing yourself."
                     Confidence = 0.5
                 });
 
-                return new PlanResult { Success = false, ErrorMessage = ex.Message };
+                return new PlanResult
+                {
+                    Success = false,
+                    ErrorMessage = ex.Message
+                };
             }
         }
 
@@ -6215,17 +7476,18 @@ Answer directly without introducing yourself."
         // In ExecuteRetrievalAsync method, replace the call with:
 
         private async Task<RetrievalResult> ExecuteRetrievalAsync(
-            string question,
-            ModelConfiguration embModel,
-            int maxResults,
-            string plant,
-            AgentContext context,
-            bool useReRanking,
-            ExecutionPlan plan)
+          string question,
+          ModelConfiguration embModel,
+          int maxResults,
+          string plant,
+          AgentContext context,
+          bool useReRanking,
+          ExecutionPlan plan)
         {
-            var result = new RetrievalResult { Chunks = new List<RelevantChunk>() };
-
-
+            var result = new RetrievalResult
+            {
+                Chunks = new List<RelevantChunk>()
+            };
 
             try
             {
@@ -6236,13 +7498,13 @@ Answer directly without introducing yourself."
                 if (sectionQuery != null)
                 {
                     _logger.LogInformation(
-                        "🎯 Detected {Kind} query: Section/Annexure {Num}",
-                        sectionQuery.IsAnnexure ? "Annexure" : "Section",
-                        sectionQuery.SectionNumber);
+                      "🎯 Detected {Kind} query: Section/Annexure {Num}",
+                      sectionQuery.IsAnnexure ? "Annexure" : "Section",
+                      sectionQuery.SectionNumber);
 
                     var collectionId = await _collectionManager.GetOrCreateCollectionAsync(embModel);
                     chunks = await SearchForSpecificSection(
-                        sectionQuery, embModel, maxResults, plant, collectionId);
+                      sectionQuery, embModel, maxResults, plant, collectionId);
                 }
                 else
                 {
@@ -6264,14 +7526,14 @@ Answer directly without introducing yourself."
 
                     // Retrieve chunks using the existing method
                     chunks = await GetRelevantChunksWithExpansionAsync(
-                        question,
-                        embModel,
-                        maxResults,
-                        true,
-                        conversationContext,
-                        false,
-                        embModel,
-                        plant
+                      question,
+                      embModel,
+                      maxResults,
+                      true,
+                      conversationContext,
+                      false,
+                      embModel,
+                      plant
                     );
                 }
 
@@ -6281,19 +7543,19 @@ Answer directly without introducing yourself."
                 var bm25Chunks = _bm25Service.Rank(question, chunks, maxResults * 2);
 
                 var hybridChunks = chunks
-                        .Concat(bm25Chunks)
-                        .GroupBy(c => c.Id)
-                        .Select(g => g.First())
-                        .OrderByDescending(c => c.RelevanceScore + (c.Bm25Score * 0.5))
-                        .Take(maxResults)
-                        .ToList();
+                  .Concat(bm25Chunks)
+                  .GroupBy(c => c.Id)
+                  .Select(g => g.First())
+                  .OrderByDescending(c => c.RelevanceScore + (c.Bm25Score * 0.5))
+                  .Take(maxResults)
+                  .ToList();
 
                 if (useReRanking && hybridChunks.Count > 3)
                 {
                     try
                     {
                         hybridChunks = await _rerankerService.RerankAsync(
-                            question, hybridChunks, "qllama/bge-reranker-v2-m3:f16", topK: 5);
+                          question, hybridChunks, "qllama/bge-reranker-v2-m3:f16", topK: 5);
                     }
                     catch (Exception ex)
                     {
@@ -6332,18 +7594,18 @@ Answer directly without introducing yourself."
         // VERIFICATION WRAPPER
         // ============================
         private async Task<VerificationResult?> VerifyResponseSafelyAsync(
-            string question,
-            string response,
-            List<RelevantChunk> chunks,
-            bool checkFactuality)
+          string question,
+          string response,
+          List<RelevantChunk> chunks,
+          bool checkFactuality)
         {
             try
             {
                 var verification = await _selfVerifier.VerifyResponseAsync(
-                    question,
-                    response,
-                    chunks,
-                    checkFactuality
+                  question,
+                  response,
+                  chunks,
+                  checkFactuality
                 );
 
                 _agentLogger.LogDecision(new AgentDecision
@@ -6454,24 +7716,25 @@ Answer directly without introducing yourself."
         //    }
 
         private async Task SaveConversationSafelyAsync(
-           AgentContext context,
-           string question,
-           string answer,
-           List<RelevantChunk> chunks,
-           ModelConfiguration genModel,
-           ModelConfiguration embModel,
-           string plant,
-           VerificationResult? verification,
-           long processingTime)
+          AgentContext context,
+          string question,
+          string answer,
+          List<RelevantChunk> chunks,
+          ModelConfiguration genModel,
+          ModelConfiguration embModel,
+          string plant,
+          VerificationResult? verification,
+          long processingTime)
         {
             // Use a dedicated scope — this is the key fix for DbContext concurrency
-            await using var scope = _serviceProvider.CreateAsyncScope();
+            await using
+            var scope = _serviceProvider.CreateAsyncScope();
             var storage = scope.ServiceProvider.GetRequiredService<IConversationStorageService>();
 
             try
             {
                 var dbSession = await storage.GetOrCreateSessionAsync(
-                    context.SessionId, context.UserId, plant);
+                  context.SessionId, context.UserId, plant);
 
                 // FIX 4 — generate embeddings once, reuse
                 var questionEmbedding = await GetEmbeddingAsync(question, embModel);
@@ -6503,10 +7766,10 @@ Answer directly without introducing yourself."
 
                 // Update the centralised in-memory history AFTER the DB write succeeds
                 _historyService.AddTurn(context.SessionId, question, answer,
-                    chunks.Select(c => c.Source).Distinct().ToList());
+                  chunks.Select(c => c.Source).Distinct().ToList());
 
                 _logger.LogInformation("Saved conversation {Id} for session {SessionId}",
-                    entry.Id, context.SessionId);
+                  entry.Id, context.SessionId);
             }
             catch (Exception ex)
             {
@@ -6514,7 +7777,6 @@ Answer directly without introducing yourself."
                 // swallow — don't kill the stream
             }
         }
-
 
         // ============================
         // LOGGING HELPER
@@ -6539,66 +7801,89 @@ Answer directly without introducing yourself."
         }
 
         private async IAsyncEnumerable<StreamChunk> ExecuteDirectPathAsync(
-    string question,
-    string plant,
-    AgentContext context,
-    ModelConfiguration genModel,
-    ModelConfiguration embModel,
-    int maxResults,
-    bool meaiInfo,
-    bool useReRanking,
-    Stopwatch stopwatch,
-    [EnumeratorCancellation] CancellationToken cancellationToken)
+          string question,
+          string plant,
+          AgentContext context,
+          ModelConfiguration genModel,
+          ModelConfiguration embModel,
+          int maxResults,
+          bool meaiInfo,
+          bool useReRanking,
+          Stopwatch stopwatch,
+          [EnumeratorCancellation] CancellationToken cancellationToken)
         {
-            yield return new StreamChunk { Type = "status", Content = "Executing (fallback mode)..." };
+            yield
+            return new StreamChunk
+            {
+                Type = "status",
+                Content = "Executing (fallback mode)..."
+            };
 
             // Safe retrieval
             var retrievalResult = await ExecuteRetrievalAsync(
-                question, embModel, maxResults, plant, context, useReRanking, null!);
+              question, embModel, maxResults, plant, context, useReRanking, null!);
 
             var chunks = retrievalResult.Chunks;
 
             if (chunks.Any())
             {
-                yield return new StreamChunk
+                yield
+                return new StreamChunk
                 {
                     Type = "sources",
                     Sources = chunks.Select(c => c.Source).Distinct().ToList()
                 };
             }
 
-            yield return new StreamChunk { Type = "status", Content = "Generating response..." };
+            yield
+            return new StreamChunk
+            {
+                Type = "status",
+                Content = "Generating response..."
+            };
 
             var fullResponse = new StringBuilder();
 
             // Use the helper method
             await foreach (var token in GenerateResponseFromContext(
-                question,
-                genModel.Name!,
-                context,
-                chunks,
-                meaiInfo,
-                plant,
-                cancellationToken))
+              question,
+              genModel.Name!,
+              context,
+              chunks,
+              meaiInfo,
+              plant,
+              cancellationToken))
             {
                 if (token.StartsWith("__ERROR__:"))
                 {
-                    yield return new StreamChunk { Type = "error", Content = token[10..] };
-                    yield break;
+                    yield
+                    return new StreamChunk
+                    {
+                        Type = "error",
+                        Content = token[10..]
+                    };
+                    yield
+                    break;
                 }
 
                 fullResponse.Append(token);
-                yield return new StreamChunk { Type = "response", Content = token };
+                yield
+                return new StreamChunk
+                {
+                    Type = "response",
+                    Content = token
+                };
             }
 
             // Save
             _ = SaveConversationSafelyAsync(
-                context, question, fullResponse.ToString(), chunks,
-                genModel, embModel, plant, null, stopwatch.ElapsedMilliseconds);
+              context, question, fullResponse.ToString(), chunks,
+              genModel, embModel, plant, null, stopwatch.ElapsedMilliseconds);
 
             stopwatch.Stop();
 
-            yield return new StreamChunk
+            yield
+            return new StreamChunk
             {
                 Type = "complete",
                 ProcessingTimeMs = stopwatch.ElapsedMilliseconds
@@ -6609,30 +7894,78 @@ Answer directly without introducing yourself."
 
         private class ValidationResult
         {
-            public bool Success { get; set; }
-            public string ErrorMessage { get; set; } = "";
-            public AgentContext? Context { get; set; }
-            public ModelConfiguration? GenerationModel { get; set; }
-            public ModelConfiguration? EmbeddingModel { get; set; }
+            public bool Success
+            {
+                get;
+                set;
+            }
+            public string ErrorMessage
+            {
+                get;
+                set;
+            } = "";
+            public AgentContext? Context
+            {
+                get;
+                set;
+            }
+            public ModelConfiguration? GenerationModel
+            {
+                get;
+                set;
+            }
+            public ModelConfiguration? EmbeddingModel
+            {
+                get;
+                set;
+            }
         }
 
         private class CacheResult
         {
-            public bool HasResult { get; set; }
-            public string? CachedAnswer { get; set; }
+            public bool HasResult
+            {
+                get;
+                set;
+            }
+            public string? CachedAnswer
+            {
+                get;
+                set;
+            }
         }
 
         private class PlanResult
         {
-            public bool Success { get; set; }
-            public ExecutionPlan? Plan { get; set; }
-            public string? ErrorMessage { get; set; }
+            public bool Success
+            {
+                get;
+                set;
+            }
+            public ExecutionPlan? Plan
+            {
+                get;
+                set;
+            }
+            public string? ErrorMessage
+            {
+                get;
+                set;
+            }
         }
 
         private class RetrievalResult
         {
-            public List<RelevantChunk> Chunks { get; set; } = new();
-            public double AverageConfidence { get; set; }
+            public List<RelevantChunk> Chunks
+            {
+                get;
+                set;
+            } = new();
+            public double AverageConfidence
+            {
+                get;
+                set;
+            }
         }
 
         private QuestionType ClassifyQuestionType(string question, ConversationContext context)
@@ -6682,8 +8015,8 @@ Answer directly without introducing yourself."
             {
                 var questionLower = question.ToLower();
                 var matchedEntities = context.NamedEntities
-                    .Where(entity => questionLower.Contains(entity.ToLower()))
-                    .ToList();
+                  .Where(entity => questionLower.Contains(entity.ToLower()))
+                  .ToList();
 
                 if (matchedEntities.Count >= 2)
                 {
@@ -6701,15 +8034,14 @@ Answer directly without introducing yourself."
             return QuestionType.NewTopic;
         }
 
-
         private async Task<(bool HasError, string ErrorMessage, List<RelevantChunk> Chunks)> SafeSearchKnowledgeBaseWithExpansion(
-    string originalQuery,
-    string expandedQuery,
-    string contextualQuery,
-    ModelConfiguration embModel,
-    int maxResults,
-    string plant,
-    bool useReRanking)
+          string originalQuery,
+          string expandedQuery,
+          string contextualQuery,
+          ModelConfiguration embModel,
+          int maxResults,
+          string plant,
+          bool useReRanking)
         {
             try
             {
@@ -6739,11 +8071,11 @@ Answer directly without introducing yourself."
 
                 // 4. Deduplicate and re-rank
                 var uniqueChunks = allChunks
-                    .GroupBy(c => c.Text.Trim())
-                    .Select(g => g.OrderByDescending(c => c.Similarity).First())
-                    .OrderByDescending(c => c.Similarity)
-                    .Take(maxResults)
-                    .ToList();
+                  .GroupBy(c => c.Text.Trim())
+                  .Select(g => g.OrderByDescending(c => c.Similarity).First())
+                  .OrderByDescending(c => c.Similarity)
+                  .Take(maxResults)
+                  .ToList();
 
                 // 5. Optional: Apply re-ranking if enabled
                 if (useReRanking && uniqueChunks.Count > 0)
@@ -6762,7 +8094,6 @@ Answer directly without introducing yourself."
                 return (true, "Knowledge base search failed", new List<RelevantChunk>());
             }
         }
-
 
         //   private async IAsyncEnumerable<string> GenerateStreamingResponseSafe(
         //string question,
@@ -6795,7 +8126,6 @@ Answer directly without introducing yourself."
         //       {
         //           prompt = _systemPromptBuilder.BuildGeneralSystemPrompt();
         //       }
-
 
         //       _logger.LogInformation($"📝 Prompt built, length: {prompt?.Length ?? 0} chars");
 
@@ -6835,15 +8165,16 @@ Answer directly without introducing yourself."
         //   }
 
         private async IAsyncEnumerable<string> GenerateStreamingResponseSafe(
-            string question,
-            string model,
-            ConversationContext context,
-            List<RelevantChunk> relevantChunks,
-            bool meaiInfo,
-            string plant,
-            QuestionType questionType = QuestionType.NewTopic,
-            bool isOracleEbsQuery = false,
-            [EnumeratorCancellation] CancellationToken ct = default)
+          string question,
+          string model,
+          ConversationContext context,
+          List<RelevantChunk> relevantChunks,
+          bool meaiInfo,
+          string plant,
+          QuestionType questionType = QuestionType.NewTopic,
+          bool isOracleEbsQuery = false,
+          [EnumeratorCancellation] CancellationToken ct =
+          default)
         {
             if (meaiInfo && !isOracleEbsQuery)
             {
@@ -6851,11 +8182,13 @@ Answer directly without introducing yourself."
                 if (!hasSufficientCoverage)
                 {
                     _logger.LogWarning(
-                        "⚠️ Insufficient policy coverage for streaming response (plant={Plant}, chunks={Count}) — refusing to generate",
-                        plant, relevantChunks.Count);
+                      "⚠️ Insufficient policy coverage for streaming response (plant={Plant}, chunks={Count}) — refusing to generate",
+                      plant, relevantChunks.Count);
 
-                    yield return $"I don't have sufficient policy information to answer this question for {plant}. Please contact your supervisor or HR department for clarification on this matter.";
-                    yield break;
+                    yield
+                    return $"I don't have sufficient policy information to answer this question for {plant}. Please contact your supervisor or HR department for clarification on this matter.";
+                    yield
+                    break;
                 }
             }
 
@@ -6871,20 +8204,21 @@ Answer directly without introducing yourself."
             var history = _historyService.GetHistory(context.SessionId);
 
             _logger.LogInformation("Streaming MEAI response: session {S}, {N} history turns, {C} chunks",
-                context.SessionId, history.Count, relevantChunks.Count);
+              context.SessionId, history.Count, relevantChunks.Count);
 
             await foreach (var token in StreamGenerateWithHistoryAsync(
-                model, systemPrompt, history, question, ct))
+              model, systemPrompt, history, question, ct))
             {
-                yield return token;
+                yield
+                return token;
             }
         }
 
         // ✅ NEW: Safe stream creation wrapper
         private async Task<IAsyncEnumerable<string>?> SafeCreateStream(
-    string model,
-    string prompt,
-    CancellationToken cancellationToken)
+          string model,
+          string prompt,
+          CancellationToken cancellationToken)
         {
             try
             {
@@ -6904,14 +8238,15 @@ Answer directly without introducing yourself."
         }
 
         private async IAsyncEnumerable<string> GenerateStreamingResponseFromLLM(
-    string question,
-    string model,
-    ConversationContext context,
-    List<RelevantChunk> relevantChunks,
-    bool meaiInfo,
-    string plant,
-    QuestionType questionType = QuestionType.NewTopic,
-    [EnumeratorCancellation] CancellationToken cancellationToken = default)
+          string question,
+          string model,
+          ConversationContext context,
+          List<RelevantChunk> relevantChunks,
+          bool meaiInfo,
+          string plant,
+          QuestionType questionType = QuestionType.NewTopic,
+          [EnumeratorCancellation] CancellationToken cancellationToken =
+          default)
         {
             var prompt = BuildEnhancedPrompt(question, relevantChunks, context, meaiInfo, plant, questionType);
 
@@ -6923,13 +8258,13 @@ Answer directly without introducing yourself."
             await foreach (var token in StreamGenerateAsync(model, prompt, history, cancellationToken))
             {
                 if (cancellationToken.IsCancellationRequested)
-                    yield break;
+                    yield
+                  break;
 
-                yield return token;
+                yield
+                return token;
             }
         }
-
-
 
         //   public async IAsyncEnumerable<string> StreamGenerateAsync(
         //string model,
@@ -7018,15 +8353,21 @@ Answer directly without introducing yourself."
 
         private bool IsMetadataQuery(string question)
         {
-            var metadataKeywords = new[]
-            {
-        "which policy", "what policy", "list policy", "policy information",
-        "what policies", "available policies", "policy documents",
-        "what do you know", "what information", "which documents"
-    };
+            var metadataKeywords = new[] {
+        "which policy",
+        "what policy",
+        "list policy",
+        "policy information",
+        "what policies",
+        "available policies",
+        "policy documents",
+        "what do you know",
+        "what information",
+        "which documents"
+      };
 
             return metadataKeywords.Any(keyword =>
-                question.ToLowerInvariant().Contains(keyword));
+              question.ToLowerInvariant().Contains(keyword));
         }
 
         //    private async Task<StreamSetupResult> SafeSetupStreamRequest(
@@ -7099,23 +8440,28 @@ Answer directly without introducing yourself."
         //    }
 
         public async IAsyncEnumerable<string> StreamGenerateAsync(
-           string model,
-           string prompt,
-           List<ConversationTurn>? history = null,
-           [EnumeratorCancellation] CancellationToken ct = default)
+          string model,
+          string prompt,
+          List<ConversationTurn>? history = null,
+          [EnumeratorCancellation] CancellationToken ct =
+          default)
         {
             var setup = await SafeSetupStreamRequest(model, prompt, history ?? new List<ConversationTurn>(), ct);
 
             if (!setup.Success)
             {
                 _logger.LogError("Stream setup failed: {Err}", setup.ErrorMessage);
-                yield break;
+                yield
+                break;
             }
 
             // FIX 3 — response is owned here, not in a finally block
-            using var response = setup.Response!;
-            using var stream = await response.Content.ReadAsStreamAsync(ct);
-            using var reader = new StreamReader(stream);
+            using
+            var response = setup.Response!;
+            using
+            var stream = await response.Content.ReadAsStreamAsync(ct);
+            using
+            var reader = new StreamReader(stream);
 
             int tokenCount = 0;
             while (!reader.EndOfStream && !ct.IsCancellationRequested)
@@ -7124,16 +8470,23 @@ Answer directly without introducing yourself."
                 if (string.IsNullOrWhiteSpace(line)) continue;
 
                 OllamaStreamResponse? streamResponse;
-                try { streamResponse = ParseStreamLine(line); }
-                catch { continue; }
+                try
+                {
+                    streamResponse = ParseStreamLine(line);
+                }
+                catch
+                {
+                    continue;
+                }
 
-                var token = streamResponse?.Message?.Content
-                         ?? streamResponse?.Response;
+                var token = streamResponse?.Message?.Content ??
+                  streamResponse?.Response;
 
                 if (!string.IsNullOrEmpty(token))
                 {
                     tokenCount++;
-                    yield return token;
+                    yield
+                    return token;
                 }
 
                 if (streamResponse?.Done == true)
@@ -7152,28 +8505,42 @@ Answer directly without introducing yourself."
         }
 
         private async Task<StreamSetupResult> SafeSetupStreamRequest(
-    string model,
-    string prompt,
-    List<ConversationTurn>? history = null,
-    CancellationToken ct = default)
+          string model,
+          string prompt,
+          List<ConversationTurn>? history = null,
+          CancellationToken ct =
+          default)
         {
             try
             {
                 // Build message list: system + history turns + current user message
-                var messages = new List<object>
-        {
-            new { role = "system", content = "You are a helpful AI assistant." }
+                var messages = new List<object> {
+          new {
+            role = "system", content = "You are a helpful AI assistant."
+          }
         };
 
                 // Insert history turns so the LLM sees previous Q&A
                 foreach (var turn in (history ?? new List<ConversationTurn>()).TakeLast(8))
                 {
-                    messages.Add(new { role = "user", content = turn.Question });
-                    messages.Add(new { role = "assistant", content = turn.Answer });
+                    messages.Add(new
+                    {
+                        role = "user",
+                        content = turn.Question
+                    });
+                    messages.Add(new
+                    {
+                        role = "assistant",
+                        content = turn.Answer
+                    });
                 }
 
                 // Current user message
-                messages.Add(new { role = "user", content = prompt });
+                messages.Add(new
+                {
+                    role = "user",
+                    content = prompt
+                });
 
                 var requestBody = new
                 {
@@ -7185,37 +8552,47 @@ Answer directly without introducing yourself."
                         temperature = 0.7,
                         //num_predict = 16000,
                         //num_ctx = 16384,
-                        num_ctx = 32768,      // ← was 16384: double to fit prompt + generous response
-                        num_predict = 8192,   // ← was 16000: must be < (num_ctx − input_tokens)
+                        num_ctx = 32768, // ← was 16384: double to fit prompt + generous response
+                        num_predict = 8192, // ← was 16000: must be < (num_ctx − input_tokens)
                         repeat_penalty = 1.1
                     }
                 };
 
                 var response = await _ollamaClient.SendAsync(
-                    new HttpRequestMessage(HttpMethod.Post, "/api/chat")
-                    {
-                        Content = JsonContent.Create(requestBody)
-                    },
-                    HttpCompletionOption.ResponseHeadersRead,
-                    ct);
+                  new HttpRequestMessage(HttpMethod.Post, "/api/chat")
+                  {
+                      Content = JsonContent.Create(requestBody)
+                  },
+                  HttpCompletionOption.ResponseHeadersRead,
+                  ct);
 
                 if (!response.IsSuccessStatusCode)
                 {
                     var err = await response.Content.ReadAsStringAsync(ct);
                     _logger.LogError("Ollama {Status}: {Err}", response.StatusCode, err);
-                    return new StreamSetupResult { Success = false, ErrorMessage = $"HTTP {response.StatusCode}" };
+                    return new StreamSetupResult
+                    {
+                        Success = false,
+                        ErrorMessage = $"HTTP {response.StatusCode}"
+                    };
                 }
 
-                return new StreamSetupResult { Success = true, Response = response };
+                return new StreamSetupResult
+                {
+                    Success = true,
+                    Response = response
+                };
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "SafeSetupStreamRequest failed");
-                return new StreamSetupResult { Success = false, ErrorMessage = ex.Message };
+                return new StreamSetupResult
+                {
+                    Success = false,
+                    ErrorMessage = ex.Message
+                };
             }
         }
-
-
 
         private OllamaStreamResponse? ParseStreamLine(string line)
         {
@@ -7242,49 +8619,93 @@ Answer directly without introducing yourself."
         // ✅ NEW: Result wrapper classes
         private class StreamSetupResult
         {
-            public bool Success { get; set; }
-            public string ErrorMessage { get; set; } = "";
-            public HttpResponseMessage? Response { get; set; }
+            public bool Success
+            {
+                get;
+                set;
+            }
+            public string ErrorMessage
+            {
+                get;
+                set;
+            } = "";
+            public HttpResponseMessage? Response
+            {
+                get;
+                set;
+            }
         }
 
         // Response model for Ollama streaming
         private class OllamaStreamResponse
         {
             [JsonPropertyName("model")]
-            public string? Model { get; set; }
+            public string? Model
+            {
+                get;
+                set;
+            }
 
             [JsonPropertyName("response")]
-            public string? Response { get; set; }
+            public string? Response
+            {
+                get;
+                set;
+            }
             [JsonPropertyName("message")]
-            public MessageContent? Message { get; set; }  // ✅ For /chat endpoint
+            public MessageContent? Message
+            {
+                get;
+                set;
+            } // ✅ For /chat endpoint
 
             [JsonPropertyName("done")]
-            public bool Done { get; set; }
+            public bool Done
+            {
+                get;
+                set;
+            }
 
-            [JsonPropertyName("done_reason")]       // ← add this
-            public string? DoneReason { get; set; }
-
+            [JsonPropertyName("done_reason")] // ← add this
+            public string? DoneReason
+            {
+                get;
+                set;
+            }
 
             [JsonPropertyName("context")]
-            public int[]? Context { get; set; }
+            public int[]? Context
+            {
+                get;
+                set;
+            }
         }
         private class MessageContent
         {
             [JsonPropertyName("role")]
-            public string? Role { get; set; }
+            public string? Role
+            {
+                get;
+                set;
+            }
 
             [JsonPropertyName("content")]
-            public string? Content { get; set; }
+            public string? Content
+            {
+                get;
+                set;
+            }
         }
-        private async Task<SessionResult> SafeInitializeSession(string? sessionId, string? userId, CancellationToken ct = default)
+        private async Task<SessionResult> SafeInitializeSession(string? sessionId, string? userId, CancellationToken ct =
+          default)
         {
             try
             {
                 _logger.LogInformation($"Initializing session: {sessionId}");
 
                 var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
-                    sessionId ?? Guid.NewGuid().ToString(),
-                    userId
+                  sessionId ?? Guid.NewGuid().ToString(),
+                  userId
                 );
 
                 var context = _conversation.GetOrCreateConversationContext(dbSession.SessionId);
@@ -7314,9 +8735,10 @@ Answer directly without introducing yourself."
 
         // ✅ NEW METHOD: Always refresh history from database
         private async Task RefreshConversationHistoryFromDatabase(
-            string sessionId,
-            ConversationContext context,
-            CancellationToken ct = default)
+          string sessionId,
+          ConversationContext context,
+          CancellationToken ct =
+          default)
         {
             try
             {
@@ -7339,16 +8761,16 @@ Answer directly without introducing yourself."
 
                 // Load fresh history from database (last 10 conversations)
                 var turns = conversations
-                    .OrderBy(c => c.CreatedAt)
-                    .TakeLast(10)
-                    .Select(c => new ConversationTurn
-                    {
-                        Question = c.Question,
-                        Answer = c.Answer,
-                        Timestamp = c.CreatedAt,
-                        Sources = c.Sources ?? new List<string>()
-                    })
-                    .ToList();
+                  .OrderBy(c => c.CreatedAt)
+                  .TakeLast(10)
+                  .Select(c => new ConversationTurn
+                  {
+                      Question = c.Question,
+                      Answer = c.Answer,
+                      Timestamp = c.CreatedAt,
+                      Sources = c.Sources ?? new List<string>()
+                  })
+                  .ToList();
 
                 // Add fresh turns to context
                 foreach (var turn in turns)
@@ -7359,9 +8781,9 @@ Answer directly without introducing yourself."
 
                 // Load named entities from all conversations
                 var allEntities = conversations
-                    .SelectMany(c => c.NamedEntities ?? new List<string>())
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
+                  .SelectMany(c => c.NamedEntities ?? new List<string>())
+                  .Distinct(StringComparer.OrdinalIgnoreCase)
+                  .ToList();
 
                 foreach (var entity in allEntities)
                 {
@@ -7373,8 +8795,8 @@ Answer directly without introducing yourself."
 
                 // Set last topic anchor from most recent conversation
                 var lastConversation = conversations
-                    .OrderByDescending(c => c.CreatedAt)
-                    .FirstOrDefault();
+                  .OrderByDescending(c => c.CreatedAt)
+                  .FirstOrDefault();
 
                 if (lastConversation != null && !string.IsNullOrEmpty(lastConversation.Question))
                 {
@@ -7391,7 +8813,6 @@ Answer directly without introducing yourself."
                 // Don't throw - continue with existing history
             }
         }
-
 
         private async Task LoadConversationHistoryFromDatabaseAsync(string sessionId, ConversationContext context)
         {
@@ -7413,24 +8834,24 @@ Answer directly without introducing yourself."
 
                 // Load fresh history
                 var turns = conversations
-                    .OrderBy(c => c.CreatedAt)
-                    .TakeLast(10)
-                    .Select(c => new ConversationTurn
-                    {
-                        Question = c.Question,
-                        Answer = c.Answer,
-                        Timestamp = c.CreatedAt,
-                        Sources = c.Sources ?? new List<string>()
-                    })
-                    .ToList();
+                  .OrderBy(c => c.CreatedAt)
+                  .TakeLast(10)
+                  .Select(c => new ConversationTurn
+                  {
+                      Question = c.Question,
+                      Answer = c.Answer,
+                      Timestamp = c.CreatedAt,
+                      Sources = c.Sources ?? new List<string>()
+                  })
+                  .ToList();
 
                 context.History.AddRange(turns);
 
                 // Load entities
                 var allEntities = conversations
-                    .SelectMany(c => c.NamedEntities ?? new List<string>())
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
+                  .SelectMany(c => c.NamedEntities ?? new List<string>())
+                  .Distinct(StringComparer.OrdinalIgnoreCase)
+                  .ToList();
 
                 foreach (var entity in allEntities)
                 {
@@ -7446,22 +8867,21 @@ Answer directly without introducing yourself."
             }
         }
 
-
         private async Task<List<ConversationTurn>> LoadHistoryForSession(string sessionId)
         {
             var conversations = await _conversationStorage.GetSessionConversationsAsync(sessionId);
 
             return conversations
-                .OrderBy(c => c.CreatedAt)
-                .TakeLast(10)
-                .Select(c => new ConversationTurn
-                {
-                    Question = c.Question,
-                    Answer = c.Answer,
-                    Timestamp = c.CreatedAt,
-                    Sources = c.Sources ?? new List<string>()
-                })
-                .ToList();
+              .OrderBy(c => c.CreatedAt)
+              .TakeLast(10)
+              .Select(c => new ConversationTurn
+              {
+                  Question = c.Question,
+                  Answer = c.Answer,
+                  Timestamp = c.CreatedAt,
+                  Sources = c.Sources ?? new List<string>()
+              })
+              .ToList();
         }
 
         private async Task LoadConversationHistoryAsync(string sessionId, ConversationContext context)
@@ -7482,25 +8902,25 @@ Answer directly without introducing yourself."
 
                 // Convert database entries to conversation turns
                 var turns = conversations
-                    .OrderBy(c => c.CreatedAt)
-                    .TakeLast(10) // Load last 10 conversations
-                    .Select(c => new ConversationTurn
-                    {
-                        Question = c.Question,
-                        Answer = c.Answer,
-                        Timestamp = c.CreatedAt,
-                        Sources = c.Sources ?? new List<string>()
-                    })
-                    .ToList();
+                  .OrderBy(c => c.CreatedAt)
+                  .TakeLast(10) // Load last 10 conversations
+                  .Select(c => new ConversationTurn
+                  {
+                      Question = c.Question,
+                      Answer = c.Answer,
+                      Timestamp = c.CreatedAt,
+                      Sources = c.Sources ?? new List<string>()
+                  })
+                  .ToList();
 
                 // Populate context with loaded history
                 context.History.AddRange(turns);
 
                 // ✅ LOAD NAMED ENTITIES from historical conversations
                 var allEntities = conversations
-                    .SelectMany(c => c.NamedEntities ?? new List<string>())
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
+                  .SelectMany(c => c.NamedEntities ?? new List<string>())
+                  .Distinct(StringComparer.OrdinalIgnoreCase)
+                  .ToList();
 
                 foreach (var entity in allEntities)
                 {
@@ -7527,7 +8947,6 @@ Answer directly without introducing yourself."
             }
         }
 
-
         private async Task<AnswerResult> SafeCheckAppreciatedAnswer(string question)
         {
             try
@@ -7542,7 +8961,10 @@ Answer directly without introducing yourself."
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to check appreciated answers");
-                return new AnswerResult { HasAnswer = false };
+                return new AnswerResult
+                {
+                    HasAnswer = false
+                };
             }
         }
 
@@ -7560,7 +8982,10 @@ Answer directly without introducing yourself."
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to check corrections");
-                return new AnswerResult { HasAnswer = false };
+                return new AnswerResult
+                {
+                    HasAnswer = false
+                };
             }
         }
 
@@ -7597,23 +9022,28 @@ Answer directly without introducing yourself."
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to validate models");
-                return new ModelValidationResult { HasError = true };
+                return new ModelValidationResult
+                {
+                    HasError = true
+                };
             }
         }
 
         private async Task<(bool HasError, string ErrorMessage, List<RelevantChunk> Chunks)> SafeSearchKnowledgeBase(
-      string query,
-      ModelConfiguration embModel,
-      int maxResults,
-      string plant,
-      string originalQuestion)
+          string query,
+          ModelConfiguration embModel,
+          int maxResults,
+          string plant,
+          string originalQuestion)
         {
             try
             {
                 // Expand query with abbreviations
                 var expandedQuery = _abbreviationService.ExpandQuery(query);
 
-                var searchQueries = new List<string> { query };
+                var searchQueries = new List<string> {
+          query
+        };
                 if (expandedQuery != query)
                 {
                     searchQueries.Add(expandedQuery);
@@ -7632,17 +9062,17 @@ Answer directly without introducing yourself."
                 foreach (var chunk in allChunks)
                 {
                     var isContextFile = chunk.Source.Contains("abbreviations.txt", StringComparison.OrdinalIgnoreCase) ||
-                                       chunk.Source.Contains("organization", StringComparison.OrdinalIgnoreCase);
+                      chunk.Source.Contains("organization", StringComparison.OrdinalIgnoreCase);
 
                     if (isContextFile)
                     {
                         // Check if query is asking about people/roles
                         var isPeopleQuery = query.Contains("MD", StringComparison.OrdinalIgnoreCase) ||
-                                           query.Contains("manager", StringComparison.OrdinalIgnoreCase) ||
-                                           query.Contains("head", StringComparison.OrdinalIgnoreCase) ||
-                                           query.Contains("CEO", StringComparison.OrdinalIgnoreCase) ||
-                                           query.Contains("who is", StringComparison.OrdinalIgnoreCase) ||
-                                           query.Contains("contact", StringComparison.OrdinalIgnoreCase);
+                          query.Contains("manager", StringComparison.OrdinalIgnoreCase) ||
+                          query.Contains("head", StringComparison.OrdinalIgnoreCase) ||
+                          query.Contains("CEO", StringComparison.OrdinalIgnoreCase) ||
+                          query.Contains("who is", StringComparison.OrdinalIgnoreCase) ||
+                          query.Contains("contact", StringComparison.OrdinalIgnoreCase);
 
                         if (isPeopleQuery && chunk.Source.Contains("organization"))
                         {
@@ -7659,11 +9089,11 @@ Answer directly without introducing yourself."
 
                 // Deduplicate and take top results
                 var uniqueChunks = allChunks
-                    .GroupBy(c => c.Text.Trim())
-                    .Select(g => g.OrderByDescending(c => c.Similarity).First())
-                    .OrderByDescending(c => c.Similarity)
-                    .Take(maxResults)
-                    .ToList();
+                  .GroupBy(c => c.Text.Trim())
+                  .Select(g => g.OrderByDescending(c => c.Similarity).First())
+                  .OrderByDescending(c => c.Similarity)
+                  .Take(maxResults)
+                  .ToList();
 
                 return (false, string.Empty, uniqueChunks);
             }
@@ -7676,69 +9106,176 @@ Answer directly without introducing yourself."
 
         public class SessionResult
         {
-            public bool HasError { get; set; }
-            public string ErrorMessage { get; set; } = "";
-            public ConversationSession? Session { get; set; }
-            public ConversationContext? Context { get; set; }
+            public bool HasError
+            {
+                get;
+                set;
+            }
+            public string ErrorMessage
+            {
+                get;
+                set;
+            } = "";
+            public ConversationSession? Session
+            {
+                get;
+                set;
+            }
+            public ConversationContext? Context
+            {
+                get;
+                set;
+            }
         }
 
         public class AnswerResult
         {
-            public bool? HasAnswer { get; set; }
-            public string Answer { get; set; } = "";
+            public bool? HasAnswer
+            {
+                get;
+                set;
+            }
+            public string Answer
+            {
+                get;
+                set;
+            } = "";
         }
 
         public class ModelValidationResult
         {
-            public bool HasError { get; set; }
-            public ModelConfiguration? GenerationModel { get; set; }
-            public ModelConfiguration? EmbeddingModel { get; set; }
+            public bool HasError
+            {
+                get;
+                set;
+            }
+            public ModelConfiguration? GenerationModel
+            {
+                get;
+                set;
+            }
+            public ModelConfiguration? EmbeddingModel
+            {
+                get;
+                set;
+            }
         }
 
         public class SearchResult
         {
-            public bool HasError { get; set; }
-            public string ErrorMessage { get; set; } = "";
-            public List<RelevantChunk> Chunks { get; set; } = new();
+            public bool HasError
+            {
+                get;
+                set;
+            }
+            public string ErrorMessage
+            {
+                get;
+                set;
+            } = "";
+            public List<RelevantChunk> Chunks
+            {
+                get;
+                set;
+            } = new();
         }
 
         // UPDATED STREAM CHUNK CLASS - matches HTML expectations
         public class StreamChunk
         {
-            public string Type { get; set; } = "";
-            public string? Content { get; set; }
-            public string? Source { get; set; }
-            public double? Similarity { get; set; }
-            public List<string>? Sources { get; set; }
-            public long? ProcessingTimeMs { get; set; }
-            public string? TextPreview { get; set; }  // Added for HTML compatibility
+            public string Type
+            {
+                get;
+                set;
+            } = "";
+            public string? Content
+            {
+                get;
+                set;
+            }
+            public string? Source
+            {
+                get;
+                set;
+            }
+            public double? Similarity
+            {
+                get;
+                set;
+            }
+            public List<string>? Sources
+            {
+                get;
+                set;
+            }
+            public long? ProcessingTimeMs
+            {
+                get;
+                set;
+            }
+            public string? TextPreview
+            {
+                get;
+                set;
+            } // Added for HTML compatibility
         }
 
         public class ResponseGenerationResult
         {
-            public bool HasError { get; set; }
-            public string ErrorMessage { get; set; } = "";
-            public IAsyncEnumerable<string>? TokenStream { get; set; }
+            public bool HasError
+            {
+                get;
+                set;
+            }
+            public string ErrorMessage
+            {
+                get;
+                set;
+            } = "";
+            public IAsyncEnumerable<string>? TokenStream
+            {
+                get;
+                set;
+            }
         }
 
         public class SimpleResponseResult
         {
-            public bool HasError { get; set; }
-            public string ErrorMessage { get; set; } = "";
-            public string Response { get; set; } = "";
+            public bool HasError
+            {
+                get;
+                set;
+            }
+            public string ErrorMessage
+            {
+                get;
+                set;
+            } = "";
+            public string Response
+            {
+                get;
+                set;
+            } = "";
         }
 
         private async IAsyncEnumerable<StreamChunk> StreamTextResponse(
-    string text,
-    [EnumeratorCancellation] CancellationToken cancellationToken = default)
+          string text,
+          [EnumeratorCancellation] CancellationToken cancellationToken =
+          default)
         {
-            if (string.IsNullOrEmpty(text)) yield break;
+            if (string.IsNullOrEmpty(text)) yield
+            break;
 
-            var sentences = text.Split(new[] { ". ", "! ", "? " }, StringSplitOptions.RemoveEmptyEntries);
+            var sentences = text.Split(new[] {
+        ". ",
+        "! ",
+        "? "
+      }, StringSplitOptions.RemoveEmptyEntries);
 
             foreach (var sentence in sentences)
             {
-                if (cancellationToken.IsCancellationRequested) yield break;
+                if (cancellationToken.IsCancellationRequested) yield
+                break;
 
                 var words = sentence.Split(' ');
                 var currentChunk = "";
@@ -7750,7 +9287,12 @@ Answer directly without introducing yourself."
                     // Send chunk every 6-8 words
                     if ((i + 1) % 7 == 0 || i == words.Length - 1)
                     {
-                        yield return new StreamChunk { Type = "response", Content = currentChunk };
+                        yield
+                        return new StreamChunk
+                        {
+                            Type = "response",
+                            Content = currentChunk
+                        };
                         currentChunk = "";
 
                         if (i < words.Length - 1)
@@ -7760,32 +9302,45 @@ Answer directly without introducing yourself."
 
                 if (!sentence.EndsWith('.') && !sentence.EndsWith('!') && !sentence.EndsWith('?'))
                 {
-                    yield return new StreamChunk { Type = "response", Content = ". " };
+                    yield
+                    return new StreamChunk
+                    {
+                        Type = "response",
+                        Content = ". "
+                    };
                 }
 
                 await Task.Delay(Random.Shared.Next(80, 150), cancellationToken);
             }
         }
 
-
-
-
-
         private async IAsyncEnumerable<StreamChunk> ProcessNonMeaiQueryStream(
-    string question,
-    string? sessionId,
-    string generationModel,
-    string userId,
-    [EnumeratorCancellation] CancellationToken cancellationToken = default)
+          string question,
+          string? sessionId,
+          string generationModel,
+          string userId,
+          [EnumeratorCancellation] CancellationToken cancellationToken =
+          default)
         {
-            yield return new StreamChunk { Type = "status", Content = "Processing general query..." };
+            yield
+            return new StreamChunk
+            {
+                Type = "status",
+                Content = "Processing general query..."
+            };
 
             // Get session
             var sessionResult = await SafeInitializeSession(sessionId, userId, cancellationToken);
             if (sessionResult.HasError)
             {
-                yield return new StreamChunk { Type = "error", Content = sessionResult.ErrorMessage };
-                yield break;
+                yield
+                return new StreamChunk
+                {
+                    Type = "error",
+                    Content = sessionResult.ErrorMessage
+                };
+                yield
+                break;
             }
 
             var context = sessionResult.Context!;
@@ -7794,27 +9349,35 @@ Answer directly without introducing yourself."
             var genModel = await _modelManager.GetModelAsync(generationModel ?? _config.DefaultGenerationModel);
             if (genModel == null)
             {
-                yield return new StreamChunk { Type = "error", Content = "Generation model not available" };
-                yield break;
+                yield
+                return new StreamChunk
+                {
+                    Type = "error",
+                    Content = "Generation model not available"
+                };
+                yield
+                break;
             }
 
             // ✅ Stream directly from Ollama - NO intermediate buffering
             var fullResponse = new StringBuilder();
 
             await foreach (var token in GenerateNonMeaiStreamAsync(
-                question,
-                genModel.Name!,
-                context.History,
-                cancellationToken))
+              question,
+              genModel.Name!,
+              context.History,
+              cancellationToken))
             {
-                if (cancellationToken.IsCancellationRequested) yield break;
+                if (cancellationToken.IsCancellationRequested) yield
+                break;
 
                 fullResponse.Append(token);
 
                 // ✅ Yield each token immediately
-                yield return new StreamChunk
+                yield
+                return new StreamChunk
                 {
-                    Type = "response",  // ✅ This is what your HTML expects
+                    Type = "response", // ✅ This is what your HTML expects
                     Content = token
                 };
             }
@@ -7825,14 +9388,14 @@ Answer directly without introducing yourself."
                 if (fullResponse.Length > 0)
                 {
                     await SaveNonMeaiConversationToDatabase(
-                        sessionResult.Session!.SessionId,
-                        question,
-                        fullResponse.ToString(),
-                        genModel,
-                        0.7,
-                        0,
-                        false,
-                        "");
+                      sessionResult.Session!.SessionId,
+                      question,
+                      fullResponse.ToString(),
+                      genModel,
+                      0.7,
+                      0,
+                      false,
+                      "");
                 }
             }
             catch (Exception ex)
@@ -7840,56 +9403,73 @@ Answer directly without introducing yourself."
                 _logger.LogWarning(ex, "Failed to save non-MEAI conversation");
             }
 
-            yield return new StreamChunk { Type = "complete", Content = "", ProcessingTimeMs = 0 };
+            yield
+            return new StreamChunk
+            {
+                Type = "complete",
+                Content = "",
+                ProcessingTimeMs = 0
+            };
         }
 
         private async IAsyncEnumerable<string> GenerateNonMeaiStreamAsync(
-    string question,
-    string modelName,
-    List<ConversationTurn> history,
-    [EnumeratorCancellation] CancellationToken cancellationToken = default)
+          string question,
+          string modelName,
+          List<ConversationTurn> history,
+          [EnumeratorCancellation] CancellationToken cancellationToken =
+          default)
         {
             // Build messages
-            var messages = new List<object>
-    {
-        new
-        {
-            role = "system",
-            content = "You are an intelligent and helpful AI assistant with expertise across multiple domains. "+
+            var messages = new List<object> {
+        new {
+          role = "system",
+            content = "You are an intelligent and helpful AI assistant with expertise across multiple domains. " +
 
-"**Core Principles:** " +
-"- Provide accurate, well-researched, and detailed responses "+
-"- Be conversational, professional, and friendly "+
-"- Use clear structure with appropriate formatting "+
-"- Cite reasoning when making recommendations "+
-"- Admit uncertainty when appropriate rather than guessing "+
+            "**Core Principles:** " +
+            "- Provide accurate, well-researched, and detailed responses " +
+            "- Be conversational, professional, and friendly " +
+            "- Use clear structure with appropriate formatting " +
+            "- Cite reasoning when making recommendations " +
+            "- Admit uncertainty when appropriate rather than guessing " +
 
-"**Response Guidelines:** "+
-"1. For factual questions: Provide direct, accurate answers with relevant context "+
-"2. For how-to questions: Give step-by-step instructions with clear explanations "+
-"3. For recommendations: Explain pros/cons and provide multiple options when relevant  "+
-"4. For complex topics: Break down concepts into digestible parts "+
-"5. For opinion-based questions: Present balanced perspectives "+
+            "**Response Guidelines:** " +
+            "1. For factual questions: Provide direct, accurate answers with relevant context " +
+            "2. For how-to questions: Give step-by-step instructions with clear explanations " +
+            "3. For recommendations: Explain pros/cons and provide multiple options when relevant  " +
+            "4. For complex topics: Break down concepts into digestible parts " +
+            "5. For opinion-based questions: Present balanced perspectives " +
 
-"**Formatting:** "+
-"- Use clear paragraphs for readability "+
-"- Add bullet points for lists or multiple items "+
-"- Include examples when they clarify concepts "+
-"- Keep responses concise but complete "+
+            "**Formatting:** " +
+            "- Use clear paragraphs for readability " +
+            "- Add bullet points for lists or multiple items " +
+            "- Include examples when they clarify concepts " +
+            "- Keep responses concise but complete " +
 
-"Be helpful, informative, and engaging in your communication."
+            "Be helpful, informative, and engaging in your communication."
         }
-    };
+      };
 
             // Add recent history
             foreach (var turn in history.TakeLast(6))
             {
-                messages.Add(new { role = "user", content = turn.Question });
-                messages.Add(new { role = "assistant", content = turn.Answer });
+                messages.Add(new
+                {
+                    role = "user",
+                    content = turn.Question
+                });
+                messages.Add(new
+                {
+                    role = "assistant",
+                    content = turn.Answer
+                });
             }
 
             // Add current question
-            messages.Add(new { role = "user", content = question });
+            messages.Add(new
+            {
+                role = "user",
+                content = question
+            });
 
             var requestData = new
             {
@@ -7899,8 +9479,8 @@ Answer directly without introducing yourself."
                 stream = true,
                 options = new Dictionary<string, object>
                 {
-                    ["num_ctx"] = 16384,        // ✅ Increased from 4096
-                    ["num_predict"] = 16000,    // ✅ Increased
+                    ["num_ctx"] = 16384, // ✅ Increased from 4096
+                    ["num_predict"] = 16000, // ✅ Increased
                     ["top_p"] = 0.9
                 }
             };
@@ -7908,7 +9488,8 @@ Answer directly without introducing yourself."
             _logger.LogInformation($"Streaming non-MEAI response with model: {modelName}");
 
             // Create streaming request
-            using var request = new HttpRequestMessage(HttpMethod.Post, "api/chat")
+            using
+            var request = new HttpRequestMessage(HttpMethod.Post, "api/chat")
             {
                 Content = JsonContent.Create(requestData)
             };
@@ -7916,33 +9497,37 @@ Answer directly without introducing yourself."
             HttpResponseMessage? response = null;
 
             response = await _ollamaClient.SendAsync(
-                request,
-                HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
+              request,
+              HttpCompletionOption.ResponseHeadersRead,
+              cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogError($"Ollama request failed: {response.StatusCode}");
-                yield return "I apologize, but I'm having trouble generating a response right now.";
-                yield break;
+                yield
+                return "I apologize, but I'm having trouble generating a response right now.";
+                yield
+                break;
             }
 
-            using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var reader = new StreamReader(stream);
+            using
+            var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using
+            var reader = new StreamReader(stream);
 
             while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
             {
                 var line = await reader.ReadLineAsync();
                 if (string.IsNullOrWhiteSpace(line)) continue;
 
-
                 var streamResponse = JsonSerializer.Deserialize<OllamaStreamResponse>(line);
 
                 // ✅ Handle chat format response
                 if (streamResponse?.Message?.Content != null &&
-                    !string.IsNullOrEmpty(streamResponse.Message.Content))
+                  !string.IsNullOrEmpty(streamResponse.Message.Content))
                 {
-                    yield return streamResponse.Message.Content;
+                    yield
+                    return streamResponse.Message.Content;
                 }
 
                 if (streamResponse?.Done == true)
@@ -7954,12 +9539,12 @@ Answer directly without introducing yourself."
         }
 
         private string BuildEnhancedPrompt(
-     string question,
-     List<RelevantChunk> relevantChunks,
-     ConversationContext context,
-     bool meaiInfo,
-     string plant,
-     QuestionType questionType = QuestionType.NewTopic) // ✅ Add parameter
+          string question,
+          List<RelevantChunk> relevantChunks,
+          ConversationContext context,
+          bool meaiInfo,
+          string plant,
+          QuestionType questionType = QuestionType.NewTopic) // ✅ Add parameter
         {
             var promptBuilder = new StringBuilder();
 
@@ -8083,22 +9668,21 @@ Answer directly without introducing yourself."
             return promptBuilder.ToString();
         }
 
-
-
-
-
         // Helper method to create the streaming request (handles exceptions)
         private async Task<(bool Success, HttpResponseMessage? Response, string? ErrorMessage)> CreateStreamingRequest(
-            string prompt,
-            ModelConfiguration model,
-            CancellationToken cancellationToken)
+          string prompt,
+          ModelConfiguration model,
+          CancellationToken cancellationToken)
         {
             try
             {
-                var messages = new List<object>
-        {
-            new { role = "system", content = "You are a helpful AI assistant." },
-            new { role = "user", content = prompt }
+                var messages = new List<object> {
+          new {
+            role = "system", content = "You are a helpful AI assistant."
+          },
+          new {
+            role = "user", content = prompt
+          }
         };
 
                 var requestData = new
@@ -8107,15 +9691,24 @@ Answer directly without introducing yourself."
                     messages,
                     stream = true,
                     temperature = 0.1,
-                    options = new Dictionary<string, object>
-            {
-                { "num_ctx", 4000 },
-                { "num_predict", 2000 },
-                { "top_p", 0.9 }
+                    options = new Dictionary<string, object> {
+              {
+                "num_ctx",
+                4000
+              },
+              {
+                "num_predict",
+                2000
+              },
+              {
+                "top_p",
+                0.9
+              }
             }
                 };
 
-                using var request = new HttpRequestMessage(HttpMethod.Post, "/api/chat")
+                using
+                var request = new HttpRequestMessage(HttpMethod.Post, "/api/chat")
                 {
                     Content = JsonContent.Create(requestData)
                 };
@@ -8139,8 +9732,8 @@ Answer directly without introducing yourself."
 
         // Helper method to process streaming response (no try-catch around yields)
         private async IAsyncEnumerable<string> ProcessStreamingResponse(
-            HttpResponseMessage response,
-            [EnumeratorCancellation] CancellationToken cancellationToken)
+          HttpResponseMessage response,
+          [EnumeratorCancellation] CancellationToken cancellationToken)
         {
             using (response)
             using (var stream = await response.Content.ReadAsStreamAsync(cancellationToken))
@@ -8171,7 +9764,8 @@ Answer directly without introducing yourself."
                             if (lastSpaceIndex > 0)
                             {
                                 var wordsToYield = currentText.Substring(0, lastSpaceIndex);
-                                yield return wordsToYield;
+                                yield
+                                return wordsToYield;
 
                                 currentToken.Clear();
                                 currentToken.Append(currentText.Substring(lastSpaceIndex + 1));
@@ -8183,7 +9777,8 @@ Answer directly without introducing yourself."
                 // Yield any remaining content
                 if (currentToken.Length > 0)
                 {
-                    yield return currentToken.ToString();
+                    yield
+                    return currentToken.ToString();
                 }
             }
         }
@@ -8193,9 +9788,12 @@ Answer directly without introducing yourself."
         {
             try
             {
-                using var doc = JsonDocument.Parse(jsonData);
-                if (doc.RootElement.TryGetProperty("message", out var message) &&
-                    message.TryGetProperty("content", out var content))
+                using
+                var doc = JsonDocument.Parse(jsonData);
+                if (doc.RootElement.TryGetProperty("message", out
+                    var message) &&
+                  message.TryGetProperty("content", out
+                    var content))
                 {
                     return content.GetString() ?? "";
                 }
@@ -8278,8 +9876,8 @@ Answer directly without introducing yourself."
             try
             {
                 var keysToRemove = processedFilesCache.Keys
-                    .Where(k => k.StartsWith(filePath))
-                    .ToList();
+                  .Where(k => k.StartsWith(filePath))
+                  .ToList();
 
                 foreach (var key in keysToRemove)
                 {
@@ -8379,11 +9977,10 @@ Answer directly without introducing yourself."
                 result.ExpectedDimension = model.EmbeddingDimension;
 
                 // Test with sample text
-                var testTexts = new[]
-                {
-            "This is a test sentence for embedding generation.",
-            "HR policy regarding leave management.",
-            "Section 1: Introduction and Purpose"
+                var testTexts = new[] {
+          "This is a test sentence for embedding generation.",
+          "HR policy regarding leave management.",
+          "Section 1: Introduction and Purpose"
         };
 
                 var embeddings = new List<int>();
@@ -8418,55 +10015,149 @@ Answer directly without introducing yourself."
             return result;
         }
 
-
         // Supporting class
         public class EmbeddingTestResult
         {
-            public string ModelName { get; set; } = "";
-            public DateTime Timestamp { get; set; }
-            public bool Success { get; set; }
-            public bool ModelFound { get; set; }
-            public int ExpectedDimension { get; set; }
-            public List<int> ActualDimensions { get; set; } = new();
-            public string? Error { get; set; }
-            public string? Message { get; set; }
+            public string ModelName
+            {
+                get;
+                set;
+            } = "";
+            public DateTime Timestamp
+            {
+                get;
+                set;
+            }
+            public bool Success
+            {
+                get;
+                set;
+            }
+            public bool ModelFound
+            {
+                get;
+                set;
+            }
+            public int ExpectedDimension
+            {
+                get;
+                set;
+            }
+            public List<int> ActualDimensions
+            {
+                get;
+                set;
+            } = new();
+            public string? Error
+            {
+                get;
+                set;
+            }
+            public string? Message
+            {
+                get;
+                set;
+            }
         }
 
         public class PolicyProcessingDiagnostics
         {
-            public string Plant { get; set; } = "";
-            public DateTime Timestamp { get; set; }
-            public int TotalPolicyFiles { get; set; }
-            public List<PolicyFileInfo> PolicyFiles { get; set; } = new();
-            public List<string> EmbeddingModels { get; set; } = new();
-            public List<ModelCollectionInfo> ModelCollections { get; set; } = new();
-            public int CachedFiles { get; set; }
-            public int CachedEmbeddings { get; set; }
-            public string? Error { get; set; }
+            public string Plant
+            {
+                get;
+                set;
+            } = "";
+            public DateTime Timestamp
+            {
+                get;
+                set;
+            }
+            public int TotalPolicyFiles
+            {
+                get;
+                set;
+            }
+            public List<PolicyFileInfo> PolicyFiles
+            {
+                get;
+                set;
+            } = new();
+            public List<string> EmbeddingModels
+            {
+                get;
+                set;
+            } = new();
+            public List<ModelCollectionInfo> ModelCollections
+            {
+                get;
+                set;
+            } = new();
+            public int CachedFiles
+            {
+                get;
+                set;
+            }
+            public int CachedEmbeddings
+            {
+                get;
+                set;
+            }
+            public string? Error
+            {
+                get;
+                set;
+            }
         }
 
         public class PolicyFileInfo
         {
-            public string FileName { get; set; } = "";
-            public string FilePath { get; set; } = "";
-            public long FileSize { get; set; }
-            public DateTime LastModified { get; set; }
+            public string FileName
+            {
+                get;
+                set;
+            } = "";
+            public string FilePath
+            {
+                get;
+                set;
+            } = "";
+            public long FileSize
+            {
+                get;
+                set;
+            }
+            public DateTime LastModified
+            {
+                get;
+                set;
+            }
         }
 
         public class ModelCollectionInfo
         {
-            public string ModelName { get; set; } = "";
-            public string CollectionId { get; set; } = "";
-            public int EmbeddingCount { get; set; }
+            public string ModelName
+            {
+                get;
+                set;
+            } = "";
+            public string CollectionId
+            {
+                get;
+                set;
+            } = "";
+            public int EmbeddingCount
+            {
+                get;
+                set;
+            }
         }
         public enum QuestionType
         {
-            NewTopic,        // Completely new conversation
-            FollowUp,        // Direct follow-up (e.g., "what about...", "tell me more")
-            RelatedTopic,     // Related but exploring different angle
+            NewTopic, // Completely new conversation
+            FollowUp, // Direct follow-up (e.g., "what about...", "tell me more")
+            RelatedTopic, // Related but exploring different angle
             LooselyRelated
         }
-
 
     }
 

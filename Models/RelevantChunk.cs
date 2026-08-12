@@ -22,5 +22,12 @@
         /// otherwise uncalibrated.
         /// </summary>
         public double? RerankScore { get; set; }
+
+        // ✅ NEW: populated from ChromaDB metadata in ParseSearchResults so
+        // API consumers can cite the actual section/annexure a chunk came
+        // from, not just the source filename.
+        public string? SectionNumber { get; set; }
+        public string? SectionTitle { get; set; }
+        public string? AnnexureRefs { get; set; } // comma-delimited annexure numbers found in this chunk, if any
     }
 }

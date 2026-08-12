@@ -25,51 +25,33 @@ namespace MEAI_GPT_API.Service
             if (chunks == null || chunks.Count == 0)
                 return chunks;
 
-            var scored = new List<(int Index, double Score)>();
+            var scores = new double[chunks.Count];
 
-            for (int i = 0; i < chunks.Count; i++)
+            // ✅ Bounded concurrency: each rerank call is a full LLM inference
+            // round-trip, so unbounded parallelism would overwhelm Ollama, but
+            // running fully sequential (as before) means total latency scales
+            // linearly with candidate count — N chunks = N x full-inference-latency.
+            // 4 concurrent requests is a conservative starting point; tune based
+            // on observed Ollama load.
+            using var semaphore = new SemaphoreSlim(4, 4);
+
+            var tasks = chunks.Select(async (chunk, i) =>
             {
-                var prompt = $"""
-You are a relevance ranking model.
-Score the relevance between the query and passage on a scale from 0 to 1.
-Return ONLY a single number.
-
-Query:
-{query}
-
-Passage:
-{chunks[i].Text}
-""";
-
-                var request = new
+                await semaphore.WaitAsync();
+                try
                 {
-                    model = modelName,
-                    prompt = prompt,
-                    stream = false
-                };
-
-                var response = await _ollama.PostAsJsonAsync("/api/generate", request);
-                if (!response.IsSuccessStatusCode)
-                {
-                    _logger.LogWarning("Reranker call failed for chunk {Index}: {Status}", i, response.StatusCode);
-                    scored.Add((i, chunks[i].Similarity)); // fall back instead of throwing
-                    continue;
+                    scores[i] = await ScoreChunkAsync(query, chunk, modelName, i);
                 }
-                response.EnsureSuccessStatusCode(); // safe now, only reached on success path anyway — can remove
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
 
-                var json = await response.Content.ReadAsStringAsync();
-                using var doc = JsonDocument.Parse(json);
+            await Task.WhenAll(tasks);
 
-                var output = doc.RootElement
-                    .GetProperty("response")
-                    .GetString();
-
-                var score = ExtractScore(output, chunks[i].Similarity, i);
-
-                scored.Add((i, score));
-            }
-
-            return scored
+            return scores
+                .Select((score, i) => (Index: i, Score: score))
                 .OrderByDescending(s => s.Score)
                 .Take(topK)
                 .Select(s =>
@@ -81,6 +63,48 @@ Passage:
                     return chunks[s.Index];
                 })
                 .ToList();
+        }
+
+        private async Task<double> ScoreChunkAsync(string query, RelevantChunk chunk, string modelName, int index)
+        {
+            var prompt = $"""
+You are a relevance ranking model.
+Score the relevance between the query and passage on a scale from 0 to 1.
+Return ONLY a single number.
+
+Query:
+{query}
+
+Passage:
+{chunk.Text}
+""";
+
+            var request = new { model = modelName, prompt = prompt, stream = false };
+
+            try
+            {
+                var response = await _ollama.PostAsJsonAsync("/api/generate", request);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Reranker call failed for chunk {Index}: {Status}", index, response.StatusCode);
+                    return chunk.Similarity; // fall back instead of throwing
+                }
+
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+                var output = doc.RootElement.GetProperty("response").GetString();
+
+                return ExtractScore(output, chunk.Similarity, index);
+            }
+            catch (Exception ex)
+            {
+                // ✅ Previously only IsSuccessStatusCode was checked — a genuine
+                // network exception (timeout, connection reset) here would still
+                // propagate uncaught and, per the ExecuteRetrievalAsync try/catch,
+                // could discard already-retrieved chunks. Fail this one chunk only.
+                _logger.LogWarning(ex, "Reranker call threw for chunk {Index}; falling back to vector similarity", index);
+                return chunk.Similarity;
+            }
         }
         /// <summary>
         /// Pulls the first 0-1 floating point number out of the reranker's raw

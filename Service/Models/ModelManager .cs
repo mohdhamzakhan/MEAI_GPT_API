@@ -469,6 +469,25 @@ namespace MEAI_GPT_API.Services
 
         public async Task<bool> ValidateModelAsync(string modelName)
             => (await GetModelAsync(modelName)) != null;
+
+        /// <summary>
+        /// Real availability check: is this model actually pulled on the
+        /// Ollama server right now? Unlike GetModelAsync/ValidateModelAsync,
+        /// this deliberately ignores appsettings.json — a model can be listed
+        /// in ModelConfigurations and still not exist on the Ollama box (e.g.
+        /// a typo, or a model that was never pulled), which is exactly the
+        /// failure mode that caused silent empty-retrieval results in the past.
+        /// </summary>
+        public async Task<bool> IsModelActuallyAvailableAsync(string modelName)
+        {
+            if (_availableModels.ContainsKey(modelName))
+                return true;
+
+            // Cache may be stale (10 min discovery interval) — force a fresh check
+            // before concluding the model is genuinely missing.
+            await DiscoverAvailableModelsAsync();
+            return _availableModels.ContainsKey(modelName);
+        }
         private async Task<ModelConfiguration?> GetModelFromDiscoveryAsync(string modelName)
         {
             if (_availableModels.TryGetValue(modelName, out var model))

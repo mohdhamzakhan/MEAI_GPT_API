@@ -9,5 +9,6 @@ namespace MEAI_GPT_API.Service.Interface
         Task<List<ModelConfiguration>> GetEmbeddingModelsAsync();
         Task<List<ModelConfiguration>> GetGenerationModelsAsync();
         Task<bool> ValidateModelAsync(string modelName);
+        Task<bool> IsModelActuallyAvailableAsync(string modelName);
     }
 }
