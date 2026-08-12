@@ -3418,16 +3418,35 @@ Answer directly without introducing yourself."
         private static readonly ConcurrentDictionary<string, Regex> _sectionPatternCache = new();
 
         private bool IsExactSectionMatch(string lowerText, string sectionNumber) { if (string.IsNullOrWhiteSpace(sectionNumber)) return false; var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num => { var escaped = Regex.Escape(num); return new Regex($@"\b(?:section|clause|part)\.?\s*{escaped}(?:\.\d+)*\b" + $@"|(?:^|\n)\s*{escaped}\.(?:\d+\.?)*\s", RegexOptions.IgnoreCase | RegexOptions.Compiled); }); return pattern.IsMatch(lowerText); }
-        private async Task<List<RelevantChunk>> SearchForSpecificSection(SectionQuery sectionQuery, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId)
+        private async Task<List<RelevantChunk>> SearchForSpecificSection(
+    SectionQuery sectionQuery, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId)
         {
-            // Create a single comprehensive search query instead of multiple
-            var combinedQuery = $"Section {sectionQuery.SectionNumber} {sectionQuery.DocumentType} " +
-                               string.Join(" ", _policyAnalysis.GetDynamicSectionTopics(sectionQuery.SectionNumber, sectionQuery.DocumentType));
+            string combinedQuery;
 
-            // Single search instead of multiple
-            var results = await PerformChromaSearch(combinedQuery, embeddingModel, maxResults * 2, plant, collectionId);
+            if (sectionQuery.IsAnnexure)
+            {
+                // Annexure topics from GetDynamicSectionTopics are meaningless here —
+                // that method is tuned for ISO-style numbered sections, not annexures.
+                // Keep the query short and literal; we rely on exact-match filtering
+                // below, not embedding precision, to find the right chunk.
+                combinedQuery = $"Annexure {sectionQuery.SectionNumber} form approval technical baseline";
+            }
+            else
+            {
+                combinedQuery = $"Section {sectionQuery.SectionNumber} {sectionQuery.DocumentType} " +
+                    string.Join(" ", _policyAnalysis.GetDynamicSectionTopics(sectionQuery.SectionNumber, sectionQuery.DocumentType));
+            }
 
-            // Filter results after retrieval
+            // Annexure mentions are often buried as one line inside a large,
+            // topically-unrelated chunk (as in your example). Cast a much wider
+            // net since we're filtering by exact text match afterward, not
+            // relying on the initial ranking to be precise.
+            var candidatePoolSize = sectionQuery.IsAnnexure
+                ? Math.Max(maxResults * 6, 40)
+                : maxResults * 2;
+
+            var results = await PerformChromaSearch(combinedQuery, embeddingModel, candidatePoolSize, plant, collectionId);
+
             return results
                 .Where(r => IsSectionContentDynamic(r.Text, r.Source, sectionQuery))
                 .OrderByDescending(r => CalculateDynamicSectionRelevance(r, sectionQuery))
@@ -3437,10 +3456,14 @@ Answer directly without introducing yourself."
         private double CalculateDynamicSectionRelevance(RelevantChunk chunk, SectionQuery sectionQuery)
         {
             double relevance = chunk.Similarity; var lowerText = chunk.Text.ToLowerInvariant(); var lowerSource = chunk.Source.ToLowerInvariant();             // Boost for exact section match
-            if (IsExactSectionMatch(lowerText, sectionQuery.SectionNumber))
+            if (sectionQuery.IsAnnexure && IsExactAnnexureMatch(lowerText, sectionQuery.SectionNumber))
             {
                 relevance += 0.4;
-            }             // Boost for document type match
+            }
+            else if (!sectionQuery.IsAnnexure && IsExactSectionMatch(lowerText, sectionQuery.SectionNumber))
+            {
+                relevance += 0.4;
+            }          // Boost for document type match
             if (!string.IsNullOrEmpty(sectionQuery.DocumentType)) { if (lowerSource.Contains(sectionQuery.DocumentType.ToLowerInvariant())) { relevance += 0.3; } }
             // Boost for expected section content
             var expectedTopics = _policyAnalysis.GetDynamicSectionTopics(sectionQuery.SectionNumber, sectionQuery.DocumentType); var topicMatches = expectedTopics.Count(topic => lowerText.Contains(topic.ToLowerInvariant())); if (topicMatches > 0)
