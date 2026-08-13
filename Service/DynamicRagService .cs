@@ -3755,7 +3755,7 @@ namespace MEAI_GPT_API.Services
 
                 if (hintWords.Any())
                 {
-                    var matchedWords = hintWords.Count(w => sourceFileName.Contains(w));
+                    var matchedWords = hintWords.Count(w => sourceFileName.Contains(w) || lowerText.Contains(w));
                     var matchRatio = (double)matchedWords / hintWords.Count;
 
                     // ✅ FIX: the old "general"/"centralized" escape hatch let any
