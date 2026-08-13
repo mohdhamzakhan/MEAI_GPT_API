@@ -9,6 +9,8 @@
         public string DocumentType { get; set; } = "";
         public string OriginalQuery { get; set; } = "";
         public bool IsAnnexure {  get; set; } = false;
+        public bool HasExplicitDocumentHint {  get; set; } = false;
+
     }
     // Supporting classes for diagnostics
     public class DiagnosticInfo

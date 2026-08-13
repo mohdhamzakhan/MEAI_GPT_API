@@ -229,7 +229,8 @@ namespace MEAI_GPT_API.Services
             foreach (var plant in _plants.Plants.Keys)
             {
                 var plantOrgPath = Path.Combine(
-                  _chromaOptions.ContextFolder,$"organization-{plant.ToLower()}.txt"
+                  _chromaOptions.ContextFolder,
+                  $"organization-{plant.ToLower()}.txt"
                 );
 
                 if (!File.Exists(plantOrgPath))
@@ -3706,33 +3707,97 @@ namespace MEAI_GPT_API.Services
             var lowerText = text.ToLowerInvariant();
             var sectionNumber = sectionQuery.SectionNumber;
             var documentType = sectionQuery.DocumentType;
+            var sourceFileName = Path.GetFileNameWithoutExtension(source).ToLowerInvariant();
 
-            // Check for direct references — route to the right matcher based on query type
-            if (sectionQuery.IsAnnexure)
-            {
-                if (IsExactAnnexureMatch(lowerText, sectionNumber)) return true;
-            }
-            else
-            {
-                if (IsExactSectionMatch(lowerText, sectionNumber)) return true;
-            }
+            // ✅ FIX: document alignment must be checked BEFORE the exact-match
+            // short-circuit below, not after. Previously an exact "Annexure N"
+            // (or "Section N") text match returned true immediately regardless
+            // of which document it came from — so when two different documents
+            // both legitimately contain "Annexure 2" (e.g. an ISMS Technical
+            // baseline and an unrelated ISMS General Baseline document), both
+            // leaked into the answer even when the user named one specifically.
+            bool documentAligns = true;
 
-            // Check document type alignment
             if (!string.IsNullOrEmpty(documentType))
             {
-                var sourceFileName = Path.GetFileNameWithoutExtension(source).ToLowerInvariant();
-                if (!sourceFileName.Contains(documentType.ToLowerInvariant()) &&
-                  !sourceFileName.Contains("general") &&
-                  !sourceFileName.Contains("centralized"))
+                // ✅ FIX: was a single Contains() check on the whole documentType
+                // string, which only works for single-word hints like "ISMS".
+                // Multi-word hints captured from phrasing like "annexure 2 of
+                // ISMS Technical" ("isms technical") need word-overlap matching
+                // instead — filenames rarely contain the exact phrase
+                // contiguously (e.g. "ISMS Policy(Sanand Plant)_Technical_Rev04").
+                // For a single-word hint this reduces to the old behavior.
+                var stopWords = new HashSet<string> {
+          "policy",
+          "the",
+          "of",
+          "a",
+          "an",
+          "for",
+          "annexure",
+          "annex",
+          "section",
+          "clause",
+          "what",
+          "is",
+          "in",
+          "this",
+          "that",
+          "no"
+        };
+                var hintWords = documentType
+                  .ToLowerInvariant()
+                  .Split(new[] {
+            ' '
+                  }, StringSplitOptions.RemoveEmptyEntries)
+                  .Where(w => w.Length > 2 && !stopWords.Contains(w))
+                  .ToList();
+
+                if (hintWords.Any())
                 {
-                    return false;
+                    var matchedWords = hintWords.Count(w => sourceFileName.Contains(w));
+                    var matchRatio = (double)matchedWords / hintWords.Count;
+
+                    // ✅ FIX: the old "general"/"centralized" escape hatch let any
+                    // document whose FILENAME happens to contain the substring
+                    // "general" bypass this check entirely. That was intended for
+                    // genuinely general/shared documents, but collided with a
+                    // document literally named "...General Baseline..." — a
+                    // document-variant name, not the "applies generally" concept
+                    // the escape hatch was meant for. Only allow that escape when
+                    // the user gave a loose category hint (e.g. plain "ISMS"), not
+                    // when they explicitly named a specific document.
+                    var allowGeneralEscape = !(sectionQuery.IsAnnexure && sectionQuery.HasExplicitDocumentHint);
+                    var isGeneralOrCentralized = sourceFileName.Contains("general") || sourceFileName.Contains("centralized");
+
+                    // ✅ FIX: an explicit, user-named hint requires full word
+                    // overlap — a 50% threshold still let a document matching
+                    // only "isms" out of "isms technical" through as "aligned",
+                    // which is exactly the wrong-document leak reported. A loose
+                    // category hint (no explicit document named) keeps the more
+                    // forgiving 50% threshold, matching prior behavior.
+                    var requiredRatio = (sectionQuery.IsAnnexure && sectionQuery.HasExplicitDocumentHint) ? 1.0 : 0.5;
+
+                    if (matchRatio < requiredRatio && !(allowGeneralEscape && isGeneralOrCentralized))
+                    {
+                        documentAligns = false;
+                    }
                 }
             }
 
-            // Annexures don't have meaningful "expected topics" the way sections do —
-            // an exact-match miss above means this chunk isn't the one being asked for.
-            if (sectionQuery.IsAnnexure)
+            if (!documentAligns)
                 return false;
+
+            // Check for direct references
+            if (sectionQuery.IsAnnexure)
+            {
+                // Annexures don't have meaningful "expected topics" the way
+                // sections do — an exact-match miss means this chunk isn't
+                // the one being asked for.
+                return IsExactAnnexureMatch(lowerText, sectionNumber);
+            }
+
+            if (IsExactSectionMatch(lowerText, sectionNumber)) return true;
 
             // Check for section-specific content based on policy type
             var expectedTopics = _policyAnalysis.GetDynamicSectionTopics(sectionNumber, documentType);
