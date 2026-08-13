@@ -44,6 +44,12 @@ builder.Services.AddCors(options =>
 builder.Services.Configure<ChromaDbOptions>(
     builder.Configuration.GetSection("ChromaDB"));
 
+// ✅ NEW: annexure-to-server-link resolution (disabled by default until
+// AnnexureLinks:Enabled + AnnexureLinks:BaseServerPath are set in appsettings.json)
+builder.Services.Configure<AnnexureLinkOptions>(
+    builder.Configuration.GetSection("AnnexureLinks"));
+builder.Services.AddSingleton<MEAI_GPT_API.Service.AnnexureLinkService>();
+
 builder.Services.AddHttpClient("ChromaDB", client =>
 {
     var baseUrl = builder.Configuration["ChromaDB:BaseUrl"] ?? "http://localhost:8000";

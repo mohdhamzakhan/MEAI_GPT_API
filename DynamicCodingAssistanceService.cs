@@ -387,7 +387,24 @@ public partial class DynamicCodingAssistanceService
 
             // Get required models
             var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultGenerationModel);
-            var generationModel = await _modelManager.GetModelAsync(_config.DefaultGenerationModel!);
+
+            // ✅ NEW: use a dedicated coding model (e.g. codestral:latest) if
+            // configured, instead of always reusing the general policy-QA
+            // generation model. Falls back to DefaultGenerationModel if
+            // DefaultCodingModel isn't set or isn't available.
+            var codingModelName = !string.IsNullOrWhiteSpace(_config.DefaultCodingModel)
+                ? _config.DefaultCodingModel
+                : _config.DefaultGenerationModel;
+
+            var generationModel = await _modelManager.GetModelAsync(codingModelName!);
+
+            if (generationModel == null && !string.IsNullOrWhiteSpace(_config.DefaultCodingModel))
+            {
+                _logger.LogWarning(
+                    "Configured coding model '{Model}' not available, falling back to default generation model",
+                    _config.DefaultCodingModel);
+                generationModel = await _modelManager.GetModelAsync(_config.DefaultGenerationModel!);
+            }
 
             if (embeddingModel == null || generationModel == null)
             {

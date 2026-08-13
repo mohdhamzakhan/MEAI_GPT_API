@@ -79,6 +79,7 @@ namespace MEAI_GPT_API.Services
         private readonly OllamaHttpClient _ollamaClient;
         private readonly ConversationHistoryService _historyService;
         private readonly AppreciatedAnswerStore _appreciatedAnswerStore;
+        private readonly AnnexureLinkService _annexureLinkService;
         // For Agentic AI
         private readonly IServiceProvider _serviceProvider;
         private readonly AgentPlanner _agentPlanner;
@@ -119,7 +120,8 @@ namespace MEAI_GPT_API.Services
           SelfVerifier selfVerifier,
           AgentDecisionLogger agentLogger,
           ConversationHistoryService historyService,
-          AppreciatedAnswerStore appreciatedAnswerStore)
+          AppreciatedAnswerStore appreciatedAnswerStore,
+          AnnexureLinkService annexureLinkService)
         {
             _modelManager = modelManager;
             _collectionManager = collectionManager;
@@ -147,6 +149,7 @@ namespace MEAI_GPT_API.Services
             _ollamaClient = ollamaClient;
             _historyService = historyService;
             _appreciatedAnswerStore = appreciatedAnswerStore;
+            _annexureLinkService = annexureLinkService;
 
             InitializeSessionCleanup();
             _helperMethods = helperMethods;
@@ -1528,36 +1531,25 @@ namespace MEAI_GPT_API.Services
             });
 
             // OPTIMIZED: Request configuration
+            // ✅ NEW: merge per-model config (Temperature / ModelOptions from
+            // appsettings.json) over these defaults, same as the streaming path.
+            var options = BuildGenerationOptions(generationModel, new Dictionary<string, object>
+            {
+                ["num_ctx"] = 32768,
+                ["num_predict"] = 8192,
+                ["top_p"] = 0.9,
+                ["repeat_penalty"] = 1.05,
+                ["stop"] = new string[] { }
+            });
+
             var requestData = new
             {
                 model = generationModel.Name,
                 messages,
-                temperature = 0.1,
+                temperature = options.TryGetValue("temperature", out
+                  var t) ? t : 0.1,
                 stream = false,
-                options = new Dictionary<string, object> {
-            //{ "num_ctx", 16384  },       // ✅ Increased from 4000
-            //{ "num_predict", 16000 },   // ✅ Increased from 2000
-            {
-              "num_ctx",
-              32768
-            }, // ← was 16384
-            {
-              "num_predict",
-              8192
-            }, // ← was 16000
-            {
-              "top_p",
-              0.9
-            },
-            {
-              "repeat_penalty",
-              1.05
-            },
-            {
-              "stop",
-              new string[] {}
-            }
-          }
+                options
             };
 
             try
@@ -2001,6 +1993,98 @@ namespace MEAI_GPT_API.Services
         /// 'using' inside this method so it lives exactly as long as the
         /// stream reader.
         /// </summary>
+        /// <summary>
+        /// Builds the Ollama "options" payload for a generation call, starting
+        /// from the existing hardcoded defaults and overlaying any per-model
+        /// overrides from appsettings.json (ModelConfigurations:{model}:Temperature
+        /// / ModelOptions). This is what makes selecting a different generation
+        /// model (e.g. qwen3.5:27b with its recommended presence_penalty/top_k)
+        /// actually take effect — previously every call site used the same
+        /// hardcoded options regardless of which model was selected, so a model
+        /// tuned for different sampling settings silently ran with the wrong ones.
+        /// </summary>
+        private Dictionary<string, object> BuildGenerationOptions(
+          ModelConfiguration? config, Dictionary<string, object> defaults)
+        {
+            var options = new Dictionary<string,
+              object>(defaults);
+
+            if (config == null)
+                return options;
+
+            // Baseline from the model's top-level Temperature field.
+            options["temperature"] = config.Temperature;
+
+            // ModelOptions entries (num_ctx, top_p, top_k, presence_penalty,
+            // repeat_penalty, and/or an explicit "temperature") take final
+            // precedence when present.
+            if (config.ModelOptions != null)
+            {
+                foreach (var kv in config.ModelOptions)
+                {
+                    options[kv.Key] = CoerceConfigValue(kv.Value);
+                }
+            }
+
+            return options;
+        }
+
+        private async Task<Dictionary<string, object>> BuildGenerationOptionsAsync(
+          string modelName, Dictionary<string, object> defaults)
+        {
+            ModelConfiguration? config = null;
+            try
+            {
+                config = await _modelManager.GetModelAsync(modelName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to load per-model generation options for {Model}; using defaults", modelName);
+            }
+
+            return BuildGenerationOptions(config, defaults);
+        }
+
+        /// <summary>
+        /// Configuration binding for Dictionary&lt;string, object&gt; can
+        /// materialize JSON numbers/booleans as plain strings (or as
+        /// JsonElement, depending on the binding path taken), since the JSON
+        /// config provider stores all leaf values as strings internally. If
+        /// left as-is, that would send Ollama e.g. "temperature": "1" (a JSON
+        /// string) instead of "temperature": 1 (a number), which some models/
+        /// endpoints reject or silently ignore. This normalizes back to real
+        /// numeric/bool types regardless of which representation was produced.
+        /// </summary>
+        private static object CoerceConfigValue(object value)
+        {
+            if (value is System.Text.Json.JsonElement je)
+            {
+                return je.ValueKind
+                switch
+                {
+                    System.Text.Json.JsonValueKind.Number => je.TryGetInt64(out
+                        var l) ? l : je.GetDouble(),
+                    System.Text.Json.JsonValueKind.True => true,
+                    System.Text.Json.JsonValueKind.False => false,
+                    System.Text.Json.JsonValueKind.String => je.GetString() ?? "",
+                    _ => je.ToString()
+                };
+            }
+
+            if (value is string s)
+            {
+                if (long.TryParse(s, out
+                    var l2)) return l2;
+                if (double.TryParse(s, out
+                    var d)) return d;
+                if (bool.TryParse(s, out
+                    var b)) return b;
+                return s;
+            }
+
+            return value; // already a proper numeric/bool type
+        }
+
         public async IAsyncEnumerable<string> StreamGenerateWithHistoryAsync(
           string model,
           string systemPrompt,
@@ -2012,21 +2096,24 @@ namespace MEAI_GPT_API.Services
             // FIX 5 — Build full message list WITH history
             var messages = BuildMessageList(systemPrompt, history, userQuestion);
 
+            // ✅ NEW: merge per-model config (Temperature / ModelOptions from
+            // appsettings.json) over these defaults, so selecting a different
+            // generation model actually changes its sampling behavior.
+            var options = await BuildGenerationOptionsAsync(model, new Dictionary<string, object>
+            {
+                ["temperature"] = 0.7,
+                ["num_predict"] = 8192,
+                ["top_p"] = 0.9,
+                ["num_ctx"] = 32768,
+                ["repeat_penalty"] = 1.1
+            });
+
             var requestBody = new
             {
                 model,
                 messages,
                 stream = true,
-                options = new
-                {
-                    temperature = 0.7,
-                    //num_predict = 16000,
-                    num_predict = 8192, // ← was 16000
-                    top_p = 0.9,
-                    //num_ctx = 16384,
-                    num_ctx = 32768, // ← was 16384
-                    repeat_penalty = 1.1
-                }
+                options
             };
 
             // FIX 3 — 'using' keeps response alive until the iterator is done
@@ -3319,6 +3406,29 @@ namespace MEAI_GPT_API.Services
                 // RelevanceScore can exceed 1.0 — that is intentional and fine
                 // because it is used only for ordering, never for threshold logic.
 
+                // ✅ NEW: resolve each referenced annexure number to an actual
+                // file on the configured server. policyName uses the exact
+                // source document filename (no extension), matching the
+                // confirmed server folder convention. No-op / returns nulls
+                // if AnnexureLinks:Enabled is false in appsettings.json.
+                Dictionary<string, string>? annexureLinks = null;
+                if (!string.IsNullOrEmpty(annexureRefsMeta))
+                {
+                    var policyName = Path.GetFileNameWithoutExtension(sourceFile);
+                    var resolved = new Dictionary<string,
+                      string>();
+
+                    foreach (var num in annexureRefsMeta.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        var link = _annexureLinkService.ResolveAnnexureLink(policyName, num);
+                        if (link != null)
+                            resolved[num] = link;
+                    }
+
+                    if (resolved.Any())
+                        annexureLinks = resolved;
+                }
+
                 relevantChunks.Add(new RelevantChunk
                 {
                     Text = documentText,
@@ -3331,6 +3441,7 @@ namespace MEAI_GPT_API.Services
                     SectionTitle = metadata.TryGetProperty("section_title", out
                       var stProp) ? stProp.GetString() : null,
                     AnnexureRefs = string.IsNullOrEmpty(annexureRefsMeta) ? null : annexureRefsMeta,
+                    AnnexureLinks = annexureLinks,
                 });
             }
 
@@ -3755,6 +3866,16 @@ namespace MEAI_GPT_API.Services
 
                 if (hintWords.Any())
                 {
+                    // ✅ FIX: this previously only checked the FILENAME for hint
+                    // words. That works when the document variant name is part
+                    // of the filename (e.g. "...General Baseline V2.docx"), but
+                    // fails when the discriminating phrase is actually the
+                    // annexure's own label written inside the document content
+                    // instead — e.g. "ISMS Policy(Sanand Plant)_Technical_Rev04"
+                    // contains "technical" but not "baseline", even though the
+                    // chunk's own text literally says "Annexure 2 - Technical
+                    // Baseline". Checking chunk text too lets the real content
+                    // carry the signal that the filename alone doesn't.
                     var matchedWords = hintWords.Count(w => sourceFileName.Contains(w) || lowerText.Contains(w));
                     var matchRatio = (double)matchedWords / hintWords.Count;
 
@@ -6965,6 +7086,26 @@ namespace MEAI_GPT_API.Services
                     Type = "sources",
                     Sources = finalChunks.Select(c => c.Source).Distinct().ToList()
                 };
+
+                // ✅ NEW: deterministic, code-built annexure links (never
+                // LLM-generated) so the frontend can render real, clickable
+                // references. No-op dictionary stays empty/omitted if
+                // AnnexureLinks:Enabled is false in appsettings.json.
+                var combinedAnnexureLinks = finalChunks
+                  .Where(c => c.AnnexureLinks != null)
+                  .SelectMany(c => c.AnnexureLinks!)
+                  .GroupBy(kv => kv.Key)
+                  .ToDictionary(g => g.Key, g => g.First().Value);
+
+                if (combinedAnnexureLinks.Any())
+                {
+                    yield
+                    return new StreamChunk
+                    {
+                        Type = "links",
+                        AnnexureLinks = combinedAnnexureLinks
+                    };
+                }
             }
 
             // ============================
@@ -7898,6 +8039,22 @@ namespace MEAI_GPT_API.Services
                     Type = "sources",
                     Sources = chunks.Select(c => c.Source).Distinct().ToList()
                 };
+
+                var combinedAnnexureLinks = chunks
+                  .Where(c => c.AnnexureLinks != null)
+                  .SelectMany(c => c.AnnexureLinks!)
+                  .GroupBy(kv => kv.Key)
+                  .ToDictionary(g => g.Key, g => g.First().Value);
+
+                if (combinedAnnexureLinks.Any())
+                {
+                    yield
+                    return new StreamChunk
+                    {
+                        Type = "links",
+                        AnnexureLinks = combinedAnnexureLinks
+                    };
+                }
             }
 
             yield
@@ -9283,6 +9440,21 @@ namespace MEAI_GPT_API.Services
                 get;
                 set;
             } // Added for HTML compatibility
+
+            /// <summary>
+            /// Resolved server links for any annexures referenced by the
+            /// chunks used to answer this query, keyed by annexure number
+            /// (e.g. "2" -> "\\SERVERNAME\policies\...\Annexure 2.pdf").
+            /// Built deterministically from ChromaDB metadata + a filesystem
+            /// lookup — never generated by the LLM — so the frontend can
+            /// render a real, clickable reference without hallucination risk.
+            /// Only populated on a "links" chunk, sent right after "sources".
+            /// </summary>
+            public Dictionary<string, string>? AnnexureLinks
+            {
+                get;
+                set;
+            }
         }
 
         public class ResponseGenerationResult

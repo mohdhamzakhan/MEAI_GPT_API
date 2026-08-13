@@ -4,6 +4,7 @@
     {
         public string DefaultGenerationModel { get; set; } = string.Empty;
         public string DefaultEmbeddingModel { get; set; } = string.Empty;
+        public string DefaultCodingModel { get; set; } = string.Empty;
         public string VerifierModel { get; set; } = string.Empty;
         public bool AutoDiscoverModels { get; set; } = true;
         public int ModelDiscoveryTimeoutMs { get; set; } = 30000;

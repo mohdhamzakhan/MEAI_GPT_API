@@ -29,5 +29,15 @@
         public string? SectionNumber { get; set; }
         public string? SectionTitle { get; set; }
         public string? AnnexureRefs { get; set; } // comma-delimited annexure numbers found in this chunk, if any
+        /// <summary>
+        /// Resolved server links for each annexure number referenced in this
+        /// chunk, keyed by annexure number (e.g. "2" -> "\\SERVERNAME\policies\
+        /// ISMS Policy..._Technical_Rev04\Annexure 2.pdf"). Populated by
+        /// AnnexureLinkService, which looks up the actual file on disk since
+        /// the extension (pdf/doc/docx/xls/xlsx) isn't known in advance.
+        /// Null/empty if the feature is disabled, the file wasn't found, or
+        /// the server path isn't reachable — never a guessed path.
+        /// </summary>
+        public Dictionary<string, string>? AnnexureLinks { get; set; }
     }
 }
