@@ -44,12 +44,6 @@ builder.Services.AddCors(options =>
 builder.Services.Configure<ChromaDbOptions>(
     builder.Configuration.GetSection("ChromaDB"));
 
-// ✅ NEW: annexure-to-server-link resolution (disabled by default until
-// AnnexureLinks:Enabled + AnnexureLinks:BaseServerPath are set in appsettings.json)
-builder.Services.Configure<AnnexureLinkOptions>(
-    builder.Configuration.GetSection("AnnexureLinks"));
-builder.Services.AddSingleton<MEAI_GPT_API.Service.AnnexureLinkService>();
-
 builder.Services.AddHttpClient("ChromaDB", client =>
 {
     var baseUrl = builder.Configuration["ChromaDB:BaseUrl"] ?? "http://localhost:8000";
@@ -127,6 +121,16 @@ builder.Services.AddOpenTelemetry()
 
 builder.Services.Configure<ChromaDbOptions>(
     builder.Configuration.GetSection("ChromaDB"));
+
+// ✅ NEW: access control for gated features (e.g. who can submit corrections)
+builder.Services.Configure<AccessControlOptions>(
+    builder.Configuration.GetSection("AccessControl"));
+
+// ✅ NEW: annexure-to-server-link resolution (disabled by default until
+// AnnexureLinks:Enabled + AnnexureLinks:BaseServerPath are set in appsettings.json)
+builder.Services.Configure<AnnexureLinkOptions>(
+    builder.Configuration.GetSection("AnnexureLinks"));
+builder.Services.AddSingleton<MEAI_GPT_API.Service.AnnexureLinkService>();
 
 builder.Services.AddDbContextFactory<ConversationDbContext>(options =>
     options.UseSqlite("Data Source=conversations.db"));
@@ -245,20 +249,20 @@ builder.Services.AddSingleton<DynamicCollectionManager>(provider =>
 if (Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development")
 {
     builder.Host.UseSerilog((context, config) =>
-{
-    config
-        .MinimumLevel.Information()
-        .WriteTo.Console();
-});
+    {
+        config
+            .MinimumLevel.Information()
+            .WriteTo.Console();
+    });
 }
 else
 {
     builder.Host.UseSerilog((context, config) =>
-{
-    config
-        .MinimumLevel.Information()
-        .WriteTo.File("logs/meai_rag_api.log", rollingInterval: RollingInterval.Day);
-});
+    {
+        config
+            .MinimumLevel.Information()
+            .WriteTo.File("logs/meai_rag_api.log", rollingInterval: RollingInterval.Day);
+    });
 }
 
 

@@ -26,6 +26,7 @@ namespace MEAI_GPT_API.Controller
         private readonly DynamicRAGInitializationService _initService;
         private readonly IConversationStorageService _conversationStorage;
         private readonly TranslationService _translationService;
+        private readonly AccessControlOptions _accessControl;
 
 
         [ActivatorUtilitiesConstructor]
@@ -36,7 +37,8 @@ namespace MEAI_GPT_API.Controller
         DynamicRAGInitializationService initService,
          IConversationStorageService conversationStorage,
          TranslationService translationService,
-        ILogger<RagController> logger)
+        ILogger<RagController> logger,
+        Microsoft.Extensions.Options.IOptions<AccessControlOptions> accessControl)
         {
             _ragService = ragService;
             _codingService = codingService;
@@ -45,6 +47,7 @@ namespace MEAI_GPT_API.Controller
             _initService = initService;
             _conversationStorage = conversationStorage;
             _translationService = translationService;
+            _accessControl = accessControl.Value;
         }
         [HttpPost("query")]
         //public async Task<IActionResult> Query([FromBody] QueryRequest request, [FromServices] IBackgroundTaskQueue taskQueue)
@@ -567,7 +570,7 @@ namespace MEAI_GPT_API.Controller
             public CodingAssistanceResponse? Response { get; set; }
         }
 
-     
+
 
         private async IAsyncEnumerable<string> ProcessQueryStreamAsync(QueryRequest request)
         {
@@ -898,6 +901,26 @@ namespace MEAI_GPT_API.Controller
             if (string.IsNullOrWhiteSpace(request.Question) || string.IsNullOrWhiteSpace(request.CorrectAnswer))
                 return BadRequest("Question and correct answer are required");
 
+            // ✅ NEW: corrections are restricted — a bad correction poisons
+            // future answers for everyone (ApplyCorrectionAsync feeds into
+            // the corrections cache used to short-circuit future queries),
+            // so this can't be left open to any caller. Checked server-side,
+            // not just hidden in the UI — a hidden button is not access control.
+            if (string.IsNullOrWhiteSpace(request.UserId))
+            {
+                _logger.LogWarning("Correction submission rejected: no UserId provided");
+                return Forbid();
+            }
+
+            var allowed = _accessControl.CorrectionAllowedUsers
+                .Any(u => string.Equals(u, request.UserId, StringComparison.OrdinalIgnoreCase));
+
+            if (!allowed)
+            {
+                _logger.LogWarning("Correction submission rejected: user '{User}' is not on the allowlist", request.UserId);
+                return Forbid();
+            }
+
             try
             {
                 await _ragService.ApplyCorrectionAsync(request.sessionId, request.Question, request.CorrectAnswer, request.model);
@@ -1119,5 +1142,3 @@ public class CodingQueryRequest
     public string? Difficulty { get; set; } = "intermediate";
     public string? UserId { get; set; }
 }
-
-
