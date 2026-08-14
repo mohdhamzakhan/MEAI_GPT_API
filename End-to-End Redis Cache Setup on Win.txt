@@ -1,0 +1,89 @@
+End-to-End Redis Cache Setup on Windows 11 (WSL)
+This document outlines the complete process for installing Redis via Windows Subsystem for Linux (Ubuntu), optimizing it as an LRU cache, and configuring a Windows Port Proxy to expose it on a specific host IP (10.235.20.91).
+
+Phase 1: Installation
+Open your Ubuntu terminal and execute the following commands to install the Redis server:
+
+Bash
+# Update the package lists
+sudo apt update
+
+# Install the Redis server
+sudo apt install redis-server -y
+Phase 2: Configuration (Cache & Network)
+By default, Redis operates as a strict in-memory database bound only to localhost. We must configure it to drop old data when full and accept connections from the Windows proxy.
+
+Open the configuration file:
+
+Bash
+sudo nano /etc/redis/redis.conf
+Make the following four modifications:
+
+Allow External Connections: Search for bind 127.0.0.1 and change it to listen to all internal WSL network adapters.
+
+Plaintext
+bind 0.0.0.0
+Disable Protected Mode: Search for protected-mode yes and disable it so forwarded traffic isn't dropped.
+
+Plaintext
+protected-mode no
+Set a Memory Limit: Search for maxmemory <bytes> and uncomment/add a limit appropriate for your server.
+
+Plaintext
+maxmemory 256mb
+Set the Cache Eviction Policy: Search for maxmemory-policy and change it to drop the least recently used keys when the memory limit is reached.
+
+Plaintext
+maxmemory-policy allkeys-lru
+Save (Ctrl + O, Enter) and exit (Ctrl + X).
+
+Phase 3: Start the Service & Get the Internal IP
+Restart Redis to apply the new configurations:
+
+Bash
+sudo service redis-server restart
+Next, retrieve the internal IP address assigned to your WSL virtual machine. You will need this for the Windows proxy.
+
+Bash
+hostname -I
+(For this setup, the WSL IP is 172.30.197.228)
+
+Phase 4: Windows Port Proxy & Firewall Configuration
+Because WSL runs in an isolated virtual machine, Windows needs explicit instructions on how to route traffic from your host IP (10.235.20.91) into the WSL IP (172.30.197.228).
+
+Open Windows PowerShell as Administrator and run the following commands:
+
+1. Start the IP Helper Service:
+
+PowerShell
+Start-Service iphlpsvc
+Set-Service iphlpsvc -StartupType Automatic
+2. Create the Port Proxy:
+
+PowerShell
+netsh interface portproxy add v4tov4 listenport=6379 listenaddress=10.235.20.91 connectport=6379 connectaddress=172.30.197.228
+3. Open the Windows Firewall:
+
+PowerShell
+New-NetFirewallRule -DisplayName "Redis WSL Proxy" -Direction Inbound -LocalPort 6379 -Protocol TCP -Action Allow
+Phase 5: Verification & Application Integration
+Verify that Windows is successfully routing traffic to the cache by testing the connection in PowerShell:
+
+PowerShell
+Test-NetConnection -ComputerName 10.235.20.91 -Port 6379
+(If successful, this will return TcpTestSucceeded : True)
+
+Connecting via .NET (C#)
+Your cache is now ready to be consumed by your backend applications. Install the StackExchange.Redis NuGet package and use the host IP for your connection string:
+
+C#
+using StackExchange.Redis;
+
+// Connect to the proxy IP we just configured
+ConnectionMultiplexer redis = ConnectionMultiplexer.Connect("10.235.20.91:6379");
+IDatabase cache = redis.GetDatabase();
+
+// Example usage
+await cache.StringSetAsync("test_key", "Hello from Redis!", TimeSpan.FromMinutes(10));
+string value = await cache.StringGetAsync("test_key");
+Note: Because WSL dynamically assigns its internal IP address (e.g., 172.30.197.228), that internal IP may change if you restart your computer. If the connection fails after a reboot, run hostname -I in Ubuntu, delete the old proxy rule, and create a new one pointing to the new WSL IP.
