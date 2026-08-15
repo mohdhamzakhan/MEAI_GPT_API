@@ -4,8 +4,8 @@
     {
         public string Question { get; set; } = "";
         public string CorrectAnswer { get; set; } = "";
-        public string model { get; set; }
-        public string sessionId { get; set; }
+        public string model { get; set; } = "";
+        public string sessionId { get; set; } = "";
         /// <summary>
         /// Username of whoever is submitting this feedback. Required for
         /// corrections (checked against AccessControl:CorrectionAllowedUsers

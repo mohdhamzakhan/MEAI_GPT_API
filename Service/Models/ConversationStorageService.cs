@@ -439,7 +439,10 @@ namespace MEAI_GPT_API.Services
                 {
                     Question = e.Question,
                     Answer = e.Answer,
-                    CreatedAt = e.CreatedAt
+                    CreatedAt = e.CreatedAt,
+                    CorrectedAnswer = e.CorrectedAnswer,
+                    IsFromCorrection = e.IsFromCorrection,
+                    WasAppreciated = e.WasAppreciated
                 })
                 .ToListAsync();
 

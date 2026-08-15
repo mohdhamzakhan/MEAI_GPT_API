@@ -1122,6 +1122,10 @@ namespace MEAI_GPT_API.Controller
             public string Question { get; set; } = string.Empty;
             public string Answer { get; set; } = string.Empty;
             public DateTime CreatedAt { get; set; }
+            public string CorrectedAnswer { get; set; } = string.Empty;
+            public bool IsFromCorrection { get; set; } = false;
+            public bool WasAppreciated { get; set; } = false;
+
         }
 
 
