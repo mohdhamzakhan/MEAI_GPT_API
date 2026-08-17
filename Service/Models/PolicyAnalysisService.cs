@@ -1,5 +1,6 @@
 ﻿using MEAI_GPT_API.Models;
 using MEAI_GPT_API.Services;
+using Microsoft.Extensions.Options;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using static MEAI_GPT_API.Services.DynamicRagService;
@@ -9,9 +10,12 @@ namespace MEAI_GPT_API.Service.Models
     public class PolicyAnalysisService
     {
         private readonly ILogger<DynamicRagService> _logger;
-        public PolicyAnalysisService(ILogger<DynamicRagService> logger)
+        private readonly DynamicRAGConfiguration _config;
+
+        public PolicyAnalysisService(ILogger<DynamicRagService> logger, IOptions<DynamicRAGConfiguration> config)
         {
             _logger = logger;
+            _config = config.Value;
         }
         public bool HasSectionReference(string text)
         {
@@ -84,7 +88,12 @@ namespace MEAI_GPT_API.Service.Models
             }
 
             // Pattern 4: Just number references like "what is 5.2"
-            var match4 = Regex.Match(lowerQuery, @"(?:what\s+is\s+|tell\s+me\s+about\s+)?(?:section|clause)\s+(\d+(?:\.\d+)*)(?!\s*(?:working\s+days|days|hours|months|years)\b)");
+            // Note: "clause" intentionally NOT matched here anymore — it now
+            // flows through the generic ReferenceTypes loop below, which
+            // gives it the same document-hint capture and exact-match
+            // retrieval that Annexure already gets, instead of only the
+            // basic topic-based DocumentType detection it had before.
+            var match4 = Regex.Match(lowerQuery, @"(?:what\s+is\s+|tell\s+me\s+about\s+)?section\s+(\d+(?:\.\d+)*)(?!\s*(?:working\s+days|days|hours|months|years)\b)");
             if (match4.Success)
             {
                 return new SectionQuery
@@ -95,14 +104,50 @@ namespace MEAI_GPT_API.Service.Models
                 };
             }
 
-            var annexMatch = Regex.Match(lowerQuery, @"annex(?:ure)?\s*(?:no\.?)?\s*(\d+)");
-            if (annexMatch.Success)
+            // ✅ NEW: generic, config-driven detection for any reference type
+            // configured under DynamicRAG:ReferenceTypes in appsettings.json
+            // (e.g. Annexure, Clause, Form, Exhibit). Adding a new type there
+            // needs no code change — it automatically gets the same
+            // exact-match retrieval treatment originally built specifically
+            // for Annexure.
+            foreach (var refType in _config.ReferenceTypes ?? new List<ReferenceTypeOptions>())
             {
+                if (string.IsNullOrWhiteSpace(refType.Pattern))
+                    continue;
+
+                var refMatch = Regex.Match(lowerQuery, refType.Pattern, RegexOptions.IgnoreCase);
+                if (!refMatch.Success || refMatch.Groups.Count < 2)
+                    continue;
+
+                // Capture an explicit document-name hint from "<type> N of
+                // <hint>" phrasing, e.g. "annexure 2 of ISMS Technical" ->
+                // "isms technical". Without this, two documents that both
+                // legitimately contain the same reference number (e.g. two
+                // ISMS documents each with their own "Annexure 2") can't be
+                // told apart. Position-based rather than a rebuilt regex, so
+                // it works the same way regardless of which type matched.
+                var afterMatch = lowerQuery.Substring(refMatch.Index + refMatch.Length).TrimStart();
+                string docHint = "";
+                bool hasExplicitHint = false;
+
+                if (afterMatch.StartsWith("of "))
+                {
+                    docHint = Regex.Replace(afterMatch.Substring(3), @"\s+policy\s*$", "", RegexOptions.IgnoreCase).Trim();
+                    hasExplicitHint = !string.IsNullOrWhiteSpace(docHint);
+                }
+
+                if (!hasExplicitHint)
+                {
+                    docHint = DetectDocumentTypeFromContext(lowerQuery);
+                }
+
                 return new SectionQuery
                 {
-                    SectionNumber = annexMatch.Groups[1].Value,
-                    DocumentType = "",
-                    IsAnnexure = true   // add this flag to SectionQuery
+                    SectionNumber = refMatch.Groups[1].Value,
+                    DocumentType = docHint,
+                    ReferenceType = refType.Name,
+                    OriginalQuery = query,
+                    HasExplicitDocumentHint = hasExplicitHint
                 };
             }
 

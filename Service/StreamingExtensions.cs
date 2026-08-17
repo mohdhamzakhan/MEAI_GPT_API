@@ -10,6 +10,7 @@
         public string OriginalQuery { get; set; } = "";
         public bool IsAnnexure {  get; set; } = false;
         public bool HasExplicitDocumentHint {  get; set; } = false;
+        public string ReferenceType { get; set; } = "Section";
 
     }
     // Supporting classes for diagnostics

@@ -203,14 +203,14 @@ namespace MEAI_GPT_API.Services
         private void LogMetric(string metric)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_metricsFile)!);
-            File.AppendAllText(_metricsFile, $ "{DateTime.Now:O} | {metric}{Environment.NewLine}");
+            File.AppendAllText(_metricsFile, $"{DateTime.Now:O} | {metric}{Environment.NewLine}");
         }
         private void EnsureAbbreviationContext()
         {
             var abbreviationsPath = Path.Combine(_chromaOptions.ContextFolder, "abbreviations.txt");
             if (!File.Exists(abbreviationsPath))
             {
-                var abbreviationContent = @ "HR Policy Abbreviations:
+                var abbreviationContent = @"HR Policy Abbreviations:
               CL = Casual Leave
         SL = Sick Leave
         COFF = Compensatory Off
@@ -221,7 +221,8 @@ namespace MEAI_GPT_API.Services
 
         These abbreviations are standard across all MEAI HR policies and should be interpreted consistently.
               ";
-      
+
+
         File.WriteAllText(abbreviationsPath, abbreviationContent);
                 _logger.LogInformation("Created abbreviations context file");
             }
@@ -233,20 +234,22 @@ namespace MEAI_GPT_API.Services
             {
                 var plantOrgPath = Path.Combine(
                   _chromaOptions.ContextFolder,
-                  $ "organization-{plant.ToLower()}.txt"
+                  $"organization-{plant.ToLower()}.txt"
                 );
 
                 if (!File.Exists(plantOrgPath))
                 {
-                    var plantOrgContent = $ @ "MEAI {plant} Plant - Organization Details
-        
+                    var plantOrgContent = $@"MEAI {plant} Plant - Organization Details
+
+
           These are the fixed organizational details
           for {
                             plant
           }
                     plant.
                   ";
-        
+
+
           File.WriteAllText(plantOrgPath, plantOrgContent);
                     _logger.LogInformation($"Created organization context file for {plant}");
                 }
@@ -352,35 +355,38 @@ namespace MEAI_GPT_API.Services
                 _logger.LogInformation($"📁 Found {centralizedFiles.Count()} centralized policy files");
             }
 
-            // ✅ NEW: Technical documents — plant-agnostic, visible to every
-            // plant the same way Centralized is. Use this for content that
-            // isn't tied to any specific plant (manuals, methodology docs,
-            // engineering references, etc).
-            var technicalPath = Path.Combine(_chromaOptions.PolicyFolder, "Technical");
-            if (Directory.Exists(technicalPath))
+            // ✅ NEW: any additional folder listed in appsettings.json under
+            // DynamicRAG:AdditionalDocumentSources gets picked up here
+            // automatically — no code change needed to add a new source.
+            // If RestrictedToPlants is set for a source, it's only scanned
+            // during this plant's indexing pass when `plant` is in that list;
+            // otherwise it's included for every plant (like Centralized).
+            foreach (var source in _config.AdditionalDocumentSources ?? new List<DocumentSourceOptions>())
             {
-                var technicalFiles = Directory.GetFiles(technicalPath, "*.*", SearchOption.AllDirectories)
+                if (string.IsNullOrWhiteSpace(source.Folder))
+                    continue;
+
+                var isRestricted = source.RestrictedToPlants != null && source.RestrictedToPlants.Any();
+                if (isRestricted && !source.RestrictedToPlants!.Contains(plant, StringComparer.OrdinalIgnoreCase))
+                {
+                    continue; // this plant isn't on the allowlist for this source
+                }
+
+                var sourcePath = Path.Combine(_chromaOptions.PolicyFolder, source.Folder);
+                if (!Directory.Exists(sourcePath))
+                {
+                    _logger.LogWarning($"⚠️ Configured document source folder not found: {sourcePath}");
+                    continue;
+                }
+
+                var sourceFiles = Directory.GetFiles(sourcePath, "*.*", SearchOption.AllDirectories)
                   .Where(f => _chromaOptions.SupportedExtensions.Contains(
                     Path.GetExtension(f).ToLowerInvariant()));
 
-                policyFiles.AddRange(technicalFiles);
-                _logger.LogInformation($"📁 Found {technicalFiles.Count()} technical documents");
-            }
-
-            // ✅ NEW: Customer-specific documents — also plant-agnostic and
-            // visible everywhere (no access restriction, per requirements),
-            // but tagged by customer name at index time so retrieval can
-            // boost the right customer's content when a query mentions them.
-            // Expected layout: {PolicyFolder}/Customers/{CustomerName}/file.docx
-            var customersPath = Path.Combine(_chromaOptions.PolicyFolder, "Customers");
-            if (Directory.Exists(customersPath))
-            {
-                var customerFiles = Directory.GetFiles(customersPath, "*.*", SearchOption.AllDirectories)
-                  .Where(f => _chromaOptions.SupportedExtensions.Contains(
-                    Path.GetExtension(f).ToLowerInvariant()));
-
-                policyFiles.AddRange(customerFiles);
-                _logger.LogInformation($"📁 Found {customerFiles.Count()} customer-specific documents");
+                policyFiles.AddRange(sourceFiles);
+                _logger.LogInformation(
+                    $"📁 Found {sourceFiles.Count()} files in '{source.Folder}'" +
+                    (isRestricted ? $" (restricted to: {string.Join(", ", source.RestrictedToPlants!)})" : " (all plants)"));
             }
 
             _logger.LogInformation($"📋 Total files for {plant}: {policyFiles.Count}");
@@ -419,7 +425,7 @@ namespace MEAI_GPT_API.Services
                 };
 
                 var response = await _chromaClient.PostAsJsonAsync(
-          $ "/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/get",
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/get",
                   queryData);
 
                 if (response.IsSuccessStatusCode)
@@ -446,7 +452,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, $ "Failed to check existing embeddings for {filePath}");
+                _logger.LogWarning(ex, $"Failed to check existing embeddings for {filePath}");
                 return false; // Assume doesn't exist if check fails
             }
         }
@@ -530,7 +536,7 @@ namespace MEAI_GPT_API.Services
             try
             {
                 var fileInfo = new FileInfo(filePath);
-                var cacheKey = $ "{filePath}:{model.Name}";
+                var cacheKey = $"{filePath}:{model.Name}";
 
                 // ✅ ENHANCED: Check both cache AND database for existing embeddings
                 if (processedFilesCache.TryGetValue(cacheKey, out
@@ -598,7 +604,7 @@ namespace MEAI_GPT_API.Services
                 {
                     processedFilesCache[cacheKey] = fileInfo.LastWriteTime;
                     _logger.LogInformation(
-            $ "✅ Successfully processed & CACHED {successCount}/{chunks.Count} chunks from {fileInfo.Name}");
+            $"✅ Successfully processed & CACHED {successCount}/{chunks.Count} chunks from {fileInfo.Name}");
                 }
                 else
                 {
@@ -608,7 +614,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "❌ Failed to process file {filePath}");
+                _logger.LogError(ex, $"❌ Failed to process file {filePath}");
                 processedFilesCache.TryRemove($"{filePath}:{model.Name}", out _);
                 throw;
             }
@@ -637,8 +643,8 @@ namespace MEAI_GPT_API.Services
             if (corruptionRatio > 0.01) // More than 1% corruption
             {
                 _logger.LogError(
-          $ "❌ File appears corrupted: {fileName} " +
-                  $ "({replacementCharCount} replacement characters, {corruptionRatio:P1})");
+          $"❌ File appears corrupted: {fileName} " +
+                  $"({replacementCharCount} replacement characters, {corruptionRatio:P1})");
                 return false;
             }
 
@@ -647,8 +653,8 @@ namespace MEAI_GPT_API.Services
             if (alphanumericRatio < 0.65) // Increased from 0.5
             {
                 _logger.LogWarning(
-          $ "❌ Low quality text: {fileName} " +
-                  $ "(only {alphanumericRatio:P0} alphanumeric characters)");
+          $"❌ Low quality text: {fileName} " +
+                  $"(only {alphanumericRatio:P0} alphanumeric characters)");
                 return false;
             }
 
@@ -661,12 +667,12 @@ namespace MEAI_GPT_API.Services
       }, StringSplitOptions.RemoveEmptyEntries);
             var meaningfulWords = words.Count(w =>
               w.Length >= 3 &&
-              Regex.IsMatch(w, @ "^[a-zA-Z]+$"));
+              Regex.IsMatch(w, @"^[a-zA-Z]+$"));
 
             if (meaningfulWords < 50)
             {
                 _logger.LogWarning(
-          $ "❌ Too few meaningful words ({meaningfulWords}): {fileName}");
+          $"❌ Too few meaningful words ({meaningfulWords}): {fileName}");
                 return false;
             }
 
@@ -679,8 +685,8 @@ namespace MEAI_GPT_API.Services
                 if (uniqueRatio < 0.05) // Less than 30% unique words
                 {
                     _logger.LogWarning(
-            $ "❌ Excessive repetition detected: {fileName} " +
-                      $ "(only {uniqueWords}/{words.Length} unique words, {uniqueRatio:P0})");
+            $"❌ Excessive repetition detected: {fileName} " +
+                      $"(only {uniqueWords}/{words.Length} unique words, {uniqueRatio:P0})");
                     return false;
                 }
             }
@@ -717,7 +723,7 @@ namespace MEAI_GPT_API.Services
                 };
 
                 var response = await _chromaClient.PostAsJsonAsync(
-          $ "/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/delete",
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/delete",
                   deleteRequest);
 
                 if (response.IsSuccessStatusCode)
@@ -732,7 +738,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, $ "Failed to delete old embeddings for {filePath} - continuing anyway");
+                _logger.LogWarning(ex, $"Failed to delete old embeddings for {filePath} - continuing anyway");
                 // Don't throw - allow reprocessing to continue even if deletion fails
             }
         }
@@ -768,7 +774,7 @@ namespace MEAI_GPT_API.Services
         private string CleanupContextReferences(string response)
         {
             // Replace [Context 1], [Context 2], etc. with just the source document
-            var pattern = @ "\[Context \d+\]:\s*([^\]]+\.docx)";
+            var pattern = @"\[Context \d+\]:\s*([^\]]+\.docx)";
             var cleaned = System.Text.RegularExpressions.Regex.Replace(
               response,
               pattern,
@@ -778,7 +784,7 @@ namespace MEAI_GPT_API.Services
             // Remove standalone [Context X] references
             cleaned = System.Text.RegularExpressions.Regex.Replace(
               cleaned,
-              @ "\[Context \d+\]",
+              @"\[Context \d+\]",
               ""
             );
 
@@ -1372,7 +1378,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to mark conversation as appreciated: {question}");
+                _logger.LogError(ex, $"Failed to mark conversation as appreciated: {question}");
             }
             finally
             {
@@ -1396,7 +1402,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to save correction: {question}");
+                _logger.LogError(ex, $"Failed to save correction: {question}");
             }
         }
         // 🆕 New method to get conversation statistics
@@ -1518,7 +1524,7 @@ namespace MEAI_GPT_API.Services
             if (ismeai && !hasSufficientCoverage)
             {
                 _logger.LogWarning($"⚠️ Insufficient policy coverage for {plant}, returning fallback message");
-                return $ "I don't have sufficient policy information to answer this question for {plant}. Please contact your supervisor or HR department for clarification on this matter.";
+                return $"I don't have sufficient policy information to answer this question for {plant}. Please contact your supervisor or HR department for clarification on this matter.";
             }
 
             // OPTIMIZED: Simplified system prompt
@@ -1759,12 +1765,12 @@ namespace MEAI_GPT_API.Services
 
             // Remove HTML/XML tags
             var cleaned = System.Text.RegularExpressions.Regex.Replace(
-              response, @ "<[^>]*>", "",
+              response, @"<[^>]*>", "",
               System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
             // Clean excessive whitespace
-            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @ "\n\s*\n\s*\n", "\n\n");
-            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @ " {2,}", " ");
+            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"\n\s*\n\s*\n", "\n\n");
+            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @" {2,}", " ");
 
             return cleaned.Trim();
         }
@@ -1773,21 +1779,21 @@ namespace MEAI_GPT_API.Services
         private string GetFallbackMessage(bool ismeai, string plant)
         {
             return ismeai ?
-            $ "I apologize, but I'm having trouble generating a response right now. Please contact your supervisor or HR department for assistance regarding {plant} policies." :
+            $"I apologize, but I'm having trouble generating a response right now. Please contact your supervisor or HR department for assistance regarding {plant} policies." :
         "I apologize, but I'm having trouble generating a response right now. Please try again.";
         }
 
         private string GetTimeoutMessage(bool ismeai, string plant)
         {
             return ismeai ?
-            $ "The response generation timed out. Please contact your supervisor or HR department for assistance regarding {plant} policies." :
+            $"The response generation timed out. Please contact your supervisor or HR department for assistance regarding {plant} policies." :
         "The response generation timed out. Please try a simpler question.";
         }
 
         private string GetErrorMessage(bool ismeai, string plant)
         {
             return ismeai ?
-            $ "I apologize, but I'm having trouble generating a response right now. Please contact your supervisor or HR department for assistance regarding {plant} policies." :
+            $"I apologize, but I'm having trouble generating a response right now. Please contact your supervisor or HR department for assistance regarding {plant} policies." :
         "I apologize, but I'm having trouble generating a response right now. Please try again.";
         }
         // API endpoint to get available models
@@ -1835,7 +1841,7 @@ namespace MEAI_GPT_API.Services
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, $ "Failed to get count for collection {collectionId}");
+                        _logger.LogWarning(ex, $"Failed to get count for collection {collectionId}");
                     }
                 }
 
@@ -1853,7 +1859,7 @@ namespace MEAI_GPT_API.Services
             try
             {
                 var response = await _chromaClient.GetAsync(
-          $ "/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/count");
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/count");
 
                 if (response.IsSuccessStatusCode)
                 {
@@ -1867,7 +1873,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Error getting count for collection {collectionId}");
+                _logger.LogError(ex, $"Error getting count for collection {collectionId}");
                 return 0;
             }
         }
@@ -1877,7 +1883,7 @@ namespace MEAI_GPT_API.Services
             var textHash = text.GetHashCode().ToString("X");
             var timeStamp = lastModified.Ticks.ToString();
             var modelHash = modelName.GetHashCode().ToString("X");
-            return $ "{fileName}_{textHash}_{timeStamp}_{modelHash}";
+            return $"{fileName}_{textHash}_{timeStamp}_{modelHash}";
         }
 
         private void InitializeSessionCleanup()
@@ -2275,7 +2281,7 @@ namespace MEAI_GPT_API.Services
                 };
 
                 var response = await _chromaClient.PostAsJsonAsync(
-          $ "/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/add",
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/add",
                   addData);
 
                 if (!response.IsSuccessStatusCode)
@@ -2294,7 +2300,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "❌ Failed to add to ChromaDB collection: {collectionId}");
+                _logger.LogError(ex, $"❌ Failed to add to ChromaDB collection: {collectionId}");
                 return false;
             }
         }
@@ -2457,13 +2463,16 @@ namespace MEAI_GPT_API.Services
             messages.Add(new
             {
                 role = "system",
-                content = @ "You are a helpful AI assistant.
-      
+                content = @"You are a helpful AI assistant.
+
+
         CRITICAL: For simple factual questions(Who / What / When / Where / Which),
                 answer in ONE SENTENCE only.
-      
+
+
         Only provide detailed explanations when explicitly requested.
-      
+
+
         Answer directly without introducing yourself.
               "
             });
@@ -2562,7 +2571,7 @@ namespace MEAI_GPT_API.Services
             messages.Add(new
             {
                 role = "system",
-                content = @ "You are a helpful and knowledgeable AI assistant.
+                content = @"You are a helpful and knowledgeable AI assistant.
 
         🎯 INSTRUCTIONS:
           1.Provide accurate,
@@ -2723,7 +2732,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to apply correction: {question}");
+                _logger.LogError(ex, $"Failed to apply correction: {question}");
             }
             finally
             {
@@ -2890,7 +2899,7 @@ namespace MEAI_GPT_API.Services
 
                         if (embedding.Count != model.EmbeddingDimension)
                         {
-                            var error = $ "Dimension mismatch: got {embedding.Count}, expected {model.EmbeddingDimension}";
+                            var error = $"Dimension mismatch: got {embedding.Count}, expected {model.EmbeddingDimension}";
                             _logger.LogError($"❌ {error}");
                             failedChunks.Add((chunk.ChunkId, error));
                             continue;
@@ -2901,7 +2910,7 @@ namespace MEAI_GPT_API.Services
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, $ "❌ Failed to generate embedding for chunk {i + 1}: {chunk.ChunkId}");
+                        _logger.LogError(ex, $"❌ Failed to generate embedding for chunk {i + 1}: {chunk.ChunkId}");
                         failedChunks.Add((chunk.ChunkId, ex.Message));
                     }
 
@@ -2914,7 +2923,7 @@ namespace MEAI_GPT_API.Services
 
                 // Log summary
                 _logger.LogInformation(
-          $ "📊 Embedding generation complete: {successfulChunks.Count} succeeded, {failedChunks.Count} failed");
+          $"📊 Embedding generation complete: {successfulChunks.Count} succeeded, {failedChunks.Count} failed");
 
                 if (failedChunks.Any())
                 {
@@ -2956,7 +2965,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "❌ Failed to process chunk batch for model {model.Name}");
+                _logger.LogError(ex, $"❌ Failed to process chunk batch for model {model.Name}");
                 return 0;
             }
         }
@@ -2985,8 +2994,8 @@ namespace MEAI_GPT_API.Services
                     }
 
                     _logger.LogWarning(
-            $ "⚠️ Invalid embedding on attempt {attempt}/{maxRetries}: " +
-                      $ "got {embedding?.Count ?? 0} dimensions, expected {model.EmbeddingDimension}");
+            $"⚠️ Invalid embedding on attempt {attempt}/{maxRetries}: " +
+                      $"got {embedding?.Count ?? 0} dimensions, expected {model.EmbeddingDimension}");
                 }
                 catch (Exception ex)
                 {
@@ -3003,7 +3012,7 @@ namespace MEAI_GPT_API.Services
                 }
             }
 
-            _logger.LogError(lastException, $ "❌ All {maxRetries} attempts failed to generate embedding");
+            _logger.LogError(lastException, $"❌ All {maxRetries} attempts failed to generate embedding");
             return null;
         }
 
@@ -3106,7 +3115,7 @@ namespace MEAI_GPT_API.Services
                     };
 
                     var response = await _chromaClient.PostAsJsonAsync(
-            $ "/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/get",
+            $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/get",
                       request);
 
                     if (response.IsSuccessStatusCode)
@@ -3187,7 +3196,7 @@ namespace MEAI_GPT_API.Services
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, $ "Failed to warm up model: {model.Name}");
+                        _logger.LogWarning(ex, $"Failed to warm up model: {model.Name}");
                     }
                 });
 
@@ -3411,7 +3420,7 @@ namespace MEAI_GPT_API.Services
 
                 if (!string.IsNullOrEmpty(annexureRefsMeta))
                 {
-                    var queryAnnexNumbers = Regex.Matches(originalQuery, @ "annex(?:ure)?\s*(?:no\.?)?\s*(\d+)", RegexOptions.IgnoreCase)
+                    var queryAnnexNumbers = Regex.Matches(originalQuery, @"annex(?:ure)?\s*(?:no\.?)?\s*(\d+)", RegexOptions.IgnoreCase)
                       .Select(m => m.Groups[1].Value);
                     var chunkAnnexNumbers = annexureRefsMeta.Split(',', StringSplitOptions.RemoveEmptyEntries);
 
@@ -3422,21 +3431,51 @@ namespace MEAI_GPT_API.Services
                     }
                 }
 
-                // ✅ NEW: boost customer-specific content when the query
-                // explicitly mentions that customer by name. Customer docs
-                // aren't tied to a plant, so without this they'd rank purely
-                // on embedding similarity like everything else — this makes
-                // "what does Acme require for X" reliably prefer Acme's own
-                // documents over generically similar content from others.
-                if (metadata.TryGetProperty("customer", out
-                    var customerProp))
+                // ✅ NEW: exact metadata match for any OTHER configured
+                // reference type (Clause, Form, etc.). Annexure is handled
+                // above since its metadata key also feeds the
+                // annexure-link-resolution feature further down; every other
+                // type configured under DynamicRAG:ReferenceTypes gets the
+                // same treatment here without needing its own code block.
+                foreach (var refType in _config.ReferenceTypes ?? new List<ReferenceTypeOptions>())
                 {
-                    var customerName = customerProp.GetString();
-                    if (!string.IsNullOrEmpty(customerName) &&
-                      originalQuery.Contains(customerName, StringComparison.OrdinalIgnoreCase))
+                    if (string.IsNullOrWhiteSpace(refType.MetadataKey) ||
+                        string.Equals(refType.MetadataKey, "annexure_refs", StringComparison.OrdinalIgnoreCase))
+                        continue; // already handled above
+
+                    if (!metadata.TryGetProperty(refType.MetadataKey, out var refProp))
+                        continue;
+
+                    var chunkRefNumbers = (refProp.GetString() ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries);
+                    if (!chunkRefNumbers.Any())
+                        continue;
+
+                    var queryRefNumbers = Regex.Matches(originalQuery, refType.Pattern, RegexOptions.IgnoreCase)
+                        .Cast<Match>()
+                        .Where(m => m.Groups.Count > 1)
+                        .Select(m => m.Groups[1].Value);
+
+                    if (queryRefNumbers.Any(n => chunkRefNumbers.Contains(n)))
+                    {
+                        boost += 0.70;
+                        _logger.LogInformation("Exact {Type} metadata match → raw={Raw:F3}", refType.Name, rawSimilarity);
+                    }
+                }
+
+                // ✅ NEW: boost content when the query mentions this chunk's
+                // source_tag by name (e.g. a customer name, product name, or
+                // any other subfolder-derived tag under an additional
+                // document source — see CreateChunkMetadata). Generic by
+                // design: works for any subfolder-organized source without
+                // needing to know what the subfolder represents.
+                if (metadata.TryGetProperty("source_tag", out var sourceTagProp))
+                {
+                    var sourceTag = sourceTagProp.GetString();
+                    if (!string.IsNullOrEmpty(sourceTag) &&
+                      originalQuery.Contains(sourceTag, StringComparison.OrdinalIgnoreCase))
                     {
                         boost += 0.40;
-                        _logger.LogInformation("Customer name match: {Customer} → raw={Raw:F3}", customerName, rawSimilarity);
+                        _logger.LogInformation("Source tag match: {Tag} → raw={Raw:F3}", sourceTag, rawSimilarity);
                     }
                 }
 
@@ -3587,7 +3626,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Enhanced search failed for: {query}");
+                _logger.LogError(ex, $"Enhanced search failed for: {query}");
                 return new List<RelevantChunk>();
             }
         }
@@ -3599,7 +3638,7 @@ namespace MEAI_GPT_API.Services
                 var queryKeywords = _entityExtraction.ExtractTopicsFromQuery(query.ToLowerInvariant());
 
                 // Learn associations
-                var key = $ "{documentType}_{sectionNumber}";
+                var key = $"{documentType}_{sectionNumber}";
                 if (!_learnedAssociations.ContainsKey(key))
                 {
                     _learnedAssociations[key] = new List<string>();
@@ -3690,7 +3729,7 @@ namespace MEAI_GPT_API.Services
                 };
 
                 var response = await _chromaClient.PostAsJsonAsync(
-          $ "/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
                   queryData);
 
                 if (response.IsSuccessStatusCode)
@@ -3762,7 +3801,7 @@ namespace MEAI_GPT_API.Services
             if (string.IsNullOrWhiteSpace(sectionNumber)) return false;
             var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num => {
                 var escaped = Regex.Escape(num);
-                return new Regex($ @ "\b(?:section|clause|part)\.?\s*{escaped}(?:\.\d+)*\b" + $ @ "|(?:^|\n)\s*{escaped}\.(?:\d+\.?)*\s", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+                return new Regex($@"\b(?:section|clause|part)\.?\s*{escaped}(?:\.\d+)*\b" + $@"|(?:^|\n)\s*{escaped}\.(?:\d+\.?)*\s", RegexOptions.IgnoreCase | RegexOptions.Compiled);
             });
             return pattern.IsMatch(lowerText);
         }
@@ -3781,12 +3820,19 @@ namespace MEAI_GPT_API.Services
                 // evaluate. Keep the query short and literal instead; precision
                 // here comes from the exact-match filter below, not from the
                 // embedding search being smart about annexure semantics.
-                combinedQuery = $ "Annexure {sectionQuery.SectionNumber} form approval technical baseline";
+                //
+                // ✅ NEW: generalized to use the query's actual ReferenceType
+                // (Clause, Form, etc. from DynamicRAG:ReferenceTypes) instead
+                // of always hardcoding "Annexure" — Annexure keeps its exact
+                // original wording for backward compatibility.
+                combinedQuery = string.Equals(sectionQuery.ReferenceType, "Annexure", StringComparison.OrdinalIgnoreCase)
+                    ? $"Annexure {sectionQuery.SectionNumber} form approval technical baseline"
+                    : $"{sectionQuery.ReferenceType} {sectionQuery.SectionNumber}";
             }
             else
             {
                 // Create a single comprehensive search query instead of multiple
-                combinedQuery = $ "Section {sectionQuery.SectionNumber} {sectionQuery.DocumentType} " +
+                combinedQuery = $"Section {sectionQuery.SectionNumber} {sectionQuery.DocumentType} " +
                   string.Join(" ", _policyAnalysis.GetDynamicSectionTopics(sectionQuery.SectionNumber, sectionQuery.DocumentType));
             }
 
@@ -3823,7 +3869,7 @@ namespace MEAI_GPT_API.Services
             // annexure match itself. Branch on query type, same as IsSectionContentDynamic.
             if (sectionQuery.IsAnnexure)
             {
-                if (IsExactAnnexureMatch(lowerText, sectionQuery.SectionNumber))
+                if (IsExactReferenceMatch(lowerText, sectionQuery))
                 {
                     relevance += 0.4;
                 }
@@ -3961,10 +4007,10 @@ namespace MEAI_GPT_API.Services
             // Check for direct references
             if (sectionQuery.IsAnnexure)
             {
-                // Annexures don't have meaningful "expected topics" the way
-                // sections do — an exact-match miss means this chunk isn't
-                // the one being asked for.
-                return IsExactAnnexureMatch(lowerText, sectionNumber);
+                // Reference types other than "Section" don't have meaningful
+                // "expected topics" the way sections do — an exact-match
+                // miss means this chunk isn't the one being asked for.
+                return IsExactReferenceMatch(lowerText, sectionQuery);
             }
 
             if (IsExactSectionMatch(lowerText, sectionNumber)) return true;
@@ -3979,12 +4025,37 @@ namespace MEAI_GPT_API.Services
         {
             var escaped = Regex.Escape(annexureNumber);
             var patterns = new[] {
-        $ @ "annexure\s*{escaped}\b",
-          $ @ "annexure[\s\-]+{escaped}\b",
-          $ @ "annex\s*{escaped}\b",
-          $ @ "annexure\s*no\.?\s*{escaped}\b"
+        $@"annexure\s*{escaped}\b",
+          $@"annexure[\s\-]+{escaped}\b",
+          $@"annex\s*{escaped}\b",
+          $@"annexure\s*no\.?\s*{escaped}\b"
       };
             return patterns.Any(p => Regex.IsMatch(lowerText, p));
+        }
+
+        /// <summary>
+        /// Generic exact-match check for any reference type — Annexure keeps
+        /// using its own hand-tuned patterns above (multiple phrasing
+        /// variants, more precise than a single config regex would be); any
+        /// other type configured under DynamicRAG:ReferenceTypes re-runs its
+        /// own Pattern against the text and checks for a matching number.
+        /// </summary>
+        private bool IsExactReferenceMatch(string lowerText, SectionQuery sectionQuery)
+        {
+            if (string.Equals(sectionQuery.ReferenceType, "Annexure", StringComparison.OrdinalIgnoreCase))
+            {
+                return IsExactAnnexureMatch(lowerText, sectionQuery.SectionNumber);
+            }
+
+            var refType = _config.ReferenceTypes?.FirstOrDefault(
+                r => string.Equals(r.Name, sectionQuery.ReferenceType, StringComparison.OrdinalIgnoreCase));
+
+            if (refType == null || string.IsNullOrWhiteSpace(refType.Pattern))
+                return false;
+
+            return Regex.Matches(lowerText, refType.Pattern, RegexOptions.IgnoreCase)
+                .Cast<Match>()
+                .Any(m => m.Groups.Count > 1 && m.Groups[1].Value == sectionQuery.SectionNumber);
         }
         // Supporting class for section queries
 
@@ -4039,26 +4110,55 @@ namespace MEAI_GPT_API.Services
                 metadata["document_type"] = documentType;
             }
 
-            // ✅ NEW: Extract Annexure references present in this chunk's text
-            // and store them as searchable metadata. Annexure/Form/Appendix-style
-            // numbered references are exact-lookup queries where dense embedding
-            // similarity is unreliable (a short, low-information query phrase
-            // competing against a large, multi-topic chunk). Storing the exact
-            // numbers as metadata lets retrieval fall back to a precise metadata
-            // filter for these queries instead of relying only on similarity.
-            var annexureNumbers = Regex.Matches(text, @ "annex(?:ure)?\s*(?:no\.?)?\s*(\d+)", RegexOptions.IgnoreCase)
-              .Select(m => m.Groups[1].Value)
-              .Distinct()
-              .ToList();
+            // ✅ NEW: extract references for every reference type configured
+            // under DynamicRAG:ReferenceTypes (Annexure, Clause, Form, etc.)
+            // — generalizes what was previously hardcoded to Annexure only.
+            // Numbered references like these are exact-lookup queries where
+            // dense embedding similarity is unreliable (a short,
+            // low-information query phrase competing against a large,
+            // multi-topic chunk), so storing the exact numbers as metadata
+            // lets retrieval fall back to a precise match instead of relying
+            // only on similarity.
+            var configuredRefTypes = _config.ReferenceTypes ?? new List<ReferenceTypeOptions>();
 
-            if (annexureNumbers.Any())
+            if (configuredRefTypes.Any())
             {
-                // Chroma string metadata doesn't support array types here, so
-                // store as a comma-delimited string; callers doing an exact
-                // lookup for annexure N should filter client-side by checking
-                // this field .Split(',').Contains(N), or switch to a $contains
-                // filter if/when the collection schema enables document FTS.
-                metadata["annexure_refs"] = string.Join(",", annexureNumbers);
+                foreach (var refType in configuredRefTypes)
+                {
+                    if (string.IsNullOrWhiteSpace(refType.Pattern) || string.IsNullOrWhiteSpace(refType.MetadataKey))
+                        continue;
+
+                    var refNumbers = Regex.Matches(text, refType.Pattern, RegexOptions.IgnoreCase)
+                        .Cast<Match>()
+                        .Where(m => m.Groups.Count > 1)
+                        .Select(m => m.Groups[1].Value)
+                        .Distinct()
+                        .ToList();
+
+                    if (refNumbers.Any())
+                    {
+                        // Chroma string metadata doesn't support array types
+                        // here, so store as a comma-delimited string; callers
+                        // doing an exact lookup filter client-side with
+                        // .Split(',').Contains(N).
+                        metadata[refType.MetadataKey] = string.Join(",", refNumbers);
+                    }
+                }
+            }
+            else
+            {
+                // Fallback if ReferenceTypes hasn't been configured yet —
+                // keeps Annexure extraction working out of the box without
+                // requiring an appsettings.json change.
+                var annexureNumbers = Regex.Matches(text, @"annex(?:ure)?\s*(?:no\.?)?\s*(\d+)", RegexOptions.IgnoreCase)
+                  .Select(m => m.Groups[1].Value)
+                  .Distinct()
+                  .ToList();
+
+                if (annexureNumbers.Any())
+                {
+                    metadata["annexure_refs"] = string.Join(",", annexureNumbers);
+                }
             }
 
             // Plant classification (existing logic)
@@ -4072,39 +4172,51 @@ namespace MEAI_GPT_API.Services
                 metadata["plant"] = "centralized";
                 metadata["is_centralized"] = true;
             }
-            // ✅ NEW: Technical documents — plant-agnostic, treated like
-            // Centralized so they surface for every plant's queries.
-            else if (folderPath.Contains("technical"))
+            // ✅ NEW: generic, config-driven classification for any folder
+            // listed in appsettings.json under AdditionalDocumentSources —
+            // no hardcoded folder names. If the source is restricted to
+            // specific plants, tag it with the current plant directly (it
+            // then rides the existing plant-specific retrieval branch,
+            // since GetPolicyFiles already only included it for allowed
+            // plants). If unrestricted, tag it with a single shared
+            // "additional_source" value so it surfaces for every plant.
+            else if (_config.AdditionalDocumentSources?.FirstOrDefault(
+                s => !string.IsNullOrWhiteSpace(s.Folder) && folderPath.Contains(s.Folder.ToLowerInvariant()))
+                is DocumentSourceOptions matchedSource)
             {
-                metadata["plant"] = "technical";
-                metadata["is_technical"] = true;
-                metadata["document_category"] = "technical";
-            }
-            // ✅ NEW: Customer-specific documents — also plant-agnostic and
-            // visible to everyone (no access restriction), but tagged with
-            // the customer name (from the folder: Customers/{CustomerName}/)
-            // so retrieval can boost the right customer's content when a
-            // query mentions them by name.
-            else if (folderPath.Contains("customers"))
-            {
-                metadata["plant"] = "customer";
-                metadata["is_customer_specific"] = true;
+                var isRestricted = matchedSource.RestrictedToPlants != null && matchedSource.RestrictedToPlants.Any();
 
-                var customersIndex = sourceFile.IndexOf("Customers", StringComparison.OrdinalIgnoreCase);
-                if (customersIndex >= 0)
+                if (isRestricted)
                 {
-                    var afterCustomers = sourceFile.Substring(customersIndex + "Customers".Length)
-                      .TrimStart('\\', '/');
-                    var customerName = afterCustomers
-                      .Split(new[] {
-              '\\',
-              '/'
-                      }, StringSplitOptions.RemoveEmptyEntries)
-                      .FirstOrDefault();
+                    metadata["plant"] = normalizedPlant;
+                    metadata["is_plant_specific"] = true;
+                }
+                else
+                {
+                    metadata["plant"] = "additional_source";
+                    metadata["is_additional_source"] = true;
+                }
 
-                    if (!string.IsNullOrEmpty(customerName))
+                metadata["document_source"] = matchedSource.Folder;
+
+                // Generic sub-tag from the immediate subfolder under the
+                // source (e.g. Customers/AcmeCorp -> "AcmeCorp", or
+                // Products/WidgetX -> "WidgetX"). Used to boost relevance
+                // when that name appears in a query — works for any
+                // subfolder-organized source, not just a specific concept
+                // like "customer".
+                var sourceIndex = sourceFile.IndexOf(matchedSource.Folder, StringComparison.OrdinalIgnoreCase);
+                if (sourceIndex >= 0)
+                {
+                    var afterSource = sourceFile.Substring(sourceIndex + matchedSource.Folder.Length)
+                        .TrimStart('\\', '/');
+                    var pathParts = afterSource.Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries);
+
+                    // Only set if there's genuinely a subfolder level (more
+                    // than just the filename directly under the source root)
+                    if (pathParts.Length > 1)
                     {
-                        metadata["customer"] = customerName;
+                        metadata["source_tag"] = pathParts[0];
                     }
                 }
             }
@@ -4123,7 +4235,7 @@ namespace MEAI_GPT_API.Services
         }
         private string ExtractSectionNumber(string sectionId)
         {
-            var match = Regex.Match(sectionId, @ "(\d+(?:\.\d+)*)");
+            var match = Regex.Match(sectionId, @"(\d+(?:\.\d+)*)");
             return match.Success ? match.Groups[1].Value : "";
         }
         private async Task<List<RelevantChunk>> GetRelevantChunksWithExpansionAsync(string query, ModelConfiguration embeddingModel, int maxResults, bool meaiInfo, ConversationContext context, bool useReRanking, ModelConfiguration generationModel, string plant)
@@ -4215,7 +4327,7 @@ namespace MEAI_GPT_API.Services
                 var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
                 var response = await _chromaClient.PostAsJsonAsync(
-          $ "/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
                   searchPayload,
                   cts.Token);
 
@@ -4351,14 +4463,7 @@ namespace MEAI_GPT_API.Services
                 object > {
                   {
                     "plant",
-                    "technical"
-                  }
-                },
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    "customer"
+                    "additional_source"
                   }
                 }
               }
@@ -4382,7 +4487,7 @@ namespace MEAI_GPT_API.Services
                 using
                 var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                 var response = await _chromaClient.PostAsJsonAsync(
-          $ "/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
                   searchData, cts.Token);
 
                 if (!response.IsSuccessStatusCode)
@@ -4399,7 +4504,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "❌ PerformChromaSearch failed for query: {query}");
+                _logger.LogError(ex, $"❌ PerformChromaSearch failed for query: {query}");
                 return new List<RelevantChunk>();
             }
         }
@@ -4457,14 +4562,7 @@ namespace MEAI_GPT_API.Services
                 object > {
                   {
                     "plant",
-                    "technical"
-                  }
-                },
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    "customer"
+                    "additional_source"
                   }
                 }
               }
@@ -4486,7 +4584,7 @@ namespace MEAI_GPT_API.Services
                 };
 
                 var response = await _chromaClient.PostAsJsonAsync(
-          $ "/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
                   searchData);
 
                 if (response.IsSuccessStatusCode)
@@ -4504,7 +4602,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "❌ General search failed: {ex.Message}");
+                _logger.LogError(ex, $"❌ General search failed: {ex.Message}");
                 return new List<RelevantChunk>();
             }
         }
@@ -4810,7 +4908,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to check for changed files in plant: {plant}");
+                _logger.LogError(ex, $"Failed to check for changed files in plant: {plant}");
             }
         }
 
@@ -4844,7 +4942,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to reinitialize plant: {plant}");
+                _logger.LogError(ex, $"Failed to reinitialize plant: {plant}");
                 throw;
             }
         }
@@ -4910,7 +5008,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to reprocess file: {filePath}");
+                _logger.LogError(ex, $"Failed to reprocess file: {filePath}");
                 throw;
             }
         }
@@ -4934,7 +5032,7 @@ namespace MEAI_GPT_API.Services
                 return new List<float>();
             }
 
-            var cacheKey = $ "{model.Name}:{text.GetHashCode():X}";
+            var cacheKey = $"{model.Name}:{text.GetHashCode():X}";
 
             // Check cache first
             if (_optimizedEmbeddingCache.TryGetValue(cacheKey, out
@@ -5035,7 +5133,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "❌ Embedding failed for model: {model.Name}");
+                _logger.LogError(ex, $"❌ Embedding failed for model: {model.Name}");
                 return new List<float>();
             }
             finally
@@ -5054,29 +5152,29 @@ namespace MEAI_GPT_API.Services
             // ✅ 1. Remove ALL special token patterns (exhaustive list)
             var specialTokenPatterns = new[] {
         // LLaMA/Mistral tokens
-        @ "<\|im_start\|>", @ "<\|im_end\|>", @ "<\|im_sep\|>",
-          @ "<\|endoftext\|>", @ "<\|startoftext\|>",
+        @"<\|im_start\|>", @"<\|im_end\|>", @"<\|im_sep\|>",
+          @"<\|endoftext\|>", @"<\|startoftext\|>",
 
           // Instruction format tokens
-          @ "\[INST\]", @ "\[/INST\]",
-          @ "<<SYS>>", @ "<</SYS>>",
+          @"\[INST\]", @"\[/INST\]",
+          @"<<SYS>>", @"<</SYS>>",
 
           // Generic model tokens
-          @ "<s>", @ "</s>",
-          @ "<\|user\|>", @ "<\|assistant\|>", @ "<\|system\|>",
-          @ "<assistant>", @ "</assistant>",
-          @ "<user>", @ "</user>",
-          @ "<system>", @ "</system>",
+          @"<s>", @"</s>",
+          @"<\|user\|>", @"<\|assistant\|>", @"<\|system\|>",
+          @"<assistant>", @"</assistant>",
+          @"<user>", @"</user>",
+          @"<system>", @"</system>",
 
           // Chat-ML tokens
-          @ "<\|begin_of_text\|>", @ "<\|end_of_text\|>",
-          @ "<\|start_header_id\|>", @ "<\|end_header_id\|>",
+          @"<\|begin_of_text\|>", @"<\|end_of_text\|>",
+          @"<\|start_header_id\|>", @"<\|end_header_id\|>",
 
           // Other potential tokens
-          @ "<\|pad\|>", @ "<\|eos\|>", @ "<\|bos\|>",
+          @"<\|pad\|>", @"<\|eos\|>", @"<\|bos\|>",
 
           // Remove any remaining angle bracket tokens
-          @ "<\|[^>]+\|>"
+          @"<\|[^>]+\|>"
       };
 
             foreach (var pattern in specialTokenPatterns)
@@ -5085,7 +5183,7 @@ namespace MEAI_GPT_API.Services
             }
 
             // ✅ 2. Remove markdown code blocks (can contain tokens)
-            cleaned = Regex.Replace(cleaned, @ "```[\w]*\n?", "", RegexOptions.Multiline);
+            cleaned = Regex.Replace(cleaned, @"```[\w]*\n?", "", RegexOptions.Multiline);
             cleaned = cleaned.Replace("```", "");
 
             // ✅ 3. Remove common instruction prefixes that might trigger token detection
@@ -5106,15 +5204,15 @@ namespace MEAI_GPT_API.Services
             }
 
             // ✅ 4. Normalize whitespace
-            cleaned = Regex.Replace(cleaned, @ "\s+", " ");
-            cleaned = Regex.Replace(cleaned, @ "\n\s*\n", "\n");
+            cleaned = Regex.Replace(cleaned, @"\s+", " ");
+            cleaned = Regex.Replace(cleaned, @"\n\s*\n", "\n");
 
             // ✅ 5. Remove control characters (except newline and tab)
-            cleaned = Regex.Replace(cleaned, @ "[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]", "");
+            cleaned = Regex.Replace(cleaned, @"[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]", "");
 
             // ✅ 6. Remove any remaining suspicious patterns
             // Remove HTML-like tags that might be interpreted as tokens
-            cleaned = Regex.Replace(cleaned, @ "</?[a-zA-Z][^>]*>", " ");
+            cleaned = Regex.Replace(cleaned, @"</?[a-zA-Z][^>]*>", " ");
 
             // ✅ 7. Final cleanup
             cleaned = cleaned.Trim();
@@ -5158,7 +5256,7 @@ namespace MEAI_GPT_API.Services
             var cleaned = result.ToString();
 
             // Remove excessive whitespace
-            cleaned = Regex.Replace(cleaned, @ "\s+", " ");
+            cleaned = Regex.Replace(cleaned, @"\s+", " ");
 
             return cleaned.Trim();
         }
@@ -5691,16 +5789,16 @@ namespace MEAI_GPT_API.Services
                 // Pattern 1: "X is a [profession]" - MOST RELIABLE
                 var patterns = new[] {
           // "Elon Musk is a business magnate"
-          @ "^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+is\s+a(?:n)?\s+",
+          @"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+is\s+a(?:n)?\s+",
 
             // "Elon Musk is the CEO"
-            @ "^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+is\s+the\s+",
+            @"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+is\s+the\s+",
 
             // "Elon Musk, born in..."
-            @ "^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}),",
+            @"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}),",
 
             // At start: "Elon Musk has/was/became..."
-            @ "^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+(?:has|was|were|became|founded|created|invented)",
+            @"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+(?:has|was|were|became|founded|created|invented)",
         };
 
                 foreach (var pattern in patterns)
@@ -5720,7 +5818,7 @@ namespace MEAI_GPT_API.Services
                 }
 
                 // Fallback: Find first proper name (2+ capitalized words)
-                var nameMatch = Regex.Match(cleanAnswer, @ "\b([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b");
+                var nameMatch = Regex.Match(cleanAnswer, @"\b([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b");
                 if (nameMatch.Success)
                 {
                     var potentialName = nameMatch.Groups[1].Value.Trim();
@@ -6675,14 +6773,14 @@ namespace MEAI_GPT_API.Services
 
             // Common name patterns
             var namePatterns = new[] {
-        @ "^[A-Z][a-z]+\s+[A-Z][a-z]+$", // First Last
-          @ "^[A-Z][a-z]+\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // First Middle Last
-          @ "^[A-Z][a-z]+\s+[A-Z]\.\s+[A-Z][a-z]+$", // First M. Last
-          @ "^[A-Z]\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // F. Middle Last
-          @ "^Dr\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // Dr. First Last
-          @ "^Mr\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // Mr. First Last
-          @ "^Mrs\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // Mrs. First Last
-          @ "^Ms\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // Ms. First Last
+        @"^[A-Z][a-z]+\s+[A-Z][a-z]+$", // First Last
+          @"^[A-Z][a-z]+\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // First Middle Last
+          @"^[A-Z][a-z]+\s+[A-Z]\.\s+[A-Z][a-z]+$", // First M. Last
+          @"^[A-Z]\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // F. Middle Last
+          @"^Dr\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // Dr. First Last
+          @"^Mr\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // Mr. First Last
+          @"^Mrs\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // Mrs. First Last
+          @"^Ms\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // Ms. First Last
       };
 
             return namePatterns.Any(pattern => Regex.IsMatch(text, pattern));
@@ -6796,9 +6894,9 @@ namespace MEAI_GPT_API.Services
 
             // Check for pronouns at word boundaries
             var pronounPatterns = new[] {
-        @ "\bhe\b", @ "\bshe\b", @ "\bhim\b", @ "\bher\b",
-          @ "\bhis\b", @ "\bhers\b", @ "\bthey\b", @ "\bthem\b",
-          @ "\btheir\b", @ "\btheirs\b"
+        @"\bhe\b", @"\bshe\b", @"\bhim\b", @"\bher\b",
+          @"\bhis\b", @"\bhers\b", @"\bthey\b", @"\bthem\b",
+          @"\btheir\b", @"\btheirs\b"
       };
 
             foreach (var pattern in pronounPatterns)
@@ -6818,34 +6916,34 @@ namespace MEAI_GPT_API.Services
             var lowerQuestion = question.ToLower();
 
             // Pattern 1: "is he/she X" → "is [Subject] X"
-            if (Regex.IsMatch(lowerQuestion, @ "^is\s+(he|she)\s+"))
+            if (Regex.IsMatch(lowerQuestion, @"^is\s+(he|she)\s+"))
             {
-                var result = Regex.Replace(question, @ "^(is\s+)(he|she)(\s+)",
-                  $ "$1{subject}$3", RegexOptions.IgnoreCase);
+                var result = Regex.Replace(question, @"^(is\s+)(he|she)(\s+)",
+                  $"$1{subject}$3", RegexOptions.IgnoreCase);
                 return result;
             }
 
             // Pattern 2: "does he/she X" → "does [Subject] X"
-            if (Regex.IsMatch(lowerQuestion, @ "^does\s+(he|she)\s+"))
+            if (Regex.IsMatch(lowerQuestion, @"^does\s+(he|she)\s+"))
             {
-                var result = Regex.Replace(question, @ "^(does\s+)(he|she)(\s+)",
-                  $ "$1{subject}$3", RegexOptions.IgnoreCase);
+                var result = Regex.Replace(question, @"^(does\s+)(he|she)(\s+)",
+                  $"$1{subject}$3", RegexOptions.IgnoreCase);
                 return result;
             }
 
             // Pattern 3: "what does he/she do" → "what does [Subject] do"
-            if (Regex.IsMatch(lowerQuestion, @ "what\s+does\s+(he|she)\s+"))
+            if (Regex.IsMatch(lowerQuestion, @"what\s+does\s+(he|she)\s+"))
             {
-                var result = Regex.Replace(question, @ "(what\s+does\s+)(he|she)(\s+)",
-                  $ "$1{subject}$3", RegexOptions.IgnoreCase);
+                var result = Regex.Replace(question, @"(what\s+does\s+)(he|she)(\s+)",
+                  $"$1{subject}$3", RegexOptions.IgnoreCase);
                 return result;
             }
 
             // Pattern 4: "where is he/she" → "where is [Subject]"
-            if (Regex.IsMatch(lowerQuestion, @ "where\s+is\s+(he|she)"))
+            if (Regex.IsMatch(lowerQuestion, @"where\s+is\s+(he|she)"))
             {
-                var result = Regex.Replace(question, @ "(where\s+is\s+)(he|she)",
-                  $ "$1{subject}", RegexOptions.IgnoreCase);
+                var result = Regex.Replace(question, @"(where\s+is\s+)(he|she)",
+                  $"$1{subject}", RegexOptions.IgnoreCase);
                 return result;
             }
 
@@ -6854,12 +6952,12 @@ namespace MEAI_GPT_API.Services
             var replacements = new Dictionary<string,
               string>
             {
-                [@ "\bhe\b"] = subject,
-                [@ "\bshe\b"] = subject,
-                [@ "\bhim\b"] = subject,
-                [@ "\bher\b"] = subject,
-                [@ "\bhis\b"] = $ "{subject}'s",
-                [@ "\bhers\b"] = $ "{subject}'s",
+                [@"\bhe\b"] = subject,
+                [@"\bshe\b"] = subject,
+                [@"\bhim\b"] = subject,
+                [@"\bher\b"] = subject,
+                [@"\bhis\b"] = $"{subject}'s",
+                [@"\bhers\b"] = $"{subject}'s",
             };
 
             foreach (var replacement in replacements)
@@ -7675,7 +7773,7 @@ namespace MEAI_GPT_API.Services
                 return new ValidationResult
                 {
                     Success = false,
-                    ErrorMessage = $ "Initialization failed: {ex.Message}"
+                    ErrorMessage = $"Initialization failed: {ex.Message}"
                 };
             }
         }
@@ -7758,7 +7856,7 @@ namespace MEAI_GPT_API.Services
                 _agentLogger.LogDecision(new AgentDecision
                 {
                     Phase = "Planning",
-                    DecisionMade = $ "Created {plan.Steps.Count}-step plan",
+                    DecisionMade = $"Created {plan.Steps.Count}-step plan",
                     Reasoning = string.Join(" → ", plan.Steps.Select(s => s.Name)),
                     Confidence = 1.0
                 });
@@ -7817,8 +7915,8 @@ namespace MEAI_GPT_API.Services
                 if (sectionQuery != null)
                 {
                     _logger.LogInformation(
-                      "🎯 Detected {Kind} query: Section/Annexure {Num}",
-                      sectionQuery.IsAnnexure ? "Annexure" : "Section",
+                      "🎯 Detected {Kind} query: {Num}",
+                      sectionQuery.ReferenceType,
                       sectionQuery.SectionNumber);
 
                     var collectionId = await _collectionManager.GetOrCreateCollectionAsync(embModel);
@@ -7887,7 +7985,7 @@ namespace MEAI_GPT_API.Services
                 _agentLogger.LogDecision(new AgentDecision
                 {
                     Phase = "Retrieval",
-                    DecisionMade = $ "Retrieved {result.Chunks.Count} chunks",
+                    DecisionMade = $"Retrieved {result.Chunks.Count} chunks",
                     Confidence = result.Chunks.Any() ? result.Chunks.Average(c => c.Similarity) : 0.0
                 });
 
@@ -7931,7 +8029,7 @@ namespace MEAI_GPT_API.Services
                 {
                     Phase = "Verification",
                     DecisionMade = verification.NeedsReprocessing ? "RETRY_NEEDED" : "APPROVED",
-                    Reasoning = $ "Confidence: {verification.OverallConfidence:P0}, Complete: {verification.IsComplete}",
+                    Reasoning = $"Confidence: {verification.OverallConfidence:P0}, Complete: {verification.IsComplete}",
                     Confidence = verification.OverallConfidence
                 });
 
@@ -8108,7 +8206,7 @@ namespace MEAI_GPT_API.Services
                 {
                     Phase = "Complete",
                     DecisionMade = "SUCCESS",
-                    Reasoning = $ "Total duration: {durationMs}ms, Confidence: {confidence:P0}",
+                    Reasoning = $"Total duration: {durationMs}ms, Confidence: {confidence:P0}",
                     Confidence = confidence
                 });
             }
@@ -8521,7 +8619,7 @@ namespace MEAI_GPT_API.Services
                       plant, relevantChunks.Count);
 
                     yield
-                    return $ "I don't have sufficient policy information to answer this question for {plant}. Please contact your supervisor or HR department for clarification on this matter.";
+                    return $"I don't have sufficient policy information to answer this question for {plant}. Please contact your supervisor or HR department for clarification on this matter.";
                     yield
                     break;
                 }
@@ -8908,7 +9006,7 @@ namespace MEAI_GPT_API.Services
                     return new StreamSetupResult
                     {
                         Success = false,
-                        ErrorMessage = $ "HTTP {response.StatusCode}"
+                        ErrorMessage = $"HTTP {response.StatusCode}"
                     };
                 }
 
@@ -9144,7 +9242,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to refresh conversation history for session {sessionId}");
+                _logger.LogError(ex, $"Failed to refresh conversation history for session {sessionId}");
                 // Don't throw - continue with existing history
             }
         }
@@ -9197,7 +9295,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to load conversation history for session {sessionId}");
+                _logger.LogError(ex, $"Failed to load conversation history for session {sessionId}");
                 // Don't throw - continue with empty history
             }
         }
@@ -9277,7 +9375,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to load conversation history for session {sessionId}");
+                _logger.LogError(ex, $"Failed to load conversation history for session {sessionId}");
                 // Don't throw - continue with empty history
             }
         }
@@ -10199,7 +10297,7 @@ namespace MEAI_GPT_API.Services
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, $ "Failed to check collection for model: {model.Name}");
+                        _logger.LogError(ex, $"Failed to check collection for model: {model.Name}");
                     }
                 }
 
@@ -10240,7 +10338,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to clear cache for file: {filePath}");
+                _logger.LogError(ex, $"Failed to clear cache for file: {filePath}");
                 throw;
             }
         }
@@ -10277,7 +10375,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to process single file: {filePath}");
+                _logger.LogError(ex, $"Failed to process single file: {filePath}");
                 throw;
             }
         }
@@ -10319,7 +10417,7 @@ namespace MEAI_GPT_API.Services
                 if (model == null)
                 {
                     result.Success = false;
-                    result.Error = $ "Model '{modelName}' not found";
+                    result.Error = $"Model '{modelName}' not found";
                     return result;
                 }
 
@@ -10342,7 +10440,7 @@ namespace MEAI_GPT_API.Services
                     if (embedding == null || embedding.Count == 0)
                     {
                         result.Success = false;
-                        result.Error = $ "Failed to generate embedding for text: '{text.Substring(0, Math.Min(50, text.Length))}'";
+                        result.Error = $"Failed to generate embedding for text: '{text.Substring(0, Math.Min(50, text.Length))}'";
                         return result;
                     }
 
@@ -10351,7 +10449,7 @@ namespace MEAI_GPT_API.Services
 
                 result.Success = true;
                 result.ActualDimensions = embeddings;
-                result.Message = $ "Successfully generated {embeddings.Count} embeddings with dimensions: {string.Join(", ", embeddings)}";
+                result.Message = $"Successfully generated {embeddings.Count} embeddings with dimensions: {string.Join(", ", embeddings)}";
 
                 _logger.LogInformation($"✅ Embedding model test passed: {modelName}");
             }
@@ -10359,7 +10457,7 @@ namespace MEAI_GPT_API.Services
             {
                 result.Success = false;
                 result.Error = ex.Message;
-                _logger.LogError(ex, $ "Embedding model test failed: {modelName}");
+                _logger.LogError(ex, $"Embedding model test failed: {modelName}");
             }
 
             return result;

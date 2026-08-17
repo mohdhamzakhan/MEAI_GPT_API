@@ -1,7 +1,9 @@
 ﻿using DocumentFormat.OpenXml.Packaging;
+using NPOI.HWPF;
+using NPOI.HWPF.Extractor;
 using System.Text;
 using UglyToad.PdfPig;
-
+using UglyToad.PdfPig.Util;
 
 public class DocumentProcessor : IDocumentProcessor
 {
@@ -10,6 +12,8 @@ public class DocumentProcessor : IDocumentProcessor
     public DocumentProcessor(ILogger<DocumentProcessor> logger)
     {
         _logger = logger;
+
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
     }
 
     public async Task<string> ExtractTextAsync(string filePath)
@@ -20,6 +24,7 @@ public class DocumentProcessor : IDocumentProcessor
         {
             ".pdf" => await ExtractFromPdfAsync(filePath),
             ".docx" => await ExtractFromDocxAsync(filePath),
+            ".doc" => await ExtractFromDocAsync(filePath), // Added .doc support
             _ => await File.ReadAllTextAsync(filePath)
         };
     }
@@ -74,6 +79,29 @@ public class DocumentProcessor : IDocumentProcessor
         {
             _logger.LogError(ex, "Failed to extract text from DOCX: {FilePath}", filePath);
             throw new DocumentProcessingException("Failed to process DOCX", ex);
+        }
+    }
+
+    private async Task<string> ExtractFromDocAsync(string filePath)
+    {
+        try
+        {
+            // NPOI parsing is primarily synchronous. We wrap it in Task.Run 
+            // to prevent blocking the calling thread during heavy file parsing.
+            return await Task.Run(() =>
+            {
+                using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                var document = new HWPFDocument(fs);
+                var extractor = new WordExtractor(document);
+
+                // WordExtractor automatically handles paragraph boundaries
+                return extractor.Text;
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to extract text from DOC: {FilePath}", filePath);
+            throw new DocumentProcessingException("Failed to process DOC", ex);
         }
     }
 }

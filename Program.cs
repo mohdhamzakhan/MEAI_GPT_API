@@ -23,6 +23,8 @@ using System.Text;
 using static MEAI_GPT_API.Controller.LoginController;
 var builder = WebApplication.CreateBuilder(args);
 
+// Add this at the top of Program.cs
+System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
 // Add services to the container.
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddControllers();
