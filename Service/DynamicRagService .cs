@@ -15,6 +15,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using static MEAI_GPT_API.Controller.RagController;
 using static MEAI_GPT_API.Models.Conversation;
 
 namespace MEAI_GPT_API.Services
@@ -223,7 +224,7 @@ namespace MEAI_GPT_API.Services
               ";
 
 
-        File.WriteAllText(abbreviationsPath, abbreviationContent);
+                File.WriteAllText(abbreviationsPath, abbreviationContent);
                 _logger.LogInformation("Created abbreviations context file");
             }
         }
@@ -243,14 +244,12 @@ namespace MEAI_GPT_API.Services
 
 
           These are the fixed organizational details
-          for {
-                            plant
-          }
+          for {plant}
                     plant.
                   ";
 
 
-          File.WriteAllText(plantOrgPath, plantOrgContent);
+                    File.WriteAllText(plantOrgPath, plantOrgContent);
                     _logger.LogInformation($"Created organization context file for {plant}");
                 }
             }
@@ -292,7 +291,8 @@ namespace MEAI_GPT_API.Services
 
             _logger.LogInformation($"📄 Processing {policyFiles.Count} policy files + {contextFiles.Count} context files for {embeddingModels.Count} embedding models");
 
-            var tasks = embeddingModels.Select(async model => {
+            var tasks = embeddingModels.Select(async model =>
+            {
                 _logger.LogInformation($"🔄 Processing documents for model: {model.Name}");
 
                 var collectionId = await _collectionManager.GetOrCreateCollectionAsync(model);
@@ -983,7 +983,8 @@ namespace MEAI_GPT_API.Services
                 var scored = await Task.WhenAll(
                   relevantChunks.OrderByDescending(x => x.Similarity)
                   .Take(5)
-                  .Select(async chunk => {
+                  .Select(async chunk =>
+                  {
                       var emb = await GetPerRequestEmbeddingAsync(chunk.Text);
                       var sim = CosineSimilarity(answerEmbedding, emb);
                       chunk.Similarity = sim;
@@ -2852,7 +2853,8 @@ namespace MEAI_GPT_API.Services
                 // Filter and prepare chunks
                 var validChunks = chunks
                   .Where(chunk => !string.IsNullOrWhiteSpace(chunk.Text))
-                  .Select(chunk => new {
+                  .Select(chunk => new
+                  {
                       Text = _stringProcessor.CleanText(chunk.Text),
                       SourceFile = chunk.SourceFile,
                       ChunkId = GenerateChunkId(chunk.SourceFile, chunk.Text, lastModified, model.Name),
@@ -3148,7 +3150,8 @@ namespace MEAI_GPT_API.Services
         private readonly ConcurrentDictionary<string, (List<RelevantChunk> Results, DateTime Timestamp)> _searchCache = new();
         public static void ConfigureOptimizedHttpClient(IServiceCollection services)
         {
-            services.AddHttpClient("OllamaAPI", client => {
+            services.AddHttpClient("OllamaAPI", client =>
+            {
                 client.Timeout = TimeSpan.FromSeconds(60);
                 client.DefaultRequestHeaders.Add("Connection", "keep-alive");
             })
@@ -3158,7 +3161,8 @@ namespace MEAI_GPT_API.Services
                   UseCookies = false
               });
 
-            services.AddHttpClient("ChromaDB", client => {
+            services.AddHttpClient("ChromaDB", client =>
+            {
                 client.Timeout = TimeSpan.FromSeconds(15); // Reduced from 30
                 client.DefaultRequestHeaders.Add("Connection", "keep-alive");
                 client.DefaultRequestHeaders.Add("Keep-Alive", "timeout=30, max=100");
@@ -3185,7 +3189,8 @@ namespace MEAI_GPT_API.Services
           "HR policy warm-up text"
         };
 
-                var tasks = embeddingModels.Select(async model => {
+                var tasks = embeddingModels.Select(async model =>
+                {
                     try
                     {
                         foreach (var text in warmUpTexts)
@@ -3799,7 +3804,8 @@ namespace MEAI_GPT_API.Services
         private bool IsExactSectionMatch(string lowerText, string sectionNumber)
         {
             if (string.IsNullOrWhiteSpace(sectionNumber)) return false;
-            var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num => {
+            var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num =>
+            {
                 var escaped = Regex.Escape(num);
                 return new Regex($@"\b(?:section|clause|part)\.?\s*{escaped}(?:\.\d+)*\b" + $@"|(?:^|\n)\s*{escaped}\.(?:\d+\.?)*\s", RegexOptions.IgnoreCase | RegexOptions.Compiled);
             });
@@ -10461,6 +10467,89 @@ namespace MEAI_GPT_API.Services
             }
 
             return result;
+        }
+
+        public async Task<ChromaGetResponse> GetDocumentsBySourceFileAsync(
+    string model,
+    string sourceFile,
+    int limit = 50)
+        {
+            if (string.IsNullOrWhiteSpace(model))
+                throw new ArgumentException("Collection ID is required.", nameof(model));
+
+            if (string.IsNullOrWhiteSpace(sourceFile))
+                throw new ArgumentException("Source file is required.", nameof(sourceFile));
+
+            limit = Math.Clamp(limit, 1, 500);
+
+           var  collectionId = _collectionManager.GetCollectionId(model);
+
+            var url =
+                $"/api/v2/tenants/default_tenant" +
+                $"/databases/default_database" +
+                $"/collections/{Uri.EscapeDataString(collectionId)}/get";
+
+            var requestBody = new
+            {
+                where = new Dictionary<string, object>
+                {
+                    ["source_file"] = new Dictionary<string, object>
+                    {
+                        ["$eq"] = sourceFile
+                    }
+                },
+                include = new[]
+                        {
+                            "documents",
+                            "metadatas"
+                        },
+                limit = limit
+            };
+
+            try
+            {
+                _logger.LogInformation(
+                    "Getting ChromaDB documents. Collection={CollectionId}, SourceFile={SourceFile}, Limit={Limit}",
+                    collectionId,
+                    sourceFile,
+                    limit);
+
+                var response = await _chromaClient.PostAsJsonAsync(
+                    url,
+                    requestBody);
+
+                var responseContent = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogError(
+                        "ChromaDB returned {StatusCode}: {Response}",
+                        response.StatusCode,
+                        responseContent);
+
+                    throw new HttpRequestException(
+                        $"ChromaDB request failed. StatusCode={response.StatusCode}, Response={responseContent}");
+                }
+
+                var result = JsonSerializer.Deserialize<ChromaGetResponse>(
+                    responseContent,
+                    new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    });
+
+                return result ?? new ChromaGetResponse();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Failed to get documents from ChromaDB. Collection={CollectionId}, SourceFile={SourceFile}",
+                    collectionId,
+                    sourceFile);
+
+                throw;
+            }
         }
 
         // Supporting class

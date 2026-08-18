@@ -1,6 +1,7 @@
 ﻿using MEAI_GPT_API.Models;
 using MEAI_GPT_API.Services;
 using System.Runtime.CompilerServices;
+using static MEAI_GPT_API.Controller.RagController;
 using static MEAI_GPT_API.Services.DynamicRagService;
 
 public interface IRAGService
@@ -29,6 +30,10 @@ public interface IRAGService
     Task ProcessSingleFileAsync(string filePath, string plant);
     Task ClearAllCachesAsync();
     Task<EmbeddingTestResult> TestEmbeddingModelAsync(string modelName);
+    Task<ChromaGetResponse> GetDocumentsBySourceFileAsync(
+    string model,
+    string sourceFile,
+    int limit = 50);
 
 
 }

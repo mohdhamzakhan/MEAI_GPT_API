@@ -1106,6 +1106,49 @@ namespace MEAI_GPT_API.Controller
             }
         }
 
+        [HttpGet("chroma/documents")]
+        public async Task<IActionResult> GetChromaDocuments(
+    [FromQuery] string model,
+    [FromQuery] string sourceFile,
+    [FromQuery] int limit = 50)
+        {
+            if (string.IsNullOrWhiteSpace(model))
+                return BadRequest("collectionId is required.");
+
+            if (string.IsNullOrWhiteSpace(sourceFile))
+                return BadRequest("sourceFile is required.");
+
+            try
+            {
+                var result = await _ragService.GetDocumentsBySourceFileAsync(
+                    model,
+                    sourceFile,
+                    limit);
+
+                return Ok(result);
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogError(ex, "ChromaDB request failed");
+
+                return StatusCode(502, new
+                {
+                    error = "Unable to communicate with ChromaDB.",
+                    details = ex.Message
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to retrieve ChromaDB documents");
+
+                return StatusCode(500, new
+                {
+                    error = "Failed to retrieve ChromaDB documents.",
+                    details = ex.Message
+                });
+            }
+        }
+
         // Add these DTOs at the end of the file
         public class SessionSummary
         {
@@ -1133,6 +1176,20 @@ namespace MEAI_GPT_API.Controller
         {
             public string FilePath { get; set; } = "";
             public string Plant { get; set; } = "";
+        }
+
+        public class ChromaGetRequest
+        {
+            public Dictionary<string, object>? Where { get; set; }
+            public List<string> Include { get; set; } = new();
+            public int Limit { get; set; } = 50;
+        }
+
+        public class ChromaGetResponse
+        {
+            public List<string>? Ids { get; set; }
+            public List<string>? Documents { get; set; }
+            public List<Dictionary<string, object>>? Metadatas { get; set; }
         }
     }
 }

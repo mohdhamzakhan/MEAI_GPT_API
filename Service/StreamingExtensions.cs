@@ -8,10 +8,17 @@
         public string SectionNumber { get; set; } = "";
         public string DocumentType { get; set; } = "";
         public string OriginalQuery { get; set; } = "";
-        public bool IsAnnexure {  get; set; } = false;
-        public bool HasExplicitDocumentHint {  get; set; } = false;
         public string ReferenceType { get; set; } = "Section";
-
+        public bool HasExplicitDocumentHint { get; set; } = false;
+        /// <summary>
+        /// True for any reference type other than the built-in "Section"
+        /// type. Computed from ReferenceType — NOT independently settable —
+        /// because DetectAndParseSection only ever sets ReferenceType; an
+        /// unconnected settable bool here silently stayed false for every
+        /// Annexure/Clause/etc. query, causing all downstream retrieval
+        /// logic to wrongly treat them as plain Section queries.
+        /// </summary>
+        public bool IsAnnexure => !string.Equals(ReferenceType, "Section", StringComparison.OrdinalIgnoreCase);
     }
     // Supporting classes for diagnostics
     public class DiagnosticInfo
