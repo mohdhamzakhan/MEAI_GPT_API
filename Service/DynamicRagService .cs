@@ -5064,7 +5064,14 @@ namespace MEAI_GPT_API.Services
                     return new List<float>();
                 }
 
-                var maxEmbeddingChars = (int)(model.MaxContextLength * 3.5 * 0.9);
+                // ✅ FIX: previous multiplier (3.5 chars/token, 0.9 margin) was                
+                // tuned for average English prose. Code, JSON, and non-English                
+                // content commonly tokenize far less efficiently (closer to                
+                // 1.5-2.5 chars/token), so a chunk well under the char ceiling                
+                // could still exceed the server's actual token limit — which is                
+                // exactly what caused "input (2121 tokens) is too large" 500s                
+                // even after truncation. Tightened for a bigger safety margin.
+                var maxEmbeddingChars = (int)(model.MaxContextLength * 2.2 * 0.85);
                 if (maxEmbeddingChars < 500) maxEmbeddingChars = 500;
                 if (processedText.Length > maxEmbeddingChars)
                 {
@@ -5074,62 +5081,50 @@ namespace MEAI_GPT_API.Services
                 }
                 _logger.LogDebug($"🔄 Generating embedding for text ({processedText.Length} chars)");
 
+                // ✅ NEW: even with a conservative char-based estimate, dense                
+                // content can still occasionally exceed the server's real                
+                // token limit. Rather than silently returning an empty                
+                // embedding (which causes retrieval to return zero chunks                
+                // and — if the coverage gate doesn't catch it — lets the LLM                
+                // answer ungrounded from its own training knowledge instead                
+                // of refusing), retry once with the text halved before                
+                // giving up.
+
                 // ✅ Use the SIMPLEST request format possible
-                var request = new
+                for (int attempt = 0; attempt < 2; attempt++)
                 {
-                    model = model.Name,
-                    prompt = processedText, // Keep "prompt" - it's standard across Ollama versions
-                    options = new Dictionary<string, object>() // Empty options to avoid conflicts
-                };
+                    var request = new
+                    {
+                        model = model.Name,
+                        prompt = processedText, // Keep "prompt" - it's standard across Ollama versions
+                        options = new Dictionary<string, object>() // Empty options to avoid conflicts
+                    };
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+                    var response = await _ollamaClient.PostAsJsonAsync("/api/embeddings", request, cts.Token);
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var json = await response.Content.ReadAsStringAsync();
 
-                using
-                var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
-                var response = await _ollamaClient.PostAsJsonAsync("/api/embeddings", request, cts.Token);
-
-                if (!response.IsSuccessStatusCode)
-                {
+                        if (string.IsNullOrWhiteSpace(json))
+                        {
+                            _logger.LogError($"❌ Empty response from embedding API");
+                            return new List<float>();
+                        }
+                        return ParseEmbeddingResponse(json, model, cacheKey);
+                    }
                     var errorContent = await response.Content.ReadAsStringAsync();
+                    var isTooLarge = errorContent.Contains("too large", StringComparison.OrdinalIgnoreCase) || errorContent.Contains("batch size", StringComparison.OrdinalIgnoreCase);
+                    if (isTooLarge && attempt == 0)
+                    {
+                        _logger.LogWarning("⚠️ Embedding request rejected as too large ({Chars} chars); retrying once with text halved", processedText.Length);
+                        processedText = processedText.Substring(0, processedText.Length / 2).Trim();
+                        continue;
+                    }
                     _logger.LogError($"❌ Embedding request failed: {response.StatusCode}");
                     _logger.LogError($"Error: {errorContent}");
                     _logger.LogError($"Model: {model.Name}, Text preview: {processedText.Substring(0, Math.Min(100, processedText.Length))}");
                     return new List<float>();
                 }
-
-                var json = await response.Content.ReadAsStringAsync();
-
-                if (string.IsNullOrWhiteSpace(json))
-                {
-                    _logger.LogError($"❌ Empty response from embedding API");
-                    return new List<float>();
-                }
-
-                // ✅ Parse response
-                using
-                var doc = JsonDocument.Parse(json);
-
-                // Try standard format
-                if (doc.RootElement.TryGetProperty("embedding", out
-                    var embeddingProperty))
-                {
-                    var embedding = embeddingProperty.EnumerateArray()
-                      .Select(x => x.GetSingle())
-                      .ToList();
-
-                    if (embedding.Count > 0)
-                    {
-                        // Verify dimension matches
-                        if (model.EmbeddingDimension > 0 && embedding.Count != model.EmbeddingDimension)
-                        {
-                            _logger.LogWarning($"⚠️ Dimension mismatch: got {embedding.Count}, expected {model.EmbeddingDimension}");
-                        }
-
-                        _optimizedEmbeddingCache.TryAdd(cacheKey, (embedding, DateTime.Now, 1));
-                        _logger.LogDebug($"✓ Embedding generated: {embedding.Count}D");
-                        return embedding;
-                    }
-                }
-
-                _logger.LogError($"❌ No embedding in response. JSON: {json.Substring(0, Math.Min(200, json.Length))}");
                 return new List<float>();
             }
             catch (OperationCanceledException)
@@ -5146,6 +5141,106 @@ namespace MEAI_GPT_API.Services
             {
                 _globalEmbeddingSemaphore.Release();
             }
+            //        var request = new
+            //        {
+            //            model = model.Name,
+            //            prompt = processedText, // Keep "prompt" - it's standard across Ollama versions
+            //            options = new Dictionary<string, object>() // Empty options to avoid conflicts
+            //        };
+
+            //        using
+            //        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            //        var response = await _ollamaClient.PostAsJsonAsync("/api/embeddings", request, cts.Token);
+
+            //        if (!response.IsSuccessStatusCode)
+            //        {
+            //            var errorContent = await response.Content.ReadAsStringAsync();
+            //            _logger.LogError($"❌ Embedding request failed: {response.StatusCode}");
+            //            _logger.LogError($"Error: {errorContent}");
+            //            _logger.LogError($"Model: {model.Name}, Text preview: {processedText.Substring(0, Math.Min(100, processedText.Length))}");
+            //            return new List<float>();
+            //        }
+
+            //        var json = await response.Content.ReadAsStringAsync();
+
+            //        if (string.IsNullOrWhiteSpace(json))
+            //        {
+            //            _logger.LogError($"❌ Empty response from embedding API");
+            //            return new List<float>();
+            //        }
+
+            //        // ✅ Parse response
+            //        using
+            //        var doc = JsonDocument.Parse(json);
+
+            //        // Try standard format
+            //        if (doc.RootElement.TryGetProperty("embedding", out
+            //            var embeddingProperty))
+            //        {
+            //            var embedding = embeddingProperty.EnumerateArray()
+            //              .Select(x => x.GetSingle())
+            //              .ToList();
+
+            //            if (embedding.Count > 0)
+            //            {
+            //                // Verify dimension matches
+            //                if (model.EmbeddingDimension > 0 && embedding.Count != model.EmbeddingDimension)
+            //                {
+            //                    _logger.LogWarning($"⚠️ Dimension mismatch: got {embedding.Count}, expected {model.EmbeddingDimension}");
+            //                }
+
+            //                _optimizedEmbeddingCache.TryAdd(cacheKey, (embedding, DateTime.Now, 1));
+            //                _logger.LogDebug($"✓ Embedding generated: {embedding.Count}D");
+            //                return embedding;
+            //            }
+            //        }
+
+            //        _logger.LogError($"❌ No embedding in response. JSON: {json.Substring(0, Math.Min(200, json.Length))}");
+            //        return new List<float>();
+            //    }
+            //catch (OperationCanceledException)
+            //{
+            //    _logger.LogError($"❌ Embedding timeout for model: {model.Name}");
+            //    return new List<float>();
+            //}
+            //catch (Exception ex)
+            //{
+            //    _logger.LogError(ex, $"❌ Embedding failed for model: {model.Name}");
+            //    return new List<float>();
+            //}
+            //finally
+            //{
+            //    _globalEmbeddingSemaphore.Release();
+            //}
+        }
+
+        /// <summary>        
+        /// Parses an Ollama /api/embeddings response and caches the result.        
+        /// Extracted from GetEmbeddingAsync so the retry-on-too-large loop        
+        /// /// there can call it from either attempt without duplicating the        
+        /// /// parsing logic.        
+        /// /// </summary>        
+        private List<float> ParseEmbeddingResponse(string json, ModelConfiguration model, string cacheKey)
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("embedding", out var embeddingProperty))
+            {
+                var embedding = embeddingProperty.EnumerateArray()
+                    .Select(x => x.GetSingle())
+                    .ToList();
+                if (embedding.Count > 0)
+                {
+                    if (model.EmbeddingDimension > 0 && embedding.Count != model.EmbeddingDimension)
+                    {
+                        _logger.LogWarning($"⚠️ Dimension mismatch: got {embedding.Count}, expected {model.EmbeddingDimension}");
+                    }
+                    _optimizedEmbeddingCache.TryAdd(cacheKey, (embedding, DateTime.Now, 1));
+                    _logger.LogDebug($"✓ Embedding generated: {embedding.Count}D");
+                    return embedding;
+                }
+            }
+            _logger.LogError($"❌ No embedding in response. JSON: {json.Substring(0, Math.Min(200, json.Length))}");
+            return new List<float>();
         }
 
         private string StripAllModelTokens(string text)
@@ -10482,7 +10577,7 @@ namespace MEAI_GPT_API.Services
 
             limit = Math.Clamp(limit, 1, 500);
 
-           var  collectionId = _collectionManager.GetCollectionId(model);
+            var collectionId = _collectionManager.GetCollectionId(model);
 
             var url =
                 $"/api/v2/tenants/default_tenant" +
