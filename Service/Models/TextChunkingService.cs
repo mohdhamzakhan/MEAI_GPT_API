@@ -97,7 +97,7 @@ namespace MEAI_GPT_API.Service.Models
 
 
         public List<(string Text, string SourceFile, string SectionId, string Title)> ChunkText(
-            string text, string sourceFile, int maxTokens = 2500)
+            string text, string sourceFile, int maxTokens = 1800)
         {
             text = _stringProcessor.CleanCopyPasteText(text);
 

@@ -5024,7 +5024,13 @@ namespace MEAI_GPT_API.Services
             var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(text));
             return Convert.ToHexString(bytes);
         }
-        private async Task<List<float>> GetEmbeddingAsync(string text, ModelConfiguration model)
+        private Task<List<float>> GetQueryEmbeddingAsync(string text, ModelConfiguration model)
+     => GetEmbeddingAsync(text, model, isQuery: true);
+
+        private Task<List<float>> GetDocumentEmbeddingAsync(string text, ModelConfiguration model)
+            => GetEmbeddingAsync(text, model, isQuery: false);
+
+        private async Task<List<float>> GetEmbeddingAsync(string text, ModelConfiguration model, bool isQuery = false)
         {
             if (string.IsNullOrWhiteSpace(text))
             {
@@ -5038,11 +5044,12 @@ namespace MEAI_GPT_API.Services
                 return new List<float>();
             }
 
-            var cacheKey = $"{model.Name}:{text.GetHashCode():X}";
+            // ✅ Cache key now includes isQuery — "search_query: X" and "search_document: X"
+            // are different inputs to the model and must not share a cache entry.
+            var cacheKey = $"{model.Name}:{isQuery}:{text.GetHashCode():X}";
 
             // Check cache first
-            if (_optimizedEmbeddingCache.TryGetValue(cacheKey, out
-                var cached))
+            if (_optimizedEmbeddingCache.TryGetValue(cacheKey, out var cached))
             {
                 if (DateTime.Now - cached.Cached < TimeSpan.FromHours(24))
                 {
@@ -5064,12 +5071,23 @@ namespace MEAI_GPT_API.Services
                     return new List<float>();
                 }
 
-                // ✅ FIX: previous multiplier (3.5 chars/token, 0.9 margin) was                
-                // tuned for average English prose. Code, JSON, and non-English                
-                // content commonly tokenize far less efficiently (closer to                
-                // 1.5-2.5 chars/token), so a chunk well under the char ceiling                
-                // could still exceed the server's actual token limit — which is                
-                // exactly what caused "input (2121 tokens) is too large" 500s                
+                // ✅ NEW: Nomic embedding models are task-prefixed / asymmetric — they were
+                // trained expecting "search_document: " on indexed content and
+                // "search_query: " on the text being searched with. Without this, retrieval
+                // quality degrades even though the call still "succeeds".
+                var isNomicModel = model.Name.Contains("nomic", StringComparison.OrdinalIgnoreCase);
+                if (isNomicModel)
+                {
+                    var prefix = isQuery ? "search_query: " : "search_document: ";
+                    processedText = prefix + processedText;
+                }
+
+                // ✅ FIX: previous multiplier (3.5 chars/token, 0.9 margin) was
+                // tuned for average English prose. Code, JSON, and non-English
+                // content commonly tokenize far less efficiently (closer to
+                // 1.5-2.5 chars/token), so a chunk well under the char ceiling
+                // could still exceed the server's actual token limit — which is
+                // exactly what caused "input (2121 tokens) is too large" 500s
                 // even after truncation. Tightened for a bigger safety margin.
                 var maxEmbeddingChars = (int)(model.MaxContextLength * 2.2 * 0.85);
                 if (maxEmbeddingChars < 500) maxEmbeddingChars = 500;
@@ -5077,27 +5095,36 @@ namespace MEAI_GPT_API.Services
                 {
                     var originalLength = processedText.Length;
                     processedText = processedText.Substring(0, maxEmbeddingChars).Trim();
-                    _logger.LogWarning("⚠️ Text truncated for embedding: {Original} chars -> {Truncated} chars (model '{Model}' context {Context} tokens). " + "Consider reducing chunk size in TextChunkingService if this happens often.", originalLength, processedText.Length, model.Name, model.MaxContextLength);
+                    _logger.LogWarning(
+                        "⚠️ Text truncated for embedding: {Original} chars -> {Truncated} chars (model '{Model}' context {Context} tokens). " +
+                        "Consider reducing chunk size in TextChunkingService if this happens often.",
+                        originalLength, processedText.Length, model.Name, model.MaxContextLength);
                 }
                 _logger.LogDebug($"🔄 Generating embedding for text ({processedText.Length} chars)");
 
-                // ✅ NEW: even with a conservative char-based estimate, dense                
-                // content can still occasionally exceed the server's real                
-                // token limit. Rather than silently returning an empty                
-                // embedding (which causes retrieval to return zero chunks                
-                // and — if the coverage gate doesn't catch it — lets the LLM                
-                // answer ungrounded from its own training knowledge instead                
-                // of refusing), retry once with the text halved before                
+                // ✅ NEW: even with a conservative char-based estimate, dense
+                // content can still occasionally exceed the server's real
+                // token limit. Rather than silently returning an empty
+                // embedding (which causes retrieval to return zero chunks
+                // and — if the coverage gate doesn't catch it — lets the LLM
+                // answer ungrounded from its own training knowledge instead
+                // of refusing), retry once with the text halved before
                 // giving up.
-
-                // ✅ Use the SIMPLEST request format possible
                 for (int attempt = 0; attempt < 2; attempt++)
                 {
                     var request = new
                     {
                         model = model.Name,
                         prompt = processedText, // Keep "prompt" - it's standard across Ollama versions
-                        options = new Dictionary<string, object>() // Empty options to avoid conflicts
+                                                // ✅ FIX: previously an empty dict, so MaxContextLength from appsettings
+                                                // never actually reached the server — it silently fell back to whatever
+                                                // ctx/batch the server had loaded (e.g. 2048), causing "input X tokens
+                                                // is too large to process" 500s regardless of what was configured here.
+                        options = new Dictionary<string, object>
+                        {
+                            ["num_ctx"] = model.MaxContextLength,
+                            ["num_batch"] = model.MaxContextLength
+                        }
                     };
                     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
                     var response = await _ollamaClient.PostAsJsonAsync("/api/embeddings", request, cts.Token);
@@ -5113,7 +5140,8 @@ namespace MEAI_GPT_API.Services
                         return ParseEmbeddingResponse(json, model, cacheKey);
                     }
                     var errorContent = await response.Content.ReadAsStringAsync();
-                    var isTooLarge = errorContent.Contains("too large", StringComparison.OrdinalIgnoreCase) || errorContent.Contains("batch size", StringComparison.OrdinalIgnoreCase);
+                    var isTooLarge = errorContent.Contains("too large", StringComparison.OrdinalIgnoreCase) ||
+                                      errorContent.Contains("batch size", StringComparison.OrdinalIgnoreCase);
                     if (isTooLarge && attempt == 0)
                     {
                         _logger.LogWarning("⚠️ Embedding request rejected as too large ({Chars} chars); retrying once with text halved", processedText.Length);
@@ -5141,77 +5169,6 @@ namespace MEAI_GPT_API.Services
             {
                 _globalEmbeddingSemaphore.Release();
             }
-            //        var request = new
-            //        {
-            //            model = model.Name,
-            //            prompt = processedText, // Keep "prompt" - it's standard across Ollama versions
-            //            options = new Dictionary<string, object>() // Empty options to avoid conflicts
-            //        };
-
-            //        using
-            //        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
-            //        var response = await _ollamaClient.PostAsJsonAsync("/api/embeddings", request, cts.Token);
-
-            //        if (!response.IsSuccessStatusCode)
-            //        {
-            //            var errorContent = await response.Content.ReadAsStringAsync();
-            //            _logger.LogError($"❌ Embedding request failed: {response.StatusCode}");
-            //            _logger.LogError($"Error: {errorContent}");
-            //            _logger.LogError($"Model: {model.Name}, Text preview: {processedText.Substring(0, Math.Min(100, processedText.Length))}");
-            //            return new List<float>();
-            //        }
-
-            //        var json = await response.Content.ReadAsStringAsync();
-
-            //        if (string.IsNullOrWhiteSpace(json))
-            //        {
-            //            _logger.LogError($"❌ Empty response from embedding API");
-            //            return new List<float>();
-            //        }
-
-            //        // ✅ Parse response
-            //        using
-            //        var doc = JsonDocument.Parse(json);
-
-            //        // Try standard format
-            //        if (doc.RootElement.TryGetProperty("embedding", out
-            //            var embeddingProperty))
-            //        {
-            //            var embedding = embeddingProperty.EnumerateArray()
-            //              .Select(x => x.GetSingle())
-            //              .ToList();
-
-            //            if (embedding.Count > 0)
-            //            {
-            //                // Verify dimension matches
-            //                if (model.EmbeddingDimension > 0 && embedding.Count != model.EmbeddingDimension)
-            //                {
-            //                    _logger.LogWarning($"⚠️ Dimension mismatch: got {embedding.Count}, expected {model.EmbeddingDimension}");
-            //                }
-
-            //                _optimizedEmbeddingCache.TryAdd(cacheKey, (embedding, DateTime.Now, 1));
-            //                _logger.LogDebug($"✓ Embedding generated: {embedding.Count}D");
-            //                return embedding;
-            //            }
-            //        }
-
-            //        _logger.LogError($"❌ No embedding in response. JSON: {json.Substring(0, Math.Min(200, json.Length))}");
-            //        return new List<float>();
-            //    }
-            //catch (OperationCanceledException)
-            //{
-            //    _logger.LogError($"❌ Embedding timeout for model: {model.Name}");
-            //    return new List<float>();
-            //}
-            //catch (Exception ex)
-            //{
-            //    _logger.LogError(ex, $"❌ Embedding failed for model: {model.Name}");
-            //    return new List<float>();
-            //}
-            //finally
-            //{
-            //    _globalEmbeddingSemaphore.Release();
-            //}
         }
 
         /// <summary>        
