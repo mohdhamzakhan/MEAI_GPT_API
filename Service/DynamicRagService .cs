@@ -9083,11 +9083,9 @@ namespace MEAI_GPT_API.Services
                     stream = true,
                     options = new
                     {
-                        temperature = 0.7,
-                        //num_predict = 16000,
-                        //num_ctx = 16384,
-                        num_ctx = 32768, // ← was 16384: double to fit prompt + generous response
-                        num_predict = 8192, // ← was 16000: must be < (num_ctx − input_tokens)
+                        temperature = 0.1,
+                        num_ctx = 32768,
+                        num_predict = 8192,
                         repeat_penalty = 1.1
                     }
                 };
