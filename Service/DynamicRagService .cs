@@ -876,7 +876,7 @@ namespace MEAI_GPT_API.Services
                 async Task<List<float>> GetPerRequestEmbeddingAsync(string text)
                 {
                     if (string.IsNullOrWhiteSpace(text)) return new List<float>();
-                    var task = _perRequestEmbeddings.GetOrAdd(text, _ => GetEmbeddingAsync(text, embModel));
+                    var task = _perRequestEmbeddings.GetOrAdd(text, _ => GetQueryEmbeddingAsync(text, embModel));
                     try
                     {
                         var emb = await task;
@@ -1071,8 +1071,8 @@ namespace MEAI_GPT_API.Services
         {
             try
             {
-                var questionEmbedding = await GetEmbeddingAsync(question, embeddingModel);
-                var answerEmbedding = await GetEmbeddingAsync(answer, embeddingModel);
+                var questionEmbedding = await GetDocumentEmbeddingAsync(question, embeddingModel);
+                var answerEmbedding = await GetDocumentEmbeddingAsync(answer, embeddingModel);
 
                 // Extract named entities from the answer
                 var namedEntities = await _entityExtraction.ExtractEntitiesAsync(answer);
@@ -1996,7 +1996,7 @@ namespace MEAI_GPT_API.Services
                 var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
                 if (embeddingModel == null) return null;
 
-                var inputEmbedding = await GetEmbeddingAsync(question, embeddingModel);
+                var inputEmbedding = await GetQueryEmbeddingAsync(question, embeddingModel);
                 if (inputEmbedding == null || inputEmbedding.Count == 0) return null;
 
                 (string Answer, List<RelevantChunk> Chunks, double Sim) best =
@@ -2004,9 +2004,9 @@ namespace MEAI_GPT_API.Services
 
                 foreach (var entry in _appreciatedAnswerStore.All())
                 {
-                    var entryEmb = await GetEmbeddingAsync(entry.Question, embeddingModel);
+                    var entryEmb = await GetDocumentEmbeddingAsync(entry.Question, embeddingModel);
                     var sim = CosineSimilarity(inputEmbedding, entryEmb);
-                    if (sim >= 0.8 && sim > best.Sim)
+                    if (sim >= 0.92 && sim > best.Sim)
                         best = (entry.Answer, entry.Chunks, sim);
                 }
 
@@ -2310,7 +2310,7 @@ namespace MEAI_GPT_API.Services
         public async Task SaveCorrectionAsync(string question, string correctAnswer, string model)
         {
             var modelConfig = await _modelManager.GetModelAsync(model);
-            var embedding = await GetEmbeddingAsync(question, modelConfig);
+            var embedding = await GetDocumentEmbeddingAsync(question, modelConfig);
 
             var entry = new CorrectionEntry
             {
@@ -2707,7 +2707,7 @@ namespace MEAI_GPT_API.Services
                         {
                             // Try to generate embedding for better matching
                             var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
-                            inputEmbedding = await GetEmbeddingAsync(question, embeddingModel!);
+                            inputEmbedding = await GetDocumentEmbeddingAsync(question, embeddingModel!);
                         }
                         catch (Exception ex)
                         {
@@ -2753,7 +2753,7 @@ namespace MEAI_GPT_API.Services
                     var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
                     if (embeddingModel != null)
                     {
-                        inputEmbedding = await GetEmbeddingAsync(question, embeddingModel);
+                        inputEmbedding = await GetQueryEmbeddingAsync(question, embeddingModel);
                     }
                 }
                 catch (Exception ex)
@@ -2783,7 +2783,7 @@ namespace MEAI_GPT_API.Services
                         }
 
                         // Accept matches with similarity >= 0.75 for semantic, >= 0.8 for text-only
-                        double threshold = (inputEmbedding.Count > 0 && correction.Embedding?.Count > 0) ? 0.75 : 0.8;
+                        double threshold = (inputEmbedding.Count > 0 && correction.Embedding?.Count > 0) ? 0.8 : 0.92;
 
                         if (similarity >= threshold)
                         {
@@ -2983,7 +2983,7 @@ namespace MEAI_GPT_API.Services
             {
                 try
                 {
-                    var embedding = await GetEmbeddingAsync(text, model);
+                    var embedding = await GetDocumentEmbeddingAsync(text, model);
 
                     // Validate embedding
                     if (embedding != null && embedding.Count == model.EmbeddingDimension)
@@ -4300,7 +4300,7 @@ namespace MEAI_GPT_API.Services
                   contextualQuery :
                   expandedQuery;
 
-                var queryEmbedding = await GetEmbeddingAsync(effectiveQuery, embeddingModel);
+                var queryEmbedding = await GetQueryEmbeddingAsync(effectiveQuery, embeddingModel);
 
                 if (queryEmbedding == null || queryEmbedding.Count == 0)
                 {
@@ -4423,7 +4423,7 @@ namespace MEAI_GPT_API.Services
         {
             try
             {
-                var queryEmbedding = await GetEmbeddingAsync(query, embeddingModel);
+                var queryEmbedding = await GetQueryEmbeddingAsync(query, embeddingModel);
                 if (queryEmbedding.Count == 0)
                 {
                     _logger.LogError($"❌ Failed to generate embedding for query: {query}");
@@ -4521,7 +4521,7 @@ namespace MEAI_GPT_API.Services
                 // General search without section-specific filtering
                 _logger.LogInformation($"🔍 Performing general search for: {query}");
 
-                var queryEmbedding = await GetEmbeddingAsync(query, embeddingModel);
+                var queryEmbedding = await GetQueryEmbeddingAsync(query, embeddingModel);
                 if (queryEmbedding.Count == 0)
                 {
                     return new List<RelevantChunk>();
@@ -8212,8 +8212,8 @@ namespace MEAI_GPT_API.Services
                   context.SessionId, context.UserId, plant);
 
                 // FIX 4 — generate embeddings once, reuse
-                var questionEmbedding = await GetEmbeddingAsync(question, embModel);
-                var answerEmbedding = await GetEmbeddingAsync(answer, embModel);
+                var questionEmbedding = await GetDocumentEmbeddingAsync(question, embModel);
+                var answerEmbedding = await GetDocumentEmbeddingAsync(answer, embModel);
                 var entities = await _entityExtraction.ExtractEntitiesAsync(answer);
 
                 var entry = new ConversationEntry
@@ -10491,7 +10491,7 @@ namespace MEAI_GPT_API.Services
 
                 foreach (var text in testTexts)
                 {
-                    var embedding = await GetEmbeddingAsync(text, model);
+                    var embedding = await GetDocumentEmbeddingAsync(text, model);
 
                     if (embedding == null || embedding.Count == 0)
                     {
