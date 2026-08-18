@@ -2618,7 +2618,7 @@ namespace MEAI_GPT_API.Services
             {
                 model = modelName ?? _config.DefaultGenerationModel,
                 messages,
-                temperature = 0.7,
+                temperature = 0.1,
                 stream = true,
                 options = new Dictionary<string, object> {
             {
@@ -9979,7 +9979,7 @@ namespace MEAI_GPT_API.Services
             {
                 model = modelName,
                 messages,
-                temperature = 0.7,
+                temperature = 0.1,
                 stream = true,
                 options = new Dictionary<string, object>
                 {

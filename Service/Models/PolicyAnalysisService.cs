@@ -326,45 +326,39 @@ namespace MEAI_GPT_API.Service.Models
                 return false;
             }
 
-            // More flexible coverage criteria for HR policies
             var veryHighQuality = chunks.Where(c => c.Similarity >= 0.7).ToList();
-            var highQualityChunks = chunks.Where(c => c.Similarity >= 0.4).ToList(); // Lowered from 0.5
-            var mediumQualityChunks = chunks.Where(c => c.Similarity >= 0.25).ToList(); // Lowered from 0.3
-            var anyRelevantChunks = chunks.Where(c => c.Similarity >= 0.15).ToList(); // Very permissive
+            var highQualityChunks = chunks.Where(c => c.Similarity >= 0.4).ToList();
+            var mediumQualityChunks = chunks.Where(c => c.Similarity >= 0.25).ToList();
 
-            // Check for HR policy keywords in the chunks
-            var hrPolicyKeywords = new[] { "leave", "cl", "casual", "sick", "policy", "employee", "hr", "rule", "regulation", "procedure" };
-            var hasHrPolicyContent = chunks.Any(c =>
-                hrPolicyKeywords.Any(keyword => c.Text.ToLowerInvariant().Contains(keyword)) ||
-                c.Source.ToLowerInvariant().Contains("policy") ||
-                c.Source.ToLowerInvariant().Contains("hr"));
+            var questionWords = question
+                .ToLowerInvariant()
+                .Split(new[] { ' ', ',', '.', '?', '!' }, StringSplitOptions.RemoveEmptyEntries)
+                .Where(w => w.Length > 3)
+                .ToHashSet();
 
-            // Enhanced coverage criteria:
+            bool HasTopicalOverlap(RelevantChunk c)
+            {
+                if (!questionWords.Any()) return false;
+                var chunkWords = c.Text.ToLowerInvariant();
+                var matchCount = questionWords.Count(qw => chunkWords.Contains(qw));
+                return matchCount >= Math.Min(2, questionWords.Count);
+            }
+
             var hasSufficientCoverage =
-                veryHighQuality.Any() ||                           // At least one very high match
-                highQualityChunks.Count >= 1 ||                    // At least one good match  
-                (mediumQualityChunks.Count >= 2 && hasHrPolicyContent) || // Multiple medium matches with HR content
-                (anyRelevantChunks.Count >= 3 && hasHrPolicyContent);      // Many low matches with HR content
-
+                veryHighQuality.Any() ||
+                highQualityChunks.Any(HasTopicalOverlap) ||
+                mediumQualityChunks.Count(HasTopicalOverlap) >= 2;
 
             if (!hasSufficientCoverage)
             {
                 _logger.LogWarning($"⚠️ Insufficient policy coverage for question: {question}. " +
                                   $"Very High: {veryHighQuality.Count}, High: {highQualityChunks.Count}, " +
-                                  $"Medium: {mediumQualityChunks.Count}, Any: {anyRelevantChunks.Count}, " +
-                                  $"HR Content: {hasHrPolicyContent}");
+                                  $"Medium: {mediumQualityChunks.Count}");
 
-                // Log chunk details for debugging
                 foreach (var chunk in chunks.Take(3))
                 {
                     _logger.LogInformation($"📄 Chunk: {chunk.Source} | Similarity: {chunk.Similarity:F3} | Text: {chunk.Text.Substring(0, Math.Max(100, chunk.Text.Length - 1))}");
                 }
-            }
-            else
-            {
-                _logger.LogInformation($"✅ Sufficient policy coverage found. " +
-                                      $"Very High: {veryHighQuality.Count}, High: {highQualityChunks.Count}, " +
-                                      $"Medium: {mediumQualityChunks.Count}");
             }
 
             return hasSufficientCoverage;
