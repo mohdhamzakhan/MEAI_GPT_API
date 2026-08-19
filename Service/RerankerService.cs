@@ -25,43 +25,18 @@ namespace MEAI_GPT_API.Service
             if (chunks == null || chunks.Count == 0)
                 return chunks;
 
-            var scores = new double[chunks.Count];
-
-            // ✅ Bounded concurrency: each rerank call is a full LLM inference
-            // round-trip, so unbounded parallelism would overwhelm Ollama, but
-            // running fully sequential (as before) means total latency scales
-            // linearly with candidate count — N chunks = N x full-inference-latency.
-            // 4 concurrent requests is a conservative starting point; tune based
-            // on observed Ollama load.
-            using var semaphore = new SemaphoreSlim(4, 4);
-
-            var tasks = chunks.Select(async (chunk, i) =>
-            {
-                await semaphore.WaitAsync();
-                try
-                {
-                    scores[i] = await ScoreChunkAsync(query, chunk, modelName, i);
-                }
-                finally
-                {
-                    semaphore.Release();
-                }
-            });
-
-            await Task.WhenAll(tasks);
-
-            return scores
-                .Select((score, i) => (Index: i, Score: score))
-                .OrderByDescending(s => s.Score)
+            // ⚠️ TEMPORARY: qllama/bge-reranker-v2-m3 (both :f16 and :latest tags) was
+            // pulled from Ollama's registry with logits computation disabled, so it
+            // cannot generate text via /api/generate — every call 500s with
+            // "the current context does not logits computation. skipping". This is a
+            // property of how the model was packaged, not a prompt/config issue on
+            // our side. Skipping reranking entirely until a working reranker model is
+            // available (see options below) — falls back to raw vector similarity,
+            // which is already producing strong (0.7+) scores post-embedding-fix.
+            _logger.LogInformation("Reranking skipped (model unavailable) — using raw similarity ranking");
+            return chunks
+                .OrderByDescending(c => c.Similarity)
                 .Take(topK)
-                .Select(s =>
-                {
-                    // Keep raw cosine Similarity untouched — store the reranker's
-                    // opinion separately so downstream confidence/threshold logic
-                    // that assumes Similarity == raw cosine still holds.
-                    chunks[s.Index].RerankScore = s.Score;
-                    return chunks[s.Index];
-                })
                 .ToList();
         }
 
@@ -79,7 +54,7 @@ Passage:
 {chunk.Text}
 """;
 
-            var request = new { model = modelName, prompt = prompt, stream = false };
+            var request = new { model = modelName, prompt = prompt, stream = false, raw = true };
 
             try
             {

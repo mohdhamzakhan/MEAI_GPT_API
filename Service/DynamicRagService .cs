@@ -7458,6 +7458,29 @@ namespace MEAI_GPT_API.Services
                 };
             }
 
+            // ✅ NEW: actually act on a failed verification instead of just reporting it.
+            // A grounding failure specifically (not just "incomplete") means the answer
+            // likely contains fabricated content — surfacing it to the user as-is defeats
+            // the entire purpose of running SelfVerifier.
+            if (verification.NeedsReprocessing && !verification.IsGrounded)
+            {
+                _logger.LogWarning(
+                    "⚠️ Self-verification flagged ungrounded answer (confidence {Confidence:P0}) — " +
+                    "replacing with refusal instead of streaming a likely-hallucinated response.",
+                    verification.OverallConfidence);
+
+                yield return new StreamChunk
+                {
+                    Type = "content",
+                    Content = $"I want to make sure I give you accurate information, but I'm not confident " +
+                              $"the answer I generated is fully grounded in {plant}'s policy documents. " +
+                              $"Please contact your supervisor or HR department for clarification on this matter."
+                };
+
+                yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+                yield break;
+            }
+
             // ============================
             // SAVE TO DATABASE
             // ============================

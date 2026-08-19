@@ -62,15 +62,35 @@ public class DocumentProcessor : IDocumentProcessor
 
             var text = new StringBuilder();
 
-            // Extract with better paragraph separation
-            foreach (var paragraph in mainPart.Document.Body.Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>())
+            // ✅ FIX: .Elements<Paragraph>() only returns direct children of Body,
+            // silently skipping any paragraph nested inside a table (Table -> TableRow ->
+            // TableCell -> Paragraph). Policy documents commonly put substantive content
+            // (allowance tables, eligibility criteria, checklists) inside tables, so this
+            // was extracting only headings/intro text and losing the real content while
+            // still indexing the file under its correct name — producing a chunk that
+            // looks legitimate but has nothing for the LLM to actually ground on.
+            // .Descendants<Paragraph>() walks the whole tree, including table cells.
+            foreach (var paragraph in mainPart.Document.Body.Descendants<DocumentFormat.OpenXml.Wordprocessing.Paragraph>())
             {
                 var paragraphText = paragraph.InnerText.Trim();
                 if (!string.IsNullOrEmpty(paragraphText))
                 {
                     text.AppendLine(paragraphText);
-                    text.AppendLine(); // Add extra line break for paragraph separation
+                    text.AppendLine();
                 }
+            }
+
+            // Optional but recommended: also walk tables explicitly so row/column
+            // structure isn't flattened into a meaningless run of cell text.
+            foreach (var table in mainPart.Document.Body.Descendants<DocumentFormat.OpenXml.Wordprocessing.Table>())
+            {
+                foreach (var row in table.Elements<DocumentFormat.OpenXml.Wordprocessing.TableRow>())
+                {
+                    var cells = row.Elements<DocumentFormat.OpenXml.Wordprocessing.TableCell>()
+                        .Select(c => c.InnerText.Trim());
+                    text.AppendLine(string.Join(" | ", cells));
+                }
+                text.AppendLine();
             }
 
             return text.ToString();
