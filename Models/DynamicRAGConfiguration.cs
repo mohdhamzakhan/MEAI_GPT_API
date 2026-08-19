@@ -3,6 +3,7 @@
     public class DynamicRAGConfiguration
     {
         public string DefaultGenerationModel { get; set; } = string.Empty;
+        public string GroundingRetryModel { get; set; } = string.Empty;
         public string DefaultEmbeddingModel { get; set; } = string.Empty;
         public string DefaultCodingModel { get; set; } = string.Empty;
         public string VerifierModel { get; set; } = string.Empty;
