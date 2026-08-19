@@ -50,7 +50,7 @@ namespace MEAIGPTAPI.Services
             _healthCheckTimer = new Timer(
                 async _ => await PerformHealthCheckAsync(),
                 null,
-                TimeSpan.FromSeconds(5), // Initial delay
+                TimeSpan.FromSeconds(1), // Initial delay
                 TimeSpan.FromSeconds(_healthCheckInterval));
         }
 

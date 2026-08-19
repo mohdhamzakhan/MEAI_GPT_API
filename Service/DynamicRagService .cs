@@ -7156,103 +7156,6 @@ namespace MEAI_GPT_API.Services
             // ============================
             // NON-MEAI → DIRECT LLM ONLY
             // ============================
-
-            //if (!meaiInfo)
-            //{
-            //    _logger.LogInformation("📝 Processing non-MEAI query");
-
-            //    // ✅ LOG CURRENT HISTORY STATE
-            //    _logger.LogInformation($"📚 Current history count: {agentContext.History.Count}");
-            //    if (agentContext.History.Any())
-            //    {
-            //        foreach (var h in agentContext.History.TakeLast(3))
-            //        {
-            //            _logger.LogInformation($"  Q: {h.Question.Substring(0, Math.Min(50, h.Question.Length))}");
-            //            _logger.LogInformation($"  A: {h.Answer.Substring(0, Math.Min(50, h.Answer.Length))}...");
-            //        }
-            //    }
-            //    else
-            //    {
-            //        _logger.LogWarning("⚠️ No history available for non-MEAI query");
-            //    }
-
-            //    yield return new StreamChunk { Type = "status", Content = "Generating response..." };
-
-            //    var full = new StringBuilder();
-
-            //    await foreach (var token in GenerateNonMeaiStreamDirectAsync(
-            //        question,
-            //        genModel.Name!,
-            //        agentContext.History,
-            //        cancellationToken))
-            //    {
-            //        full.Append(token);
-            //        yield return new StreamChunk { Type = "response", Content = token };
-            //    }
-
-            //    var nonMeaiResponseText = full.ToString();
-
-            //    // ✅ CRITICAL FIX: Save the conversation to database AND update context
-            //    if (!string.IsNullOrWhiteSpace(nonMeaiResponseText))
-            //    {
-            //        try
-            //        {
-            //            _logger.LogInformation("💾 Saving non-MEAI conversation...");
-
-            //            // Save to database
-            //            var conversationId = await SaveNonMeaiConversationToDatabase(
-            //                agentContext.SessionId,
-            //                question,
-            //                nonMeaiResponseText,
-            //                genModel,
-            //                0.8,
-            //                stopwatch.ElapsedMilliseconds,
-            //                false,
-            //                plant);
-
-            //            _logger.LogInformation($"✅ Saved non-MEAI conversation with ID: {conversationId}");
-
-            //            // ✅ CRITICAL: Update in-memory context immediately
-            //            agentContext.History.Add(new ConversationTurn
-            //            {
-            //                Question = question,
-            //                Answer = nonMeaiResponseText,
-            //                Timestamp = DateTime.Now,
-            //                Sources = new List<string> { "General Knowledge" }
-            //            });
-
-            //            // Keep only last 10 turns
-            //            if (agentContext.History.Count > 10)
-            //            {
-            //                agentContext.History = agentContext.History.TakeLast(10).ToList();
-            //            }
-
-            //            _logger.LogInformation($"📚 Updated agentContext.History, now has {agentContext.History.Count} turns");
-
-            //            // ✅ ALSO: Update the session in conversation storage
-            //            var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
-            //                agentContext.SessionId,
-            //                agentContext.UserId,
-            //                plant);
-
-            //            dbSession.LastAccessedAt = DateTime.Now;
-            //            await _conversationStorage.UpdateSessionAsync(dbSession);
-            //        }
-            //        catch (Exception ex)
-            //        {
-            //            _logger.LogError(ex, "Failed to save non-MEAI conversation");
-            //        }
-            //    }
-
-            //    yield return new StreamChunk
-            //    {
-            //        Type = "complete",
-            //        ProcessingTimeMs = stopwatch.ElapsedMilliseconds
-            //    };
-
-            //    yield break;
-            //}
-
             if (!meaiInfo)
             {
                 yield
@@ -7280,12 +7183,6 @@ namespace MEAI_GPT_API.Services
 
                 if (!string.IsNullOrWhiteSpace(full.ToString()))
                 {
-                    // Save in scoped background task (FIX 1)
-                    //_ = Task.Run(() => SaveConversationSafelyAsync(
-                    //    agentContext, question, full.ToString(),
-                    //    new List<RelevantChunk>(), genModel, embModel,
-                    //    plant, null, stopwatch.ElapsedMilliseconds), cancellationToken);
-
                     _ = SaveConversationSafelyAsync(
                       agentContext, question, full.ToString(),
                       new List<RelevantChunk>(), genModel, embModel,
@@ -7356,10 +7253,6 @@ namespace MEAI_GPT_API.Services
                     Sources = finalChunks.Select(c => c.Source).Distinct().ToList()
                 };
 
-                // ✅ NEW: deterministic, code-built annexure links (never
-                // LLM-generated) so the frontend can render real, clickable
-                // references. No-op dictionary stays empty/omitted if
-                // AnnexureLinks:Enabled is false in appsettings.json.
                 var combinedAnnexureLinks = finalChunks
                   .Where(c => c.AnnexureLinks != null)
                   .SelectMany(c => c.AnnexureLinks!)
@@ -7378,7 +7271,14 @@ namespace MEAI_GPT_API.Services
             }
 
             // ============================
-            // RESPONSE GENERATION (FIXED)
+            // RESPONSE GENERATION
+            // ✅ CHANGED: Tokens are no longer streamed live to the client during
+            // generation. Previously each token was yielded the instant it arrived,
+            // meaning the full (possibly hallucinated) answer was already fully
+            // rendered in the UI before SelfVerifier ever ran — a post-hoc refusal
+            // could never "un-display" content the user had already seen. Now we
+            // buffer the complete response, verify it, and only then stream the
+            // final (approved or refused) answer as a single chunk.
             // ============================
             yield
             return new StreamChunk
@@ -7388,6 +7288,8 @@ namespace MEAI_GPT_API.Services
             };
 
             var fullResponse = new StringBuilder();
+            var generationErrored = false;
+            string? generationErrorContent = null;
 
             await foreach (var token in GenerateResponseFromContext(
               question,
@@ -7400,23 +7302,25 @@ namespace MEAI_GPT_API.Services
             {
                 if (token.StartsWith("__ERROR__:"))
                 {
-                    yield
-                    return new StreamChunk
-                    {
-                        Type = "error",
-                        Content = token[10..]
-                    };
-                    yield
+                    generationErrored = true;
+                    generationErrorContent = token[10..];
                     break;
                 }
 
                 fullResponse.Append(token);
+                // ❌ No longer yielding "response" chunks here — buffered instead.
+            }
+
+            if (generationErrored)
+            {
                 yield
                 return new StreamChunk
                 {
-                    Type = "response",
-                    Content = token
+                    Type = "error",
+                    Content = generationErrorContent
                 };
+                yield
+                break;
             }
 
             var responseText = fullResponse.ToString();
@@ -7458,34 +7362,41 @@ namespace MEAI_GPT_API.Services
                 };
             }
 
-            // ✅ NEW: actually act on a failed verification instead of just reporting it.
-            // A grounding failure specifically (not just "incomplete") means the answer
-            // likely contains fabricated content — surfacing it to the user as-is defeats
-            // the entire purpose of running SelfVerifier.
-            if (verification.NeedsReprocessing && !verification.IsGrounded)
+            // ✅ Act on a failed grounding check BEFORE anything reaches the client —
+            // this now runs before the answer is ever streamed, not after.
+            string finalAnswer = responseText;
+            bool wasRefused = false;
+
+            if (verification != null && verification.NeedsReprocessing && !verification.IsGrounded)
             {
                 _logger.LogWarning(
                     "⚠️ Self-verification flagged ungrounded answer (confidence {Confidence:P0}) — " +
                     "replacing with refusal instead of streaming a likely-hallucinated response.",
                     verification.OverallConfidence);
 
-                yield return new StreamChunk
-                {
-                    Type = "content",
-                    Content = $"I want to make sure I give you accurate information, but I'm not confident " +
+                finalAnswer = $"I want to make sure I give you accurate information, but I'm not confident " +
                               $"the answer I generated is fully grounded in {plant}'s policy documents. " +
-                              $"Please contact your supervisor or HR department for clarification on this matter."
-                };
-
-                yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
-                yield break;
+                              $"Please contact your supervisor or HR department for clarification on this matter.";
+                wasRefused = true;
             }
+
+            // ============================
+            // STREAM FINAL (VERIFIED) ANSWER
+            // ✅ NEW: single point where the answer actually reaches the client —
+            // guaranteed to happen only after verification has completed.
+            // ============================
+            yield
+            return new StreamChunk
+            {
+                Type = "response",
+                Content = finalAnswer
+            };
 
             // ============================
             // SAVE TO DATABASE
             // ============================
             _ = SaveConversationSafelyAsync(
-              agentContext, question, responseText, finalChunks,
+              agentContext, question, finalAnswer, finalChunks,
               genModel, embModel, plant, verification, stopwatch.ElapsedMilliseconds);
 
             stopwatch.Stop();
