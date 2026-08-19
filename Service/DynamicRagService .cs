@@ -8032,10 +8032,6 @@ namespace MEAI_GPT_API.Services
                 }
                 else
                 {
-
-                    // Expand query
-                    var expandedQuery = _abbreviationService.ExpandQuery(question);
-
                     // Get or create conversation context for the session
                     var conversationContext = _conversation.GetOrCreateConversationContext(context.SessionId);
 
@@ -8048,9 +8044,46 @@ namespace MEAI_GPT_API.Services
                         Sources = h.Sources
                     }).ToList();
 
-                    // Retrieve chunks using the existing method
+                    // ✅ NEW: detect a genuine topic change and reset topic-tracking context
+                    // before deciding how to anchor retrieval. Without this, BuildContextualQuery
+                    // below would keep anchoring every follow-up to whatever topic was discussed
+                    // first in the session, even after the user has clearly moved on to something
+                    // unrelated — this mirrors the same check already used in the non-streaming
+                    // path (ProcessQueryAsync), just wired into the streaming path too.
+                    if (_conversationAnalysis.IsTopicChanged(question, conversationContext))
+                    {
+                        _logger.LogInformation(
+                            "🔄 Topic changed for session {SessionId}; resetting retrieval context",
+                            context.SessionId);
+                        ClearContext(conversationContext);
+                    }
+
+                    // ✅ NEW: anchor follow-up questions to the prior turn's topic before
+                    // retrieval. "please tell me more about the reimbursement..." on its
+                    // own reads as a generic reimbursement query and can drift to unrelated
+                    // documents (e.g. Refreshment Reimbursement Policy) instead of staying
+                    // on the actual topic (Foreign Travel Policy, Section 6). Only fires
+                    // when IsTopicChanged (above) did NOT reset the context, and only when
+                    // the current question actually contains a continuation/pronoun signal —
+                    // a genuinely new question is passed through unchanged.
+                    var retrievalQuery = _conversationAnalysis.BuildContextualQuery(question, conversationContext.History);
+
+                    if (retrievalQuery != question)
+                    {
+                        _logger.LogInformation(
+                            "🔗 Follow-up detected — anchoring retrieval query to prior topic: '{Query}'",
+                            retrievalQuery.Length > 120 ? retrievalQuery.Substring(0, 120) + "..." : retrievalQuery);
+                    }
+
+                    // Expand query
+                    var expandedQuery = _abbreviationService.ExpandQuery(question);
+
+                    // ✅ CHANGED: pass retrievalQuery (topic-anchored, or unchanged if not a
+                    // follow-up / topic reset) instead of raw question for the vector search
+                    // only. The original `question` still flows unchanged into generation,
+                    // verification, and saving — only retrieval benefits from the extra context.
                     chunks = await GetRelevantChunksWithExpansionAsync(
-                      question,
+                      retrievalQuery,
                       embModel,
                       maxResults,
                       true,
