@@ -60,7 +60,18 @@ namespace MEAI_GPT_API.Services.Agent
                 // 2. Check factual grounding (for MEAI queries)
                 if (checkFactuality && sources.Any())
                 {
-                    result.IsGrounded = await CheckGroundingAsync(response, sources);
+                    var (isGrounded, reason) = await CheckGroundingAsync(response, sources);
+                    result.IsGrounded = isGrounded;
+                    if (!isGrounded && reason != null)
+                    {
+                        // Stashed on Metadata (rather than a new top-level
+                        // field) so it flows through to the "metadata"
+                        // StreamChunk already sent to the client without
+                        // touching DynamicRagService's serialization code —
+                        // makes a false "ungrounded" verdict debuggable from
+                        // the frontend console instead of only server logs.
+                        result.Metadata["grounding_reason"] = reason;
+                    }
                 }
                 else
                 {
@@ -125,10 +136,21 @@ Answer with ONLY 'yes' or 'no'.";
             }
         }
 
-        private async Task<bool> CheckGroundingAsync(string response, List<RelevantChunk> sources)
+        private async Task<(bool IsGrounded, string? Reason)> CheckGroundingAsync(string response, List<RelevantChunk> sources)
         {
-            var sourceText = string.Join("\n\n", sources.Take(3).Select(s => s.Text));
+            // Previously only the top 3 chunks were shown to the verifier
+            // (sources.Take(3)), while generation itself sees the full
+            // retrieved set. If the specific fact the answer relies on came
+            // from chunk #4+, the verifier would correctly-but-wrongly flag
+            // a factually accurate answer as "ungrounded". Widen this to the
+            // top 6 to better match what generation actually saw, while
+            // still keeping the prompt bounded.
+            var sourceText = string.Join("\n\n", sources.Take(6).Select(s => s.Text));
 
+            // Ask for one short reason alongside the verdict so failures are
+            // debuggable from logs instead of being an opaque yes/no. The
+            // reason is parsed out for logging only — the verdict is still
+            // just the leading yes/no token.
             var prompt = $@"Is the following response factually grounded in the source material?
 
 Source Material:
@@ -137,18 +159,33 @@ Source Material:
 Response:
 {response}
 
-Answer with ONLY 'yes' or 'no'. The response should not make claims that aren't supported by the sources.";
+Reply on the first line with ONLY 'yes' or 'no'. On the second line, give one short sentence explaining why. The response should not make claims that aren't supported by the sources.";
 
             try
             {
-                var llmResponse = await CallLLMAsync(prompt, _verifierModel);
-                return llmResponse.ToLowerInvariant().Contains("yes");
+                // num_predict bumped from the default 10 to 60 here so the
+                // model has room to actually write the one-sentence reason
+                // requested above, not just the yes/no token.
+                var llmResponse = await CallLLMAsync(prompt, _verifierModel, numPredict: 60);
+                var lines = llmResponse.Split('\n', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                var firstLine = lines.Length > 0 ? lines[0] : "";
+                var isGrounded = firstLine.ToLowerInvariant().Contains("yes");
+                var reason = lines.Length > 1 ? lines[1] : null;
+
+                if (!isGrounded)
+                {
+                    _logger.LogWarning(
+                        "Grounding check returned 'no' (model '{Model}'). Verifier reasoning: {Reasoning}",
+                        _verifierModel, llmResponse);
+                }
+
+                return (isGrounded, reason);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Grounding check failed (model '{Model}'); conservatively assuming grounded — this means hallucination checking did NOT run for this response", _verifierModel);
                 // Conservative: assume it's grounded if we can't verify
-                return true;
+                return (true, null);
             }
         }
 
@@ -192,14 +229,14 @@ Answer with ONLY 'yes' or 'no'. The response should not make claims that aren't 
             return Math.Max(0.0, Math.Min(1.0, confidence));
         }
 
-        private async Task<string> CallLLMAsync(string prompt, string model)
+        private async Task<string> CallLLMAsync(string prompt, string model, int numPredict = 10)
         {
             var requestData = new
             {
                 model = model,
                 prompt = prompt,
                 stream = false,
-                options = new { temperature = 0.0, num_predict = 10 }
+                options = new { temperature = 0.0, num_predict = numPredict }
             };
 
             var response = await _ollamaClient.PostAsJsonAsync("/api/generate", requestData);

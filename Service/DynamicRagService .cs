@@ -222,9 +222,8 @@ namespace MEAI_GPT_API.Services
 
         These abbreviations are standard across all MEAI HR policies and should be interpreted consistently.
               ";
-
-
-                File.WriteAllText(abbreviationsPath, abbreviationContent);
+      
+        File.WriteAllText(abbreviationsPath, abbreviationContent);
                 _logger.LogInformation("Created abbreviations context file");
             }
         }
@@ -241,15 +240,15 @@ namespace MEAI_GPT_API.Services
                 if (!File.Exists(plantOrgPath))
                 {
                     var plantOrgContent = $@"MEAI {plant} Plant - Organization Details
-
-
+        
           These are the fixed organizational details
-          for {plant}
+          for {
+                            plant
+          }
                     plant.
                   ";
-
-
-                    File.WriteAllText(plantOrgPath, plantOrgContent);
+        
+          File.WriteAllText(plantOrgPath, plantOrgContent);
                     _logger.LogInformation($"Created organization context file for {plant}");
                 }
             }
@@ -291,8 +290,7 @@ namespace MEAI_GPT_API.Services
 
             _logger.LogInformation($"📄 Processing {policyFiles.Count} policy files + {contextFiles.Count} context files for {embeddingModels.Count} embedding models");
 
-            var tasks = embeddingModels.Select(async model =>
-            {
+            var tasks = embeddingModels.Select(async model => {
                 _logger.LogInformation($"🔄 Processing documents for model: {model.Name}");
 
                 var collectionId = await _collectionManager.GetOrCreateCollectionAsync(model);
@@ -385,8 +383,8 @@ namespace MEAI_GPT_API.Services
 
                 policyFiles.AddRange(sourceFiles);
                 _logger.LogInformation(
-                    $"📁 Found {sourceFiles.Count()} files in '{source.Folder}'" +
-                    (isRestricted ? $" (restricted to: {string.Join(", ", source.RestrictedToPlants!)})" : " (all plants)"));
+          $"📁 Found {sourceFiles.Count()} files in '{source.Folder}'" +
+                  (isRestricted ? $" (restricted to: {string.Join(", ", source.RestrictedToPlants!)})" : " (all plants)"));
             }
 
             _logger.LogInformation($"📋 Total files for {plant}: {policyFiles.Count}");
@@ -983,8 +981,7 @@ namespace MEAI_GPT_API.Services
                 var scored = await Task.WhenAll(
                   relevantChunks.OrderByDescending(x => x.Similarity)
                   .Take(5)
-                  .Select(async chunk =>
-                  {
+                  .Select(async chunk => {
                       var emb = await GetPerRequestEmbeddingAsync(chunk.Text);
                       var sim = CosineSimilarity(answerEmbedding, emb);
                       chunk.Similarity = sim;
@@ -2465,15 +2462,12 @@ namespace MEAI_GPT_API.Services
             {
                 role = "system",
                 content = @"You are a helpful AI assistant.
-
-
+      
         CRITICAL: For simple factual questions(Who / What / When / Where / Which),
                 answer in ONE SENTENCE only.
-
-
+      
         Only provide detailed explanations when explicitly requested.
-
-
+      
         Answer directly without introducing yourself.
               "
             });
@@ -2853,8 +2847,7 @@ namespace MEAI_GPT_API.Services
                 // Filter and prepare chunks
                 var validChunks = chunks
                   .Where(chunk => !string.IsNullOrWhiteSpace(chunk.Text))
-                  .Select(chunk => new
-                  {
+                  .Select(chunk => new {
                       Text = _stringProcessor.CleanText(chunk.Text),
                       SourceFile = chunk.SourceFile,
                       ChunkId = GenerateChunkId(chunk.SourceFile, chunk.Text, lastModified, model.Name),
@@ -3150,8 +3143,7 @@ namespace MEAI_GPT_API.Services
         private readonly ConcurrentDictionary<string, (List<RelevantChunk> Results, DateTime Timestamp)> _searchCache = new();
         public static void ConfigureOptimizedHttpClient(IServiceCollection services)
         {
-            services.AddHttpClient("OllamaAPI", client =>
-            {
+            services.AddHttpClient("OllamaAPI", client => {
                 client.Timeout = TimeSpan.FromSeconds(60);
                 client.DefaultRequestHeaders.Add("Connection", "keep-alive");
             })
@@ -3161,8 +3153,7 @@ namespace MEAI_GPT_API.Services
                   UseCookies = false
               });
 
-            services.AddHttpClient("ChromaDB", client =>
-            {
+            services.AddHttpClient("ChromaDB", client => {
                 client.Timeout = TimeSpan.FromSeconds(15); // Reduced from 30
                 client.DefaultRequestHeaders.Add("Connection", "keep-alive");
                 client.DefaultRequestHeaders.Add("Keep-Alive", "timeout=30, max=100");
@@ -3189,8 +3180,7 @@ namespace MEAI_GPT_API.Services
           "HR policy warm-up text"
         };
 
-                var tasks = embeddingModels.Select(async model =>
-                {
+                var tasks = embeddingModels.Select(async model => {
                     try
                     {
                         foreach (var text in warmUpTexts)
@@ -3445,10 +3435,11 @@ namespace MEAI_GPT_API.Services
                 foreach (var refType in _config.ReferenceTypes ?? new List<ReferenceTypeOptions>())
                 {
                     if (string.IsNullOrWhiteSpace(refType.MetadataKey) ||
-                        string.Equals(refType.MetadataKey, "annexure_refs", StringComparison.OrdinalIgnoreCase))
+                      string.Equals(refType.MetadataKey, "annexure_refs", StringComparison.OrdinalIgnoreCase))
                         continue; // already handled above
 
-                    if (!metadata.TryGetProperty(refType.MetadataKey, out var refProp))
+                    if (!metadata.TryGetProperty(refType.MetadataKey, out
+                        var refProp))
                         continue;
 
                     var chunkRefNumbers = (refProp.GetString() ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries);
@@ -3456,9 +3447,9 @@ namespace MEAI_GPT_API.Services
                         continue;
 
                     var queryRefNumbers = Regex.Matches(originalQuery, refType.Pattern, RegexOptions.IgnoreCase)
-                        .Cast<Match>()
-                        .Where(m => m.Groups.Count > 1)
-                        .Select(m => m.Groups[1].Value);
+                      .Cast<Match>()
+                      .Where(m => m.Groups.Count > 1)
+                      .Select(m => m.Groups[1].Value);
 
                     if (queryRefNumbers.Any(n => chunkRefNumbers.Contains(n)))
                     {
@@ -3473,7 +3464,8 @@ namespace MEAI_GPT_API.Services
                 // document source — see CreateChunkMetadata). Generic by
                 // design: works for any subfolder-organized source without
                 // needing to know what the subfolder represents.
-                if (metadata.TryGetProperty("source_tag", out var sourceTagProp))
+                if (metadata.TryGetProperty("source_tag", out
+                    var sourceTagProp))
                 {
                     var sourceTag = sourceTagProp.GetString();
                     if (!string.IsNullOrEmpty(sourceTag) &&
@@ -3804,8 +3796,7 @@ namespace MEAI_GPT_API.Services
         private bool IsExactSectionMatch(string lowerText, string sectionNumber)
         {
             if (string.IsNullOrWhiteSpace(sectionNumber)) return false;
-            var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num =>
-            {
+            var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num => {
                 var escaped = Regex.Escape(num);
                 return new Regex($@"\b(?:section|clause|part)\.?\s*{escaped}(?:\.\d+)*\b" + $@"|(?:^|\n)\s*{escaped}\.(?:\d+\.?)*\s", RegexOptions.IgnoreCase | RegexOptions.Compiled);
             });
@@ -3831,9 +3822,9 @@ namespace MEAI_GPT_API.Services
                 // (Clause, Form, etc. from DynamicRAG:ReferenceTypes) instead
                 // of always hardcoding "Annexure" — Annexure keeps its exact
                 // original wording for backward compatibility.
-                combinedQuery = string.Equals(sectionQuery.ReferenceType, "Annexure", StringComparison.OrdinalIgnoreCase)
-                    ? $"Annexure {sectionQuery.SectionNumber} form approval technical baseline"
-                    : $"{sectionQuery.ReferenceType} {sectionQuery.SectionNumber}";
+                combinedQuery = string.Equals(sectionQuery.ReferenceType, "Annexure", StringComparison.OrdinalIgnoreCase) ?
+                $"Annexure {sectionQuery.SectionNumber} form approval technical baseline" :
+          $"{sectionQuery.ReferenceType} {sectionQuery.SectionNumber}";
             }
             else
             {
@@ -4054,14 +4045,14 @@ namespace MEAI_GPT_API.Services
             }
 
             var refType = _config.ReferenceTypes?.FirstOrDefault(
-                r => string.Equals(r.Name, sectionQuery.ReferenceType, StringComparison.OrdinalIgnoreCase));
+              r => string.Equals(r.Name, sectionQuery.ReferenceType, StringComparison.OrdinalIgnoreCase));
 
             if (refType == null || string.IsNullOrWhiteSpace(refType.Pattern))
                 return false;
 
             return Regex.Matches(lowerText, refType.Pattern, RegexOptions.IgnoreCase)
-                .Cast<Match>()
-                .Any(m => m.Groups.Count > 1 && m.Groups[1].Value == sectionQuery.SectionNumber);
+              .Cast<Match>()
+              .Any(m => m.Groups.Count > 1 && m.Groups[1].Value == sectionQuery.SectionNumber);
         }
         // Supporting class for section queries
 
@@ -4135,11 +4126,11 @@ namespace MEAI_GPT_API.Services
                         continue;
 
                     var refNumbers = Regex.Matches(text, refType.Pattern, RegexOptions.IgnoreCase)
-                        .Cast<Match>()
-                        .Where(m => m.Groups.Count > 1)
-                        .Select(m => m.Groups[1].Value)
-                        .Distinct()
-                        .ToList();
+                      .Cast<Match>()
+                      .Where(m => m.Groups.Count > 1)
+                      .Select(m => m.Groups[1].Value)
+                      .Distinct()
+                      .ToList();
 
                     if (refNumbers.Any())
                     {
@@ -4187,8 +4178,7 @@ namespace MEAI_GPT_API.Services
             // plants). If unrestricted, tag it with a single shared
             // "additional_source" value so it surfaces for every plant.
             else if (_config.AdditionalDocumentSources?.FirstOrDefault(
-                s => !string.IsNullOrWhiteSpace(s.Folder) && folderPath.Contains(s.Folder.ToLowerInvariant()))
-                is DocumentSourceOptions matchedSource)
+                s => !string.IsNullOrWhiteSpace(s.Folder) && folderPath.Contains(s.Folder.ToLowerInvariant())) is DocumentSourceOptions matchedSource)
             {
                 var isRestricted = matchedSource.RestrictedToPlants != null && matchedSource.RestrictedToPlants.Any();
 
@@ -4215,8 +4205,11 @@ namespace MEAI_GPT_API.Services
                 if (sourceIndex >= 0)
                 {
                     var afterSource = sourceFile.Substring(sourceIndex + matchedSource.Folder.Length)
-                        .TrimStart('\\', '/');
-                    var pathParts = afterSource.Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries);
+                      .TrimStart('\\', '/');
+                    var pathParts = afterSource.Split(new[] {
+            '\\',
+            '/'
+          }, StringSplitOptions.RemoveEmptyEntries);
 
                     // Only set if there's genuinely a subfolder level (more
                     // than just the filename directly under the source root)
@@ -5024,11 +5017,9 @@ namespace MEAI_GPT_API.Services
             var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(text));
             return Convert.ToHexString(bytes);
         }
-        private Task<List<float>> GetQueryEmbeddingAsync(string text, ModelConfiguration model)
-     => GetEmbeddingAsync(text, model, isQuery: true);
+        private Task<List<float>> GetQueryEmbeddingAsync(string text, ModelConfiguration model) => GetEmbeddingAsync(text, model, isQuery: true);
 
-        private Task<List<float>> GetDocumentEmbeddingAsync(string text, ModelConfiguration model)
-            => GetEmbeddingAsync(text, model, isQuery: false);
+        private Task<List<float>> GetDocumentEmbeddingAsync(string text, ModelConfiguration model) => GetEmbeddingAsync(text, model, isQuery: false);
 
         private async Task<List<float>> GetEmbeddingAsync(string text, ModelConfiguration model, bool isQuery = false)
         {
@@ -5049,7 +5040,8 @@ namespace MEAI_GPT_API.Services
             var cacheKey = $"{model.Name}:{isQuery}:{text.GetHashCode():X}";
 
             // Check cache first
-            if (_optimizedEmbeddingCache.TryGetValue(cacheKey, out var cached))
+            if (_optimizedEmbeddingCache.TryGetValue(cacheKey, out
+                var cached))
             {
                 if (DateTime.Now - cached.Cached < TimeSpan.FromHours(24))
                 {
@@ -5096,9 +5088,9 @@ namespace MEAI_GPT_API.Services
                     var originalLength = processedText.Length;
                     processedText = processedText.Substring(0, maxEmbeddingChars).Trim();
                     _logger.LogWarning(
-                        "⚠️ Text truncated for embedding: {Original} chars -> {Truncated} chars (model '{Model}' context {Context} tokens). " +
-                        "Consider reducing chunk size in TextChunkingService if this happens often.",
-                        originalLength, processedText.Length, model.Name, model.MaxContextLength);
+                      "⚠️ Text truncated for embedding: {Original} chars -> {Truncated} chars (model '{Model}' context {Context} tokens). " +
+                      "Consider reducing chunk size in TextChunkingService if this happens often.",
+                      originalLength, processedText.Length, model.Name, model.MaxContextLength);
                 }
                 _logger.LogDebug($"🔄 Generating embedding for text ({processedText.Length} chars)");
 
@@ -5126,7 +5118,8 @@ namespace MEAI_GPT_API.Services
                             ["num_batch"] = model.MaxContextLength
                         }
                     };
-                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+                    using
+                    var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
                     var response = await _ollamaClient.PostAsJsonAsync("/api/embeddings", request, cts.Token);
                     if (response.IsSuccessStatusCode)
                     {
@@ -5141,7 +5134,7 @@ namespace MEAI_GPT_API.Services
                     }
                     var errorContent = await response.Content.ReadAsStringAsync();
                     var isTooLarge = errorContent.Contains("too large", StringComparison.OrdinalIgnoreCase) ||
-                                      errorContent.Contains("batch size", StringComparison.OrdinalIgnoreCase);
+                      errorContent.Contains("batch size", StringComparison.OrdinalIgnoreCase);
                     if (isTooLarge && attempt == 0)
                     {
                         _logger.LogWarning("⚠️ Embedding request rejected as too large ({Chars} chars); retrying once with text halved", processedText.Length);
@@ -5179,12 +5172,14 @@ namespace MEAI_GPT_API.Services
         /// /// </summary>        
         private List<float> ParseEmbeddingResponse(string json, ModelConfiguration model, string cacheKey)
         {
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.TryGetProperty("embedding", out var embeddingProperty))
+            using
+            var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("embedding", out
+                var embeddingProperty))
             {
                 var embedding = embeddingProperty.EnumerateArray()
-                    .Select(x => x.GetSingle())
-                    .ToList();
+                  .Select(x => x.GetSingle())
+                  .ToList();
                 if (embedding.Count > 0)
                 {
                     if (model.EmbeddingDimension > 0 && embedding.Count != model.EmbeddingDimension)
@@ -7078,17 +7073,17 @@ namespace MEAI_GPT_API.Services
         }
 
         public async IAsyncEnumerable<StreamChunk> ProcessQueryStreamAsync(
-   string question,
-   string plant,
-   string? generationModel = null,
-   string? embeddingModel = null,
-   int maxResults = 10,
-   bool meaiInfo = true,
-   string? sessionId = null,
-   bool useReRanking = true,
-   string? userId = null,
-   [EnumeratorCancellation] CancellationToken cancellationToken =
-   default)
+          string question,
+          string plant,
+          string? generationModel = null,
+          string? embeddingModel = null,
+          int maxResults = 10,
+          bool meaiInfo = true,
+          string? sessionId = null,
+          bool useReRanking = true,
+          string? userId = null,
+          [EnumeratorCancellation] CancellationToken cancellationToken =
+          default)
         {
             var stopwatch = Stopwatch.StartNew();
 
@@ -7282,7 +7277,7 @@ namespace MEAI_GPT_API.Services
             {
                 var sb = new StringBuilder();
                 await foreach (var token in GenerateResponseFromContext(
-                    question, modelName, agentContext, finalChunks, meaiInfo, plant, cancellationToken))
+                  question, modelName, agentContext, finalChunks, meaiInfo, plant, cancellationToken))
                 {
                     if (token.StartsWith("__ERROR__:"))
                         return (sb.ToString(), true, token[10..]);
@@ -7338,12 +7333,12 @@ namespace MEAI_GPT_API.Services
                 var retryModelName = _config.GroundingRetryModel;
 
                 if (!string.IsNullOrWhiteSpace(retryModelName) &&
-                    !string.Equals(retryModelName, genModel.Name, StringComparison.OrdinalIgnoreCase))
+                  !string.Equals(retryModelName, genModel.Name, StringComparison.OrdinalIgnoreCase))
                 {
                     _logger.LogWarning(
-                        "⚠️ Grounding check failed on '{OriginalModel}' (confidence {Confidence:P0}) — " +
-                        "retrying once with '{RetryModel}' before falling back to refusal.",
-                        genModel.Name, verification.OverallConfidence, retryModelName);
+                      "⚠️ Grounding check failed on '{OriginalModel}' (confidence {Confidence:P0}) — " +
+                      "retrying once with '{RetryModel}' before falling back to refusal.",
+                      genModel.Name, verification.OverallConfidence, retryModelName);
 
                     var retryModelConfig = await _modelManager.GetModelAsync(retryModelName);
 
@@ -7361,22 +7356,22 @@ namespace MEAI_GPT_API.Services
                             // than fabricating, since that's still strictly better than the
                             // original answer and will itself be caught downstream if needed.
                             if (retryVerification == null ||
-                                !retryVerification.NeedsReprocessing ||
-                                retryVerification.IsGrounded)
+                              !retryVerification.NeedsReprocessing ||
+                              retryVerification.IsGrounded)
                             {
                                 responseText = retryText;
                                 verification = retryVerification;
                                 usedRetryModel = true;
 
                                 _logger.LogInformation(
-                                    "✅ Retry with '{RetryModel}' resolved the grounding issue (confidence {Confidence:P0})",
-                                    retryModelName, retryVerification?.OverallConfidence ?? 0.0);
+                                  "✅ Retry with '{RetryModel}' resolved the grounding issue (confidence {Confidence:P0})",
+                                  retryModelName, retryVerification?.OverallConfidence ?? 0.0);
                             }
                             else
                             {
                                 _logger.LogWarning(
-                                    "⚠️ Retry with '{RetryModel}' still failed grounding check (confidence {Confidence:P0}) — falling back to refusal.",
-                                    retryModelName, retryVerification.OverallConfidence);
+                                  "⚠️ Retry with '{RetryModel}' still failed grounding check (confidence {Confidence:P0}) — falling back to refusal.",
+                                  retryModelName, retryVerification.OverallConfidence);
                             }
                         }
                     }
@@ -7403,7 +7398,15 @@ namespace MEAI_GPT_API.Services
                             complete = verification.IsComplete,
                             grounded = verification.IsGrounded,
                             hallucination_free = !verification.HasHallucinations
-                        }
+                        },
+                        // Surfaces SelfVerifier's one-line explanation for a
+                        // "not grounded" verdict (added alongside the wider
+                        // source window / VerifierModel config change) so a
+                        // false-negative grounding check is diagnosable from
+                        // the browser console instead of requiring server
+                        // log access every time.
+                        grounding_reason = verification.Metadata.TryGetValue("grounding_reason", out
+                          var gr) ? gr : null
                     })
                 };
             }
@@ -7413,13 +7416,13 @@ namespace MEAI_GPT_API.Services
             if (verification != null && verification.NeedsReprocessing && !verification.IsGrounded)
             {
                 _logger.LogWarning(
-                    "⚠️ Self-verification flagged ungrounded answer (confidence {Confidence:P0}) even after retry — " +
-                    "replacing with refusal instead of streaming a likely-hallucinated response.",
-                    verification.OverallConfidence);
+                  "⚠️ Self-verification flagged ungrounded answer (confidence {Confidence:P0}) even after retry — " +
+                  "replacing with refusal instead of streaming a likely-hallucinated response.",
+                  verification.OverallConfidence);
 
                 finalAnswer = $"I want to make sure I give you accurate information, but I'm not confident " +
-                              $"the answer I generated is fully grounded in {plant}'s policy documents. " +
-                              $"Please contact your supervisor or HR department for clarification on this matter.";
+                $"the answer I generated is fully grounded in {plant}'s policy documents. " +
+                $"Please contact your supervisor or HR department for clarification on this matter.";
             }
 
             // ============================
@@ -10494,9 +10497,9 @@ namespace MEAI_GPT_API.Services
         }
 
         public async Task<ChromaGetResponse> GetDocumentsBySourceFileAsync(
-    string model,
-    string sourceFile,
-    int limit = 50)
+          string model,
+          string sourceFile,
+          int limit = 50)
         {
             if (string.IsNullOrWhiteSpace(model))
                 throw new ArgumentException("Collection ID is required.", nameof(model));
@@ -10509,68 +10512,68 @@ namespace MEAI_GPT_API.Services
             var collectionId = _collectionManager.GetCollectionId(model);
 
             var url =
-                $"/api/v2/tenants/default_tenant" +
-                $"/databases/default_database" +
-                $"/collections/{Uri.EscapeDataString(collectionId)}/get";
+              $"/api/v2/tenants/default_tenant" +
+            $"/databases/default_database" +
+            $"/collections/{Uri.EscapeDataString(collectionId)}/get";
 
             var requestBody = new
             {
                 where = new Dictionary<string, object>
                 {
-                    ["source_file"] = new Dictionary<string, object>
+                    ["source_file"] = new Dictionary<string,
+                  object>
                     {
                         ["$eq"] = sourceFile
                     }
                 },
-                include = new[]
-                        {
-                            "documents",
-                            "metadatas"
-                        },
+                include = new[] {
+            "documents",
+            "metadatas"
+          },
                 limit = limit
             };
 
             try
             {
                 _logger.LogInformation(
-                    "Getting ChromaDB documents. Collection={CollectionId}, SourceFile={SourceFile}, Limit={Limit}",
-                    collectionId,
-                    sourceFile,
-                    limit);
+                  "Getting ChromaDB documents. Collection={CollectionId}, SourceFile={SourceFile}, Limit={Limit}",
+                  collectionId,
+                  sourceFile,
+                  limit);
 
                 var response = await _chromaClient.PostAsJsonAsync(
-                    url,
-                    requestBody);
+                  url,
+                  requestBody);
 
                 var responseContent = await response.Content.ReadAsStringAsync();
 
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogError(
-                        "ChromaDB returned {StatusCode}: {Response}",
-                        response.StatusCode,
-                        responseContent);
+                      "ChromaDB returned {StatusCode}: {Response}",
+                      response.StatusCode,
+                      responseContent);
 
                     throw new HttpRequestException(
-                        $"ChromaDB request failed. StatusCode={response.StatusCode}, Response={responseContent}");
+            $"ChromaDB request failed. StatusCode={response.StatusCode}, Response={responseContent}");
                 }
 
                 var result = JsonSerializer.Deserialize<ChromaGetResponse>(
-                    responseContent,
-                    new JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true
-                    });
+                  responseContent,
+                  new JsonSerializerOptions
+                  {
+                      PropertyNameCaseInsensitive = true
+                  });
 
                 return result ?? new ChromaGetResponse();
             }
             catch (Exception ex)
             {
                 _logger.LogError(
-                    ex,
-                    "Failed to get documents from ChromaDB. Collection={CollectionId}, SourceFile={SourceFile}",
-                    collectionId,
-                    sourceFile);
+                  ex,
+                  "Failed to get documents from ChromaDB. Collection={CollectionId}, SourceFile={SourceFile}",
+                  collectionId,
+                  sourceFile);
 
                 throw;
             }
