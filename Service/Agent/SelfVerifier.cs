@@ -173,7 +173,9 @@ Source Material:
 Response:
 {response}
 
-Reply on the first line with ONLY 'yes' or 'no'. On the second line, give one short sentence explaining why. The response should not make claims that aren't supported by the sources.";
+Reply on the first line with ONLY 'yes' or 'no'. On the second line, give one short sentence explaining why. The response should not make claims, entities, or figures that aren't supported by the sources.
+
+IMPORTANT EXCEPTION: if the response performs a CALCULATION using a rate, ratio, or formula that IS stated in the source material (e.g. the source says ""one day of leave per 10.73 days worked"" and the response computes the result of dividing a number the user gave by 10.73), that computed number counts as grounded even though the exact figure doesn't appear verbatim in the source — the underlying rate does, and the arithmetic is standard math anyone could verify. Only say 'no' for a calculation if the stated rate/formula itself isn't in the source, or if the arithmetic is wrong given that rate.";
 
             try
             {

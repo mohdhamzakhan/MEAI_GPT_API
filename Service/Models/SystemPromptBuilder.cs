@@ -293,6 +293,25 @@ Would you like detailed information about any specific policy?
             sb.AppendLine("  knowledge.");
             sb.AppendLine();
 
+            // Carve-out added after a real incident: the rule above ("don't
+            // state a figure unless it's literally in the context") was
+            // being read by the model as forbidding it from doing basic
+            // arithmetic on a rate that WAS in the context — e.g. context
+            // says "one day of leave per 10.73 days worked", user asks
+            // "how many days do I get for 180 days worked", and the model
+            // just re-stated the rate instead of computing 180/10.73,
+            // because the computed number itself doesn't appear verbatim
+            // anywhere in the source text. That's a different case from
+            // fabricating a fact — it's applying a grounded formula.
+            sb.AppendLine("- EXCEPTION — CALCULATIONS ARE REQUIRED, NOT OPTIONAL:");
+            sb.AppendLine("  If the context gives a rate, ratio, or formula (e.g. \"1 day per X days worked\",");
+            sb.AppendLine("  \"Y% of basic pay\") and the user's question requires applying it to a specific");
+            sb.AppendLine("  number they provided, you MUST perform that calculation and show the result —");
+            sb.AppendLine("  do not just restate the rate. Show your work (e.g. \"180 ÷ 10.73 ≈ 16.8 days\").");
+            sb.AppendLine("  This is not \"outside knowledge\" even though the computed number itself doesn't");
+            sb.AppendLine("  appear in the source text — the rate it's derived from does.");
+            sb.AppendLine();
+
             sb.AppendLine("═══════════════════════════════════════════════════════════════");
             sb.AppendLine();
 
@@ -868,6 +887,20 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
             prompt.AppendLine("     check: \"does this exact detail appear in the context I was given?\" If not, omit it");
             prompt.AppendLine("   - It is better to give a shorter, incomplete answer than to add plausible-sounding");
             prompt.AppendLine("     details from general knowledge");
+            prompt.AppendLine();
+
+            // Same calculation carve-out as BuildPolicyDetailSystemPrompt —
+            // this prompt is the fallback path, which is exactly where the
+            // EL-days query landed, and it hit the same problem: the rule
+            // above reads as "never state a number that isn't verbatim in
+            // context", which blocks legitimate arithmetic on a stated rate.
+            prompt.AppendLine("6. **EXCEPTION — CALCULATIONS ARE REQUIRED, NOT OPTIONAL**");
+            prompt.AppendLine("   - If the context gives a rate, ratio, or formula (e.g. \"1 day per X days worked\",");
+            prompt.AppendLine("     \"Y% of basic pay\") and the user's question requires applying it to a specific");
+            prompt.AppendLine("     number they provided, you MUST perform that calculation and show the result —");
+            prompt.AppendLine("     do not just restate the rate. Show your work (e.g. \"180 ÷ 10.73 ≈ 16.8 days\")");
+            prompt.AppendLine("   - This is not \"outside knowledge\" even though the computed number itself doesn't");
+            prompt.AppendLine("     appear in the source text — the rate it's derived from does");
             prompt.AppendLine();
 
             prompt.AppendLine("═══════════════════════════════════════════════════════════════");
