@@ -7,6 +7,8 @@ using MEAI_GPT_API.Services.Agent;
 using MEAI_GPT_API.Services.Agent.Tools;
 using MEAIGPTAPI.Services;
 using Microsoft.Extensions.Options;
+using NPOI.SS.Formula.Functions;
+using StackExchange.Redis;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
@@ -379,7 +381,7 @@ namespace MEAI_GPT_API.Services
 
                 var sourceFiles = Directory.GetFiles(sourcePath, "*.*", SearchOption.AllDirectories)
                   .Where(f => _chromaOptions.SupportedExtensions.Contains(
-                    Path.GetExtension(f).ToLowerInvariant()));
+                    System.IO.Path.GetExtension(f).ToLowerInvariant()));
 
                 policyFiles.AddRange(sourceFiles);
                 _logger.LogInformation(
@@ -402,7 +404,7 @@ namespace MEAI_GPT_API.Services
         {
             try
             {
-                var fileName = Path.GetFileName(filePath);
+                var fileName = System.IO.Path.GetFileName(filePath);
 
                 // Query ChromaDB for any embeddings with this source file
                 var queryData = new
@@ -700,7 +702,7 @@ namespace MEAI_GPT_API.Services
         {
             try
             {
-                var fileName = Path.GetFileName(filePath);
+                var fileName = System.IO.Path.GetFileName(filePath);
                 _logger.LogInformation($"🗑️ Deleting old embeddings for: {fileName} (model: {modelName})");
 
                 // ChromaDB delete by metadata filter
@@ -1877,7 +1879,7 @@ namespace MEAI_GPT_API.Services
         }
         private string GenerateChunkId(string sourceFile, string text, DateTime lastModified, string modelName)
         {
-            var fileName = Path.GetFileNameWithoutExtension(sourceFile);
+            var fileName = System.IO.Path.GetFileNameWithoutExtension(sourceFile);
             var textHash = text.GetHashCode().ToString("X");
             var timeStamp = lastModified.Ticks.ToString();
             var modelHash = modelName.GetHashCode().ToString("X");
@@ -3351,7 +3353,7 @@ namespace MEAI_GPT_API.Services
 
                 var sourceFile = metadata.TryGetProperty("source_file", out
                     var sf) ?
-                  Path.GetFileName(sf.GetString() ?? "") :
+                  System.IO.Path.GetFileName(sf.GetString() ?? "") :
                   "Unknown";
 
                 var policyType = _policyAnalysis.DeterminePolicyType(
@@ -3447,7 +3449,7 @@ namespace MEAI_GPT_API.Services
                         continue;
 
                     var queryRefNumbers = Regex.Matches(originalQuery, refType.Pattern, RegexOptions.IgnoreCase)
-                      .Cast<Match>()
+                      .Cast<System.Text.RegularExpressions.Match>()
                       .Where(m => m.Groups.Count > 1)
                       .Select(m => m.Groups[1].Value);
 
@@ -3499,7 +3501,7 @@ namespace MEAI_GPT_API.Services
                 Dictionary<string, string>? annexureLinks = null;
                 if (!string.IsNullOrEmpty(annexureRefsMeta))
                 {
-                    var policyName = Path.GetFileNameWithoutExtension(sourceFile);
+                    var policyName = System.IO.Path.GetFileNameWithoutExtension(sourceFile);
                     var resolved = new Dictionary<string,
                       string>();
 
@@ -3563,7 +3565,7 @@ namespace MEAI_GPT_API.Services
                 // Check if files exist
                 var policyFiles = GetPolicyFiles(plant);
                 diagnostic.PolicyFilesFound = policyFiles.Count;
-                diagnostic.PolicyFiles = policyFiles.Select(Path.GetFileName).ToList();
+                diagnostic.PolicyFiles = policyFiles.Select(System.IO.Path.GetFileName).ToList();
 
                 // Check embedding model
                 var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
@@ -4051,7 +4053,7 @@ namespace MEAI_GPT_API.Services
                 return false;
 
             return Regex.Matches(lowerText, refType.Pattern, RegexOptions.IgnoreCase)
-              .Cast<Match>()
+              .Cast<System.Text.RegularExpressions.Match>()
               .Any(m => m.Groups.Count > 1 && m.Groups[1].Value == sectionQuery.SectionNumber);
         }
         // Supporting class for section queries
@@ -4126,7 +4128,7 @@ namespace MEAI_GPT_API.Services
                         continue;
 
                     var refNumbers = Regex.Matches(text, refType.Pattern, RegexOptions.IgnoreCase)
-                      .Cast<Match>()
+                      .Cast<System.Text.RegularExpressions.Match>()
                       .Where(m => m.Groups.Count > 1)
                       .Select(m => m.Groups[1].Value)
                       .Distinct()
@@ -4254,7 +4256,25 @@ namespace MEAI_GPT_API.Services
                 foreach (var q in expandedQuery.Skip(1))
                 {
                     var chunks = await SearchChromaDBAsync(q, embeddingModel, 3, plant);
-                    allChunks.AddRange(chunks.Take(1)); // keep only best hit per variant
+
+                    // Boost applied here (not just merged in raw) because
+                    // this is the SAME structural bug as the topic-
+                    // continuity issue below: the original, unexpanded
+                    // query search above can return up to `maxResults`
+                    // chunks on its own. For a short/ambiguous abbreviation
+                    // like "el" (matches many generic policy sections on
+                    // raw similarity, only cleanly resolves to "Earned
+                    // Leave" once expanded), those generic chunks can fill
+                    // every slot in the final Take(maxResults) below,
+                    // silently dropping the one chunk found via the
+                    // semantically-precise expanded query even though it's
+                    // almost certainly the right one — exactly what
+                    // happened with a "calculate el for 180 days" query
+                    // pulling in unrelated General Information Policy
+                    // chunks instead of the Earned Leave accrual clause.
+                    var best = chunks.Take(1).ToList();
+                    foreach (var c in best) c.RelevanceScore *= 1.15;
+                    allChunks.AddRange(best);
                 }
 
                 // 3. Topic-continuity search. A boost applied only AFTER
@@ -4303,8 +4323,8 @@ namespace MEAI_GPT_API.Services
                     const int minAnchorChunksToStayScoped = 2; // below this, the anchor doc likely can't answer alone
 
                     var anchorChunks = dedupedChunks
-                      .Where(c => lastTurnSources.Any(s => string.Equals(s, c.Source, StringComparison.OrdinalIgnoreCase))
-                                  && c.RelevanceScore >= anchorRelevanceFloor)
+                      .Where(c => lastTurnSources.Any(s => string.Equals(s, c.Source, StringComparison.OrdinalIgnoreCase)) &&
+                        c.RelevanceScore >= anchorRelevanceFloor)
                       .OrderByDescending(c => c.RelevanceScore)
                       .Take(maxResults)
                       .ToList();
@@ -4312,16 +4332,16 @@ namespace MEAI_GPT_API.Services
                     if (anchorChunks.Count >= minAnchorChunksToStayScoped)
                     {
                         _logger.LogInformation(
-                            "🔗 Strict anchor scoping: staying within {AnchorDoc} ({Count} chunks, ignoring other sources)",
-                            lastTurnSources.First(), anchorChunks.Count);
+                          "🔗 Strict anchor scoping: staying within {AnchorDoc} ({Count} chunks, ignoring other sources)",
+                          lastTurnSources.First(), anchorChunks.Count);
 
                         uniqueChunks = anchorChunks;
                     }
                     else
                     {
                         _logger.LogInformation(
-                            "🔗 Anchor document '{AnchorDoc}' had insufficient relevant content ({Count} chunks) — falling back to broader retrieval",
-                            lastTurnSources.First(), anchorChunks.Count);
+                          "🔗 Anchor document '{AnchorDoc}' had insufficient relevant content ({Count} chunks) — falling back to broader retrieval",
+                          lastTurnSources.First(), anchorChunks.Count);
 
                         uniqueChunks = dedupedChunks
                           .OrderByDescending(c => c.RelevanceScore)
@@ -8082,8 +8102,8 @@ namespace MEAI_GPT_API.Services
                     if (_conversationAnalysis.IsTopicChanged(question, conversationContext))
                     {
                         _logger.LogInformation(
-                            "🔄 Topic changed for session {SessionId}; resetting retrieval context",
-                            context.SessionId);
+                          "🔄 Topic changed for session {SessionId}; resetting retrieval context",
+                          context.SessionId);
                         ClearContext(conversationContext);
                     }
 
@@ -8100,8 +8120,8 @@ namespace MEAI_GPT_API.Services
                     if (retrievalQuery != question)
                     {
                         _logger.LogInformation(
-                            "🔗 Follow-up detected — anchoring retrieval query to prior topic: '{Query}'",
-                            retrievalQuery.Length > 120 ? retrievalQuery.Substring(0, 120) + "..." : retrievalQuery);
+                          "🔗 Follow-up detected — anchoring retrieval query to prior topic: '{Query}'",
+                          retrievalQuery.Length > 120 ? retrievalQuery.Substring(0, 120) + "..." : retrievalQuery);
                     }
 
                     // Expand query
