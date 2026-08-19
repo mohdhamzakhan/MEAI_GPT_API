@@ -203,16 +203,30 @@ Would you like detailed information about any specific policy?
                 return BuildPolicyDetailSystemPrompt(plant, chunks, query);
 
             // 4. Abbreviation-heavy queries with no section reference and no explicit policy-detail phrasing
-            if (_entityExtraction.HasManyAbbreviations(query))
-            {
-                var variables = new Dictionary<string, object>
-                {
-                    ["plant"] = plant,
-                    ["abbreviations"] = _entityExtraction.FormatAbbreviations(
-                        _entityExtraction.ExtractAbbreviationsFromQuery(query, chunks))
-                };
-                return BuildSystemPromptFromTemplate(plant, "abbreviation_heavy", variables);
-            }
+            // ❌ REMOVED: routed to BuildSystemPromptFromTemplate("abbreviation_heavy", ...), whose template
+            // has NO placeholder for retrieved chunk content — only {plant} and {abbreviations}. Confirmed via
+            // a real incident: a query that triggered this branch received zero actual policy text in the
+            // prompt, causing the model to correctly conclude (from its own perspective) that no documents
+            // were provided, then fabricate an entire fictional governing framework (invented organizations,
+            // generic government-scheme boilerplate) to compensate. This happened on BOTH the primary
+            // generation and the GroundingRetryModel retry, since retry reuses the same broken prompt path —
+            // the retry produced an even more elaborate fabrication rather than a fix. The default prompt
+            // below already handles abbreviation-heavy queries correctly via its own instructions AND,
+            // critically, actually includes the retrieved chunks.
+            //
+            // if (_entityExtraction.HasManyAbbreviations(query))
+            // {
+            //     var variables = new Dictionary<string, object>
+            //     {
+            //         ["plant"] = plant,
+            //         ["abbreviations"] = _entityExtraction.FormatAbbreviations(
+            //             _entityExtraction.ExtractAbbreviationsFromQuery(query, chunks))
+            //     };
+            //     return BuildSystemPromptFromTemplate(plant, "abbreviation_heavy", variables);
+            // }
+
+            // 5. Default fallback
+            return BuildContextAwareSystemPrompt(plant, chunks, query);
 
             // 5. Default fallback
             return BuildContextAwareSystemPrompt(plant, chunks, query);
