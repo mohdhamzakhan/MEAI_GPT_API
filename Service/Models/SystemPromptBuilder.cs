@@ -264,6 +264,21 @@ Would you like detailed information about any specific policy?
             sb.AppendLine("- If some parts are missing, clearly state what is not available");
             sb.AppendLine();
 
+            // Same guardrail added to BuildContextAwareSystemPrompt after a
+            // real hallucination incident — this query type routes here now
+            // (see the broadened IsPolicyDetailQuery keyword list), so the
+            // explicit warning needs to live here too, not just in the
+            // fallback prompt.
+            sb.AppendLine("- DO NOT ADD OUTSIDE REAL-WORLD KNOWLEDGE, EVEN IF IT SOUNDS RELEVANT:");
+            sb.AppendLine("  This is a company-internal policy document, not a guide to the topic in general.");
+            sb.AppendLine("  Do NOT mention government ministries, regulatory bodies, external agencies,");
+            sb.AppendLine("  passport/visa offices, customs authorities, or similar institutions UNLESS they");
+            sb.AppendLine("  are explicitly named in the context. Do NOT state specific limits, amounts, or");
+            sb.AppendLine("  thresholds unless that exact figure appears in the context. It is better to give");
+            sb.AppendLine("  a shorter, incomplete answer than to add plausible-sounding details from general");
+            sb.AppendLine("  knowledge.");
+            sb.AppendLine();
+
             sb.AppendLine("═══════════════════════════════════════════════════════════════");
             sb.AppendLine();
 
@@ -305,7 +320,18 @@ Would you like detailed information about any specific policy?
         "policy says",
         "guidelines",
         "rules",
-        "requirements"
+        "requirements",
+        // Added for advice/recommendation-phrased questions like
+        // "recommend me about X policy summary... what points to keep
+        // in mind" — previously fell through to the generic fallback
+        // prompt purely because it didn't contain "policy on" or
+        // "requirements", even though it's asking for the same kind of
+        // detailed policy content.
+        "policy summary",
+        "recommend",
+        "points to",
+        "keep in mind",
+        "what should i"
     };
 
             var q = query.ToLowerInvariant();
@@ -807,6 +833,27 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
             prompt.AppendLine("4. **IF INFORMATION IS NOT IN CONTEXT**");
             prompt.AppendLine("   - Clearly state: \"The provided context does not contain information about...\"");
             prompt.AppendLine("   - Suggest: \"Please check the complete policy document or contact [relevant department]\"");
+            prompt.AppendLine();
+
+            // Added after a real incident: for topics like "foreign travel"
+            // the model has strong real-world training knowledge (passport
+            // offices, government ministries, customs/forex limits) and
+            // tends to blend it in even when told to "stay in context" —
+            // generic instructions weren't enough to stop it. Naming the
+            // exact trap explicitly, with the real entities that got
+            // fabricated, is more effective at suppressing it than the
+            // generic instruction above alone.
+            prompt.AppendLine("5. **DO NOT ADD OUTSIDE REAL-WORLD KNOWLEDGE, EVEN IF IT SOUNDS RELEVANT**");
+            prompt.AppendLine("   - This is a company-internal policy document, not a guide to the topic in general");
+            prompt.AppendLine("   - Do NOT mention government ministries, regulatory bodies, external agencies,");
+            prompt.AppendLine("     passport/visa offices, customs authorities, or similar institutions UNLESS");
+            prompt.AppendLine("     they are explicitly named in the context below");
+            prompt.AppendLine("   - Do NOT state specific limits, amounts, or thresholds (currency, time, distance,");
+            prompt.AppendLine("     etc.) unless that exact figure appears in the context below");
+            prompt.AppendLine("   - Before including any named entity, organization, or number in your answer,");
+            prompt.AppendLine("     check: \"does this exact detail appear in the context I was given?\" If not, omit it");
+            prompt.AppendLine("   - It is better to give a shorter, incomplete answer than to add plausible-sounding");
+            prompt.AppendLine("     details from general knowledge");
             prompt.AppendLine();
 
             prompt.AppendLine("═══════════════════════════════════════════════════════════════");

@@ -8017,6 +8017,20 @@ namespace MEAI_GPT_API.Services
 
                 result.Chunks = hybridChunks.Take(5).ToList();
 
+                // Added for hallucination debugging: the earlier log lines
+                // (raw=/boosted= scores) only show similarity numbers, not
+                // what's actually IN the chunk — so there was no way to
+                // check whether a hallucinated entity (e.g. "MEA",
+                // "Passport Seva Kendra") genuinely wasn't in the retrieved
+                // text, or was there but got embellished/misread by the
+                // generation model. This logs the actual content sent to
+                // the LLM for direct comparison against its output.
+                foreach (var c in result.Chunks)
+                {
+                    var preview = c.Text.Length > 300 ? c.Text.Substring(0, 300) + "..." : c.Text;
+                    _logger.LogInformation("📄 Chunk fed to generation [{Source}, sim={Similarity:F3}]: {Preview}", c.Source, c.Similarity, preview);
+                }
+
                 _agentLogger.LogDecision(new AgentDecision
                 {
                     Phase = "Retrieval",
