@@ -4282,31 +4282,60 @@ namespace MEAI_GPT_API.Services
                 }
 
                 // 4. Deduplicate and rank by similarity
-                var uniqueChunks = allChunks
+                // 4. Deduplicate and rank by similarity
+                var dedupedChunks = allChunks
                   .GroupBy(c => c.Text)
                   .Select(g => g.OrderByDescending(c => c.RelevanceScore).First())
-                  .OrderByDescending(c => c.RelevanceScore) // rank by boosted score
-                  .Take(maxResults)
                   .ToList();
 
-                // 5. Topic-continuity boost, applied to whatever anchor-doc
-                // chunks made it into the pool via step 3 above, so they
-                // rank appropriately relative to the rest rather than just
-                // barely scraping into the tail of the top-maxResults list.
+                List<RelevantChunk> uniqueChunks;
+
                 if (lastTurnSources != null && lastTurnSources.Any())
                 {
-                    const double continuityBoost = 1.15;
-                    foreach (var chunk in uniqueChunks)
-                    {
-                        if (lastTurnSources.Any(s => string.Equals(s, chunk.Source, StringComparison.OrdinalIgnoreCase)))
-                        {
-                            chunk.RelevanceScore *= continuityBoost;
-                            _logger.LogInformation($"⬆️ Topic-continuity boost ({chunk.Source}): {chunk.Text.Substring(0, Math.Min(80, chunk.Text.Length))}...");
-                        }
-                    }
-                    uniqueChunks = uniqueChunks.OrderByDescending(c => c.RelevanceScore).ToList();
-                }
+                    // ✅ STRICT anchor scoping: for a genuine follow-up, stay fully scoped
+                    // to the document(s) that answered the previous turn. Only fall back
+                    // to broader, multi-document retrieval if the anchor document doesn't
+                    // have enough relevant content to answer on its own — this prevents a
+                    // technically-accurate but off-topic document (e.g. Refreshment
+                    // Reimbursement Policy) from diluting an answer that should stay
+                    // focused on the established topic (e.g. Foreign Travel Policy).
+                    const double anchorRelevanceFloor = 0.55;
+                    const int minAnchorChunksToStayScoped = 2; // below this, the anchor doc likely can't answer alone
 
+                    var anchorChunks = dedupedChunks
+                      .Where(c => lastTurnSources.Any(s => string.Equals(s, c.Source, StringComparison.OrdinalIgnoreCase))
+                                  && c.RelevanceScore >= anchorRelevanceFloor)
+                      .OrderByDescending(c => c.RelevanceScore)
+                      .Take(maxResults)
+                      .ToList();
+
+                    if (anchorChunks.Count >= minAnchorChunksToStayScoped)
+                    {
+                        _logger.LogInformation(
+                            "🔗 Strict anchor scoping: staying within {AnchorDoc} ({Count} chunks, ignoring other sources)",
+                            lastTurnSources.First(), anchorChunks.Count);
+
+                        uniqueChunks = anchorChunks;
+                    }
+                    else
+                    {
+                        _logger.LogInformation(
+                            "🔗 Anchor document '{AnchorDoc}' had insufficient relevant content ({Count} chunks) — falling back to broader retrieval",
+                            lastTurnSources.First(), anchorChunks.Count);
+
+                        uniqueChunks = dedupedChunks
+                          .OrderByDescending(c => c.RelevanceScore)
+                          .Take(maxResults)
+                          .ToList();
+                    }
+                }
+                else
+                {
+                    uniqueChunks = dedupedChunks
+                      .OrderByDescending(c => c.RelevanceScore)
+                      .Take(maxResults)
+                      .ToList();
+                }
                 _logger.LogInformation($"🔍 Multi-query search: {originalChunks.Count} original + {allChunks.Count - originalChunks.Count} expanded = {uniqueChunks.Count} final chunks");
 
                 return uniqueChunks;
