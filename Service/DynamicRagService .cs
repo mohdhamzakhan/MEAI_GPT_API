@@ -4257,6 +4257,30 @@ namespace MEAI_GPT_API.Services
                     allChunks.AddRange(chunks.Take(1)); // keep only best hit per variant
                 }
 
+                // 3. Topic-continuity search. A boost applied only AFTER
+                // truncation can't rescue a chunk that never made the
+                // top-maxResults cut in the first place — it can only
+                // reorder chunks already present. So for a genuine
+                // follow-up (caller only reaches here when IsTopicChanged
+                // returned false), explicitly re-run the search with the
+                // previous turn's document title terms folded back into the
+                // query, guaranteeing that document a fair shot at being in
+                // the pool before we truncate and boost below. Capped at 2
+                // distinct source docs to bound the extra Chroma calls.
+                var lastTurnSources = context.History.LastOrDefault()?.Sources;
+                if (lastTurnSources != null && lastTurnSources.Any())
+                {
+                    foreach (var source in lastTurnSources.Distinct().Take(2))
+                    {
+                        var titleTerms = ExtractDocumentTitleTerms(source);
+                        if (string.IsNullOrWhiteSpace(titleTerms)) continue;
+
+                        var anchoredQuery = $"{query} {titleTerms}";
+                        var anchoredChunks = await SearchChromaDBAsync(anchoredQuery, embeddingModel, 3, plant);
+                        allChunks.AddRange(anchoredChunks.Take(2));
+                    }
+                }
+
                 // 4. Deduplicate and rank by similarity
                 var uniqueChunks = allChunks
                   .GroupBy(c => c.Text)
@@ -4264,6 +4288,24 @@ namespace MEAI_GPT_API.Services
                   .OrderByDescending(c => c.RelevanceScore) // rank by boosted score
                   .Take(maxResults)
                   .ToList();
+
+                // 5. Topic-continuity boost, applied to whatever anchor-doc
+                // chunks made it into the pool via step 3 above, so they
+                // rank appropriately relative to the rest rather than just
+                // barely scraping into the tail of the top-maxResults list.
+                if (lastTurnSources != null && lastTurnSources.Any())
+                {
+                    const double continuityBoost = 1.15;
+                    foreach (var chunk in uniqueChunks)
+                    {
+                        if (lastTurnSources.Any(s => string.Equals(s, chunk.Source, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            chunk.RelevanceScore *= continuityBoost;
+                            _logger.LogInformation($"⬆️ Topic-continuity boost ({chunk.Source}): {chunk.Text.Substring(0, Math.Min(80, chunk.Text.Length))}...");
+                        }
+                    }
+                    uniqueChunks = uniqueChunks.OrderByDescending(c => c.RelevanceScore).ToList();
+                }
 
                 _logger.LogInformation($"🔍 Multi-query search: {originalChunks.Count} original + {allChunks.Count - originalChunks.Count} expanded = {uniqueChunks.Count} final chunks");
 
@@ -4275,6 +4317,36 @@ namespace MEAI_GPT_API.Services
                 return await SearchChromaDBAsync(query, embeddingModel, maxResults, plant); // Fallback
             }
         }
+
+        // Turns "01SP_Foreign Travel  Policy(Sanand Plant).docx" into
+        // "Foreign Travel Policy" — strips the leading numeric/code prefix,
+        // the trailing "(Plant Name)" qualifier, and the file extension, so
+        // the remaining title words can be folded back into a search query
+        // (see the topic-continuity search above) without dragging in noise
+        // like the plant name or file format that would skew the embedding.
+        private static string ExtractDocumentTitleTerms(string fileName)
+        {
+            if (string.IsNullOrWhiteSpace(fileName)) return "";
+
+            var name = System.IO.Path.GetFileNameWithoutExtension(fileName);
+
+            // Drop a leading "01SP_" / "39SP_" style code prefix.
+            var underscoreIdx = name.IndexOf('_');
+            if (underscoreIdx >= 0 && underscoreIdx < 8)
+            {
+                name = name[(underscoreIdx + 1)..];
+            }
+
+            // Drop a trailing "(Sanand Plant)" style qualifier.
+            var parenIdx = name.IndexOf('(');
+            if (parenIdx >= 0)
+            {
+                name = name[..parenIdx];
+            }
+
+            return string.Join(' ', name.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim();
+        }
+
         private async Task<List<RelevantChunk>> GetRelevantChunksWithExpansionAsync(
           string originalQuery,
           string expandedQuery,
