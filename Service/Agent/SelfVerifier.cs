@@ -125,7 +125,21 @@ Answer with ONLY 'yes' or 'no'.";
 
             try
             {
-                var llmResponse = await CallLLMAsync(prompt, _verifierModel);
+                // num_predict raised from the original 10 — too tight even
+                // for a plain yes/no once `think:false` is set, since some
+                // Ollama/model combinations still emit a few tokens of
+                // preamble. 40 gives headroom without much latency cost.
+                var llmResponse = await CallLLMAsync(prompt, _verifierModel, numPredict: 40);
+
+                if (string.IsNullOrWhiteSpace(llmResponse))
+                {
+                    // Inconclusive (e.g. truncated mid-<think>), not a real
+                    // "no" — don't let a verifier hiccup masquerade as an
+                    // incomplete-answer verdict.
+                    _logger.LogWarning("Completeness check returned no usable verdict (model '{Model}'); falling back to length heuristic", _verifierModel);
+                    return response.Length > 50;
+                }
+
                 return llmResponse.ToLowerInvariant().Contains("yes");
             }
             catch (Exception ex)
@@ -163,10 +177,20 @@ Reply on the first line with ONLY 'yes' or 'no'. On the second line, give one sh
 
             try
             {
-                // num_predict bumped from the default 10 to 60 here so the
-                // model has room to actually write the one-sentence reason
-                // requested above, not just the yes/no token.
-                var llmResponse = await CallLLMAsync(prompt, _verifierModel, numPredict: 60);
+                // num_predict raised from 60 to 100 — the model needs room
+                // for both the yes/no line and the reason line even with
+                // thinking disabled.
+                var llmResponse = await CallLLMAsync(prompt, _verifierModel, numPredict: 100);
+
+                if (string.IsNullOrWhiteSpace(llmResponse))
+                {
+                    // Inconclusive (e.g. truncated mid-<think>) — same
+                    // reasoning as CheckCompletenessAsync: don't let a
+                    // verifier hiccup register as "ungrounded".
+                    _logger.LogWarning("Grounding check returned no usable verdict (model '{Model}'); conservatively assuming grounded", _verifierModel);
+                    return (true, null);
+                }
+
                 var lines = llmResponse.Split('\n', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                 var firstLine = lines.Length > 0 ? lines[0] : "";
                 var isGrounded = firstLine.ToLowerInvariant().Contains("yes");
@@ -236,6 +260,20 @@ Reply on the first line with ONLY 'yes' or 'no'. On the second line, give one sh
                 model = model,
                 prompt = prompt,
                 stream = false,
+                // Qwen3-family models (e.g. qwen3.5:9b, used as VerifierModel)
+                // default to an internal "thinking" pass — they emit a
+                // <think>...</think> reasoning block BEFORE the actual
+                // yes/no answer, even through the raw /api/generate
+                // completion endpoint, not just the chat endpoint. With
+                // num_predict capped at 10-60 for these cheap verifier
+                // calls, the model was getting cut off mid-thought and
+                // never producing "yes"/"no" at all — which silently
+                // registered as both "incomplete" and "ungrounded" here,
+                // exactly matching the false-refusal symptom. `think: false`
+                // is Ollama's documented top-level switch (supported since
+                // 0.9+ for reasoning-capable models) to skip that pass
+                // entirely. Non-reasoning models simply ignore the field.
+                think = false,
                 options = new { temperature = 0.0, num_predict = numPredict }
             };
 
@@ -245,7 +283,37 @@ Reply on the first line with ONLY 'yes' or 'no'. On the second line, give one sh
             var json = await response.Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(json);
 
-            return doc.RootElement.GetProperty("response").GetString() ?? "";
+            var rawText = doc.RootElement.GetProperty("response").GetString() ?? "";
+
+            // Belt-and-braces: if a <think> block slipped through anyway
+            // (older Ollama version that ignores the flag, or a model that
+            // doesn't honor it), strip it so downstream yes/no parsing looks
+            // at the actual answer rather than the reasoning trace.
+            return StripThinkBlock(rawText);
+        }
+
+        private static string StripThinkBlock(string text)
+        {
+            var closeTag = "</think>";
+            var closeIdx = text.IndexOf(closeTag, StringComparison.OrdinalIgnoreCase);
+            if (closeIdx >= 0)
+            {
+                return text[(closeIdx + closeTag.Length)..].Trim();
+            }
+
+            // No closing tag: if there's an opening <think> with nothing
+            // after it, the response was cut off mid-reasoning (num_predict
+            // too small) rather than actually answering. Signal that
+            // distinctly (empty string) so callers can tell "no verdict
+            // reached" apart from "model said no" instead of the empty/
+            // no-yes text being silently read as a negative answer.
+            var openIdx = text.IndexOf("<think>", StringComparison.OrdinalIgnoreCase);
+            if (openIdx >= 0)
+            {
+                return "";
+            }
+
+            return text.Trim();
         }
     }
 
