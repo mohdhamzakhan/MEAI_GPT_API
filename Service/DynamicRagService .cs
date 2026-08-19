@@ -7078,17 +7078,17 @@ namespace MEAI_GPT_API.Services
         }
 
         public async IAsyncEnumerable<StreamChunk> ProcessQueryStreamAsync(
-          string question,
-          string plant,
-          string? generationModel = null,
-          string? embeddingModel = null,
-          int maxResults = 10,
-          bool meaiInfo = true,
-          string? sessionId = null,
-          bool useReRanking = true,
-          string? userId = null,
-          [EnumeratorCancellation] CancellationToken cancellationToken =
-          default)
+   string question,
+   string plant,
+   string? generationModel = null,
+   string? embeddingModel = null,
+   int maxResults = 10,
+   bool meaiInfo = true,
+   string? sessionId = null,
+   bool useReRanking = true,
+   string? userId = null,
+   [EnumeratorCancellation] CancellationToken cancellationToken =
+   default)
         {
             var stopwatch = Stopwatch.StartNew();
 
@@ -7112,7 +7112,6 @@ namespace MEAI_GPT_API.Services
 
             var agentContext = validationResult.Context!;
 
-            // ✅ ADD: Debug logging to verify history is loaded
             _logger.LogInformation($"📝 Session {agentContext.SessionId} has {agentContext.History.Count} history items");
 
             if (agentContext.History.Any())
@@ -7165,7 +7164,6 @@ namespace MEAI_GPT_API.Services
                     Content = "Generating response..."
                 };
 
-                // Seed history from DB if session is cold
                 await EnsureHistorySeededAsync(agentContext.SessionId);
 
                 var full = new StringBuilder();
@@ -7271,14 +7269,7 @@ namespace MEAI_GPT_API.Services
             }
 
             // ============================
-            // RESPONSE GENERATION
-            // ✅ CHANGED: Tokens are no longer streamed live to the client during
-            // generation. Previously each token was yielded the instant it arrived,
-            // meaning the full (possibly hallucinated) answer was already fully
-            // rendered in the UI before SelfVerifier ever ran — a post-hoc refusal
-            // could never "un-display" content the user had already seen. Now we
-            // buffer the complete response, verify it, and only then stream the
-            // final (approved or refused) answer as a single chunk.
+            // RESPONSE GENERATION (buffered — see verification block below)
             // ============================
             yield
             return new StreamChunk
@@ -7287,29 +7278,20 @@ namespace MEAI_GPT_API.Services
                 Content = "Generating response..."
             };
 
-            var fullResponse = new StringBuilder();
-            var generationErrored = false;
-            string? generationErrorContent = null;
-
-            await foreach (var token in GenerateResponseFromContext(
-              question,
-              genModel.Name!,
-              agentContext,
-              finalChunks,
-              meaiInfo,
-              plant,
-              cancellationToken))
+            async Task<(string Text, bool Errored, string? ErrorContent)> GenerateBufferedAsync(string modelName)
             {
-                if (token.StartsWith("__ERROR__:"))
+                var sb = new StringBuilder();
+                await foreach (var token in GenerateResponseFromContext(
+                    question, modelName, agentContext, finalChunks, meaiInfo, plant, cancellationToken))
                 {
-                    generationErrored = true;
-                    generationErrorContent = token[10..];
-                    break;
+                    if (token.StartsWith("__ERROR__:"))
+                        return (sb.ToString(), true, token[10..]);
+                    sb.Append(token);
                 }
-
-                fullResponse.Append(token);
-                // ❌ No longer yielding "response" chunks here — buffered instead.
+                return (sb.ToString(), false, null);
             }
+
+            var (responseText, generationErrored, generationErrorContent) = await GenerateBufferedAsync(genModel.Name!);
 
             if (generationErrored)
             {
@@ -7322,8 +7304,6 @@ namespace MEAI_GPT_API.Services
                 yield
                 break;
             }
-
-            var responseText = fullResponse.ToString();
 
             if (string.IsNullOrWhiteSpace(responseText))
             {
@@ -7342,6 +7322,71 @@ namespace MEAI_GPT_API.Services
             // ============================
             var verification = await VerifyResponseSafelyAsync(question, responseText, finalChunks, meaiInfo);
 
+            // ✅ NEW: on a grounding failure, retry once with a stronger model before
+            // falling back to a refusal. Retrieval already succeeded here (real
+            // chunks with real content were found) — the failure mode observed was
+            // specifically weaker models (e.g. llama3.1:8b) ignoring good context
+            // and filling gaps with training knowledge. A larger, better-calibrated
+            // model (configured via GroundingRetryModel, default qwen3.5:27b) either
+            // produces a properly grounded answer or honestly admits it lacks the
+            // specific information — both are better outcomes than a hallucination,
+            // and the honest-admission case is still caught by the same gate below.
+            bool usedRetryModel = false;
+
+            if (verification != null && verification.NeedsReprocessing && !verification.IsGrounded)
+            {
+                var retryModelName = _config.GroundingRetryModel;
+
+                if (!string.IsNullOrWhiteSpace(retryModelName) &&
+                    !string.Equals(retryModelName, genModel.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogWarning(
+                        "⚠️ Grounding check failed on '{OriginalModel}' (confidence {Confidence:P0}) — " +
+                        "retrying once with '{RetryModel}' before falling back to refusal.",
+                        genModel.Name, verification.OverallConfidence, retryModelName);
+
+                    var retryModelConfig = await _modelManager.GetModelAsync(retryModelName);
+
+                    if (retryModelConfig != null)
+                    {
+                        var (retryText, retryErrored, _) = await GenerateBufferedAsync(retryModelConfig.Name!);
+
+                        if (!retryErrored && !string.IsNullOrWhiteSpace(retryText))
+                        {
+                            var retryVerification = await VerifyResponseSafelyAsync(question, retryText, finalChunks, meaiInfo);
+
+                            // Accept the retry if it's no longer flagged as an ungrounded
+                            // hallucination — including the case where the stronger model
+                            // honestly says "I don't have that specific information" rather
+                            // than fabricating, since that's still strictly better than the
+                            // original answer and will itself be caught downstream if needed.
+                            if (retryVerification == null ||
+                                !retryVerification.NeedsReprocessing ||
+                                retryVerification.IsGrounded)
+                            {
+                                responseText = retryText;
+                                verification = retryVerification;
+                                usedRetryModel = true;
+
+                                _logger.LogInformation(
+                                    "✅ Retry with '{RetryModel}' resolved the grounding issue (confidence {Confidence:P0})",
+                                    retryModelName, retryVerification?.OverallConfidence ?? 0.0);
+                            }
+                            else
+                            {
+                                _logger.LogWarning(
+                                    "⚠️ Retry with '{RetryModel}' still failed grounding check (confidence {Confidence:P0}) — falling back to refusal.",
+                                    retryModelName, retryVerification.OverallConfidence);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Grounding retry model '{RetryModel}' not found — skipping retry.", retryModelName);
+                    }
+                }
+            }
+
             if (verification != null)
             {
                 yield
@@ -7352,6 +7397,7 @@ namespace MEAI_GPT_API.Services
                     {
                         verified = !verification.NeedsReprocessing,
                         confidence = verification.OverallConfidence,
+                        retried = usedRetryModel,
                         quality_checks = new
                         {
                             complete = verification.IsComplete,
@@ -7362,28 +7408,22 @@ namespace MEAI_GPT_API.Services
                 };
             }
 
-            // ✅ Act on a failed grounding check BEFORE anything reaches the client —
-            // this now runs before the answer is ever streamed, not after.
             string finalAnswer = responseText;
-            bool wasRefused = false;
 
             if (verification != null && verification.NeedsReprocessing && !verification.IsGrounded)
             {
                 _logger.LogWarning(
-                    "⚠️ Self-verification flagged ungrounded answer (confidence {Confidence:P0}) — " +
+                    "⚠️ Self-verification flagged ungrounded answer (confidence {Confidence:P0}) even after retry — " +
                     "replacing with refusal instead of streaming a likely-hallucinated response.",
                     verification.OverallConfidence);
 
                 finalAnswer = $"I want to make sure I give you accurate information, but I'm not confident " +
                               $"the answer I generated is fully grounded in {plant}'s policy documents. " +
                               $"Please contact your supervisor or HR department for clarification on this matter.";
-                wasRefused = true;
             }
 
             // ============================
             // STREAM FINAL (VERIFIED) ANSWER
-            // ✅ NEW: single point where the answer actually reaches the client —
-            // guaranteed to happen only after verification has completed.
             // ============================
             yield
             return new StreamChunk
