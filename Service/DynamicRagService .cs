@@ -1,5 +1,9 @@
 ﻿// Services/DynamicRagService.cs
 using DocumentFormat.OpenXml.Drawing;
+using DocumentFormat.OpenXml.Math;
+using DocumentFormat.OpenXml.Office.SpreadSheetML.Y2023.MsForms;
+using DocumentFormat.OpenXml.Office2013.Drawing.ChartStyle;
+using DocumentFormat.OpenXml.Spreadsheet;
 using MEAI_GPT_API.Models;
 using MEAI_GPT_API.Service;
 using MEAI_GPT_API.Service.Interface;
@@ -8,17 +12,27 @@ using MEAI_GPT_API.Services.Agent;
 using MEAI_GPT_API.Services.Agent.Tools;
 using MEAIGPTAPI.Services;
 using Microsoft.Extensions.Options;
+using Microsoft.VisualBasic;
+using NPOI.SS.Formula.Functions;
 using StackExchange.Redis;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.DirectoryServices.ActiveDirectory;
 using System.Runtime.CompilerServices;
+using System.Runtime.ConstrainedExecution;
+using System.Runtime.Intrinsics.X86;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using UglyToad.PdfPig;
+using UglyToad.PdfPig.Fonts.Standard14Fonts;
 using static MEAI_GPT_API.Controller.RagController;
 using static MEAI_GPT_API.Models.Conversation;
+using static NPOI.HSSF.Util.HSSFColor;
+using static System.Runtime.InteropServices.JavaScript.JSType;
+using static UglyToad.PdfPig.DocumentLayoutAnalysis.TextExtractor.ContentOrderTextExtractor;
 using Path = System.IO.Path;
 
 namespace MEAI_GPT_API.Services
@@ -300,7 +314,23 @@ namespace MEAI_GPT_API.Services
 
                 foreach (var filePath in allFiles)
                 {
-                    await ProcessFileForModelAsync(filePath, model, collectionId, plant);
+                    try
+                    {
+                        await ProcessFileForModelAsync(filePath, model, collectionId, plant);
+                    }
+                    catch (Exception ex)
+                    {
+                        // ✅ FIX: A single bad file (extraction crash, chunking
+                        // bug, malformed content, etc.) used to throw out of this
+                        // loop entirely, aborting every remaining file for this
+                        // plant/model — and since InitializeAsync has no
+                        // per-plant try/catch either, it could silently kill
+                        // indexing for every plant queued after this one too.
+                        // Log it and keep going; one bad document should never
+                        // take down the whole corpus.
+                        _logger.LogError(ex,
+                          $"❌ Skipping file after unhandled error (plant: {plant}, model: {model.Name}): {filePath}");
+                    }
                 }
 
                 _logger.LogInformation($"✅ Completed document processing for model: {model.Name}");

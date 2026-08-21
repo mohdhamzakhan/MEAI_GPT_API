@@ -290,7 +290,14 @@ namespace MEAI_GPT_API.Service.Models
             if (!match.Success)
                 return false;
 
-            var number = int.Parse(match.Groups[1].Value);
+            // Use TryParse, not Parse: a line can start with a run of digits
+            // that isn't a list number at all (a long reference/serial/phone
+            // number, an ID, a date code, etc.). Those overflow Int32 and
+            // previously threw here, crashing the entire indexing batch for
+            // every file after this one. Treat "too big to be a list number"
+            // as simply "not a list item" instead.
+            if (!int.TryParse(match.Groups[1].Value, out var number))
+                return false;
             var restOfLine = match.Groups[2].Value;
 
             // ✅ NEW: If this is item "1" and the previous line ends with ':',
@@ -307,9 +314,8 @@ namespace MEAI_GPT_API.Service.Models
             if (!string.IsNullOrEmpty(previousLine))
             {
                 var prevMatch = Regex.Match(previousLine.Trim(), @"^(\d+)[.\)]?\s+");
-                if (prevMatch.Success)
+                if (prevMatch.Success && int.TryParse(prevMatch.Groups[1].Value, out var prevNumber))
                 {
-                    var prevNumber = int.Parse(prevMatch.Groups[1].Value);
                     // Sequential numbering = list
                     if (number == prevNumber + 1)
                         return true;
