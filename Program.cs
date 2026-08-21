@@ -78,6 +78,17 @@ builder.Services.AddHttpClient("OllamaAPI", client =>
 // Register the wrapper as a singleton
 builder.Services.AddSingleton<OllamaHttpClient>();
 
+// Dedicated cross-encoder reranking microservice -- see RerankerService.cs.
+// Config-driven BaseAddress/timeout so this can be pointed at a different
+// host without a code change, same pattern as OllamaAPI above.
+builder.Services.AddHttpClient("RerankerAPI", client =>
+{
+    var baseUrl = builder.Configuration.GetValue<string>("RerankerService:BaseUrl", "http://10.235.20.91:8001");
+    client.BaseAddress = new Uri(baseUrl!);
+    var timeoutSeconds = builder.Configuration.GetValue<int>("RerankerService:TimeoutSeconds", 15);
+    client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+});
+
 // Add Redis Cache with fallback to in-memory cache
 if (builder.Configuration.GetConnectionString("Redis") != null)
 {
