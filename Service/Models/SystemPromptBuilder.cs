@@ -312,6 +312,34 @@ Would you like detailed information about any specific policy?
             sb.AppendLine("  appear in the source text — the rate it's derived from does.");
             sb.AppendLine();
 
+            // Added after a real incident: the context can legitimately
+            // contain chunks from MORE THAN ONE policy document that cover
+            // similar-sounding topics -- e.g. a question about "domestic
+            // travel...meal allowance" retrieved both the Domestic Travel
+            // Scheme AND the Foreign Travel Policy (both have meal-allowance
+            // sections). The model correctly cited both, but presented the
+            // Foreign Travel Policy's USD rates under an ambiguous section
+            // header right next to the correct domestic INR rates, with
+            // nothing telling the reader which one actually applies to
+            // them. Every individual citation was accurate; the answer was
+            // still misleading. The fix is not "trust fewer chunks" (that
+            // reduces recall) but "notice when retrieved chunks belong to
+            // different, non-overlapping policies and pick the one the
+            // question is actually about."
+            sb.AppendLine("- IF CONTEXT CONTAINS MULTIPLE DIFFERENT POLICIES ON A SIMILAR TOPIC:");
+            sb.AppendLine("  Retrieval sometimes returns chunks from more than one policy document that");
+            sb.AppendLine("  cover a similar-sounding topic (e.g. both a Domestic Travel policy and a Foreign");
+            sb.AppendLine("  Travel policy have meal-allowance sections). Before writing your answer, identify");
+            sb.AppendLine("  which SPECIFIC policy the question is actually asking about (look for explicit");
+            sb.AppendLine("  words like \"domestic\"/\"foreign\", \"within India\"/\"abroad\", or a currency the");
+            sb.AppendLine("  user mentions) and answer using ONLY that policy's content.");
+            sb.AppendLine("  Do NOT include content, figures, or citations from a different, non-matching");
+            sb.AppendLine("  policy just because it was retrieved — even with an accurate citation, mixing in");
+            sb.AppendLine("  an irrelevant policy's numbers (e.g. a different currency, or a different travel");
+            sb.AppendLine("  type) can mislead the reader into applying the wrong figures to their situation.");
+            sb.AppendLine("  Only include the other policy if the user explicitly asks to compare them.");
+            sb.AppendLine();
+
             sb.AppendLine("═══════════════════════════════════════════════════════════════");
             sb.AppendLine();
 
@@ -878,6 +906,7 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
             // generic instruction above alone.
             prompt.AppendLine("5. **DO NOT ADD OUTSIDE REAL-WORLD KNOWLEDGE, EVEN IF IT SOUNDS RELEVANT**");
             prompt.AppendLine("   - This is a company-internal policy document, not a guide to the topic in general");
+            prompt.AppendLine("   - Treat an employee as a Permanent Employee by default, unless the available policy/document explicitly identifies the employee as one of the following:\r\n\r\nTrainee\r\nApprentice\r\nFixed-Term Employee (FTE)\r\n\r\nDo not classify an employee as Trainee, Apprentice, or Fixed-Term unless this status is explicitly stated in the retrieved policy information.\r\n\r\nTherefore, when a query refers to an employee or employees without specifying an employment category, interpret it as referring to Permanent Employees.\r\n\r\nIf the query explicitly mentions Trainee, Apprentice, or Fixed-Term Employee, apply the rules applicable to that specific category instead.");
             prompt.AppendLine("   - Do NOT mention government ministries, regulatory bodies, external agencies,");
             prompt.AppendLine("     passport/visa offices, customs authorities, or similar institutions UNLESS");
             prompt.AppendLine("     they are explicitly named in the context below");
@@ -899,8 +928,34 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
             prompt.AppendLine("     \"Y% of basic pay\") and the user's question requires applying it to a specific");
             prompt.AppendLine("     number they provided, you MUST perform that calculation and show the result —");
             prompt.AppendLine("     do not just restate the rate. Show your work (e.g. \"180 ÷ 10.73 ≈ 16.8 days\")");
+            prompt.AppendLine("     You should the values in case of leave if the value is 16.8 then it wull be 17 and if 16.49 then 16 and also write approx");
             prompt.AppendLine("   - This is not \"outside knowledge\" even though the computed number itself doesn't");
             prompt.AppendLine("     appear in the source text — the rate it's derived from does");
+            prompt.AppendLine();
+
+            // Added after a real incident: a "domestic travel meal
+            // allowance" question retrieved chunks from BOTH the Domestic
+            // Travel Scheme and the Foreign Travel Policy (both have
+            // meal-allowance sections). The model cited both accurately,
+            // but presented the Foreign Travel Policy's USD rates under an
+            // ambiguous header right next to the correct domestic INR
+            // rates -- every citation was individually correct, yet the
+            // answer could mislead a reader into using the wrong currency's
+            // figures. This is a different failure mode from fabrication:
+            // nothing was invented, but two different policies' numbers got
+            // blended without telling the reader which one actually applies.
+            prompt.AppendLine("7. **IF CONTEXT CONTAINS MULTIPLE DIFFERENT POLICIES ON A SIMILAR TOPIC**");
+            prompt.AppendLine("   - Retrieval sometimes returns chunks from more than one policy document that");
+            prompt.AppendLine("     cover a similar-sounding topic (e.g. both a Domestic and a Foreign Travel");
+            prompt.AppendLine("     policy have meal-allowance sections). Identify which SPECIFIC policy the");
+            prompt.AppendLine("     question is actually about (words like \"domestic\"/\"foreign\", \"within");
+            prompt.AppendLine("     India\"/\"abroad\", or a currency the user mentions) and answer using ONLY");
+            prompt.AppendLine("     that policy's content");
+            prompt.AppendLine("   - Do NOT include content, figures, or citations from a different, non-matching");
+            prompt.AppendLine("     policy just because it was retrieved — even with an accurate citation, mixing");
+            prompt.AppendLine("     in an irrelevant policy's numbers (different currency, different travel type)");
+            prompt.AppendLine("     can mislead the reader into applying the wrong figures to their situation");
+            prompt.AppendLine("   - Only include the other policy if the user explicitly asks to compare them");
             prompt.AppendLine();
 
             prompt.AppendLine("═══════════════════════════════════════════════════════════════");
