@@ -1,4 +1,5 @@
 ﻿// Services/DynamicRagService.cs
+using DocumentFormat.OpenXml.Drawing;
 using MEAI_GPT_API.Models;
 using MEAI_GPT_API.Service;
 using MEAI_GPT_API.Service.Interface;
@@ -7,7 +8,6 @@ using MEAI_GPT_API.Services.Agent;
 using MEAI_GPT_API.Services.Agent.Tools;
 using MEAIGPTAPI.Services;
 using Microsoft.Extensions.Options;
-using NPOI.SS.Formula.Functions;
 using StackExchange.Redis;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -19,6 +19,7 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using static MEAI_GPT_API.Controller.RagController;
 using static MEAI_GPT_API.Models.Conversation;
+using Path = System.IO.Path;
 
 namespace MEAI_GPT_API.Services
 {
@@ -10743,6 +10744,97 @@ namespace MEAI_GPT_API.Services
                   collectionId,
                   sourceFile);
 
+                throw;
+            }
+        }
+
+        // Added to support the regression suite's auto-discovery of every
+        // indexed document (see regression_suite/generate_smoke_tests.py).
+        // Mirrors GetDocumentsBySourceFileAsync's pattern exactly, but omits
+        // the `where` filter so it returns every chunk's metadata instead of
+        // one document's. Returns just the distinct (source_file, plant)
+        // pairs, not the chunk text itself, since callers only need to know
+        // what's indexed, not its content.
+        //
+        // Note: single-page fetch (no offset pagination). Fine up to
+        // `limit` total chunks across the collection; if the corpus grows
+        // past that, add an offset loop like the one ChromaDB's /get
+        // supports (offset + limit) to page through the rest.
+        public async Task<List<(string SourceFile, string Plant)>> GetDistinctSourceFilesAsync(
+          string model,
+          int limit = 20000)
+        {
+            if (string.IsNullOrWhiteSpace(model))
+                throw new ArgumentException("Collection ID is required.", nameof(model));
+
+            limit = Math.Clamp(limit, 1, 50000);
+
+            var collectionId = _collectionManager.GetCollectionId(model);
+
+            var url =
+              $"/api/v2/tenants/default_tenant" +
+            $"/databases/default_database" +
+            $"/collections/{Uri.EscapeDataString(collectionId)}/get";
+
+            var requestBody = new
+            {
+                include = new[] {
+            "metadatas"
+          },
+                limit = limit
+            };
+
+            try
+            {
+                _logger.LogInformation(
+                  "Listing distinct source files. Collection={CollectionId}, Limit={Limit}",
+                  collectionId,
+                  limit);
+
+                var response = await _chromaClient.PostAsJsonAsync(url, requestBody);
+                var responseContent = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogError(
+                      "ChromaDB returned {StatusCode}: {Response}",
+                      response.StatusCode,
+                      responseContent);
+
+                    throw new HttpRequestException(
+            $"ChromaDB request failed. StatusCode={response.StatusCode}, Response={responseContent}");
+                }
+
+                var result = JsonSerializer.Deserialize<ChromaGetResponse>(
+                  responseContent,
+                  new JsonSerializerOptions
+                  {
+                      PropertyNameCaseInsensitive = true
+                  });
+
+                var seen = new HashSet<(string, string)>();
+                var distinct = new List<(string SourceFile, string Plant)>();
+
+                foreach (var meta in result?.Metadatas ?? new List<Dictionary<string, object>>())
+                {
+                    var source = meta.TryGetValue("source_file", out
+                      var s) ? s?.ToString() ?? "" : "";
+                    var plant = meta.TryGetValue("plant", out
+                      var p) ? p?.ToString() ?? "" : "";
+                    if (string.IsNullOrWhiteSpace(source)) continue;
+
+                    var key = (source, plant);
+                    if (seen.Add(key))
+                    {
+                        distinct.Add((source, plant));
+                    }
+                }
+
+                return distinct;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to list distinct source files. Collection={CollectionId}", collectionId);
                 throw;
             }
         }

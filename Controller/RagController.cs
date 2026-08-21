@@ -1149,6 +1149,44 @@ namespace MEAI_GPT_API.Controller
             }
         }
 
+        // Added to back the regression suite's auto-discovery of every
+        // currently-indexed document, so the test panel scales with the
+        // corpus instead of needing a new hand-written case per document.
+        // Read-only, no side effects -- safe to call from a test runner
+        // against production.
+        [HttpGet("documents/list")]
+        public async Task<IActionResult> ListIndexedDocuments(
+    [FromQuery] string model = "nomic-embed-text:v1.5",
+    [FromQuery] int limit = 20000)
+        {
+            try
+            {
+                var distinct = await _ragService.GetDistinctSourceFilesAsync(model, limit);
+
+                return Ok(distinct.Select(d => new { sourceFile = d.SourceFile, plant = d.Plant }));
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogError(ex, "ChromaDB request failed");
+
+                return StatusCode(502, new
+                {
+                    error = "Unable to communicate with ChromaDB.",
+                    details = ex.Message
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to list indexed documents");
+
+                return StatusCode(500, new
+                {
+                    error = "Failed to list indexed documents.",
+                    details = ex.Message
+                });
+            }
+        }
+
         // Add these DTOs at the end of the file
         public class SessionSummary
         {

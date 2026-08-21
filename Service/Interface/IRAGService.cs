@@ -17,7 +17,7 @@ public interface IRAGService
     Task<bool> IsHealthy();
     Task LoadHistoricalAppreciatedAnswersAsync();
     Task MarkAppreciatedAsync(string sessionId, string question);
-    Task<QueryResponse> ProcessQueryAsync(string question, string plant, string? generationModel = null, string? embeddingModel = null, int maxResults = 15, bool meaiInfo = true, string? sessionId = null,string? userId=null, bool useReRanking = true);
+    Task<QueryResponse> ProcessQueryAsync(string question, string plant, string? generationModel = null, string? embeddingModel = null, int maxResults = 15, bool meaiInfo = true, string? sessionId = null, string? userId = null, bool useReRanking = true);
     Task ProcessUploadedPolicyAsync(Stream fileStream, string fileName, string model);
     Task RefreshEmbeddingsAsync(string model = "mistral:latest");
     Task SaveCorrectionAsync(string question, string correctAnswer, string model);
@@ -35,5 +35,9 @@ public interface IRAGService
     string sourceFile,
     int limit = 50);
 
+    // Backs the regression suite's auto-discovery of indexed documents.
+    Task<List<(string SourceFile, string Plant)>> GetDistinctSourceFilesAsync(
+    string model,
+    int limit = 20000);
 
 }
