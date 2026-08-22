@@ -1,5 +1,6 @@
 ﻿// Services/DynamicRagService.cs
 using DocumentFormat.OpenXml.Drawing;
+using DocumentFormat.OpenXml.Drawing.Diagrams;
 using DocumentFormat.OpenXml.Math;
 using DocumentFormat.OpenXml.Office.SpreadSheetML.Y2023.MsForms;
 using DocumentFormat.OpenXml.Office2013.Drawing.ChartStyle;
@@ -319,6 +320,22 @@ namespace MEAI_GPT_API.Services
             // ✅ NEW: generate/refresh query triggers once per file, independent of
             // how many embedding models are configured. Failures here are logged
             // and swallowed inside the service itself — they never affect indexing.
+            //
+            // Throttled deliberately: this runs as a background task (see
+            // RagInitializationService : BackgroundService) that starts
+            // concurrently WITH live traffic, not before it. Without a delay,
+            // ~130 documents each issuing a /api/chat call back-to-back
+            // competes with real user queries for the same limited number
+            // of concurrent generation slots on the inference backend —
+            // very likely the actual cause of both the original /api/chat
+            // 500 and this loop itself "dropping documents" and needing
+            // multiple app restarts to complete (each restart makes partial
+            // progress via the content-hash cache, then hits contention
+            // again). This doesn't fix backend concurrency limits directly
+            // (that's an Ollama/llama.cpp server-side config, e.g.
+            // OLLAMA_NUM_PARALLEL) but it meaningfully reduces how hard this
+            // background job pushes against that shared limit.
+            var triggerGenDelayMs = _config.TriggerGenerationDelayMs > 0 ? _config.TriggerGenerationDelayMs : 2000;
             foreach (var filePath in policyFiles) // context files don't need triggers
             {
                 try
@@ -330,6 +347,8 @@ namespace MEAI_GPT_API.Services
                 {
                     _logger.LogWarning(ex, $"⚠️ Trigger generation skipped for {filePath}");
                 }
+
+                await Task.Delay(triggerGenDelayMs);
             }
 
             var tasks = embeddingModels.Select(async model => {

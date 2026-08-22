@@ -9,6 +9,18 @@
         public string VerifierModel { get; set; } = string.Empty;
         public bool AutoDiscoverModels { get; set; } = true;
         public int ModelDiscoveryTimeoutMs { get; set; } = 30000;
+
+        /// <summary>
+        /// Delay between each document's trigger-generation LLM call in the
+        /// background initialization loop (see RagInitializationService).
+        /// That loop runs concurrently WITH live traffic, not before it —
+        /// without a delay, ~130 documents issuing back-to-back /api/chat
+        /// calls competes with real user queries for the same limited
+        /// number of concurrent generation slots on the inference backend.
+        /// 0 disables throttling (not recommended unless the backend has
+        /// no concurrency constraints).
+        /// </summary>
+        public int TriggerGenerationDelayMs { get; set; } = 2000;
         public string PolicyFolder { get; set; } = "./policies";
         public string ContextFolder { get; set; } = "./context";
         public List<string> SupportedExtensions { get; set; } = new();
