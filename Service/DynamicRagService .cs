@@ -3663,25 +3663,43 @@ namespace MEAI_GPT_API.Services
         }
         private async Task<List<RelevantChunk>> SearchChromaDBAsync(string query, ModelConfiguration embeddingModel, int maxResults, string plant)
         {
+            // 1. Normalize plant for strict ChromaDB metadata matching
             var normalizedPlant = plant.Trim().ToLowerInvariant();
 
-            _logger.LogInformation($"🔍 Enhanced search for: '{query}' in plant: '{plant}'");
+            _logger.LogInformation($"🔍 Enhanced search for: '{query}' in plant: '{normalizedPlant}'");
 
             try
             {
                 var collectionId = await _collectionManager.GetOrCreateCollectionAsync(embeddingModel);
+
+                // 2. Oversampling: Fetch 3x the requested results to create a broader candidate pool.
+                // This ensures your downstream BM25 and Cross-Encoder re-rankers have the best possible data to sort.
+                int candidatePoolSize = maxResults * 3;
+                List<RelevantChunk> candidates;
 
                 // Detect if this is a section-based query
                 var sectionQuery = await _policyAnalysis.DetectAndParseSection(query);
 
                 if (sectionQuery != null)
                 {
-                    return await SearchForSpecificSection(sectionQuery, embeddingModel, maxResults, plant, collectionId);
+                    // FIX: Pass normalizedPlant instead of the raw plant variable
+                    candidates = await SearchForSpecificSection(sectionQuery, embeddingModel, candidatePoolSize, normalizedPlant, collectionId);
                 }
                 else
                 {
-                    return await SearchGeneral(query, embeddingModel, maxResults, plant, collectionId, query);
+                    // FIX: Pass normalizedPlant instead of the raw plant variable
+                    candidates = await SearchGeneral(query, embeddingModel, candidatePoolSize, normalizedPlant, collectionId, query);
                 }
+
+                // 3. Baseline Thresholding: Filter out extremely low-quality matches early
+                // This prevents garbage data from wasting processing time in your hybrid/reranking steps.
+                var highQualityCandidates = candidates
+             .Where(c => c.Similarity >= 0.25) // Filter out low-quality matches
+             .OrderByDescending(c => c.Similarity) // <-- GUARANTEE highest similarity at the top
+             .Take(maxResults * 2) // Return a rich pool for upstream steps
+             .ToList();
+
+                return highQualityCandidates;
             }
             catch (Exception ex)
             {
@@ -4357,6 +4375,7 @@ namespace MEAI_GPT_API.Services
                 // candidate pool before truncation, not just a
                 // post-truncation reorder.
                 var topicAnchors = _topicAnchorService.GetMatchingAnchors(query);
+                allChunks.Clear();
                 foreach (var anchorText in topicAnchors)
                 {
                     var anchoredQuery = $"{query} {anchorText}";
@@ -4376,6 +4395,7 @@ namespace MEAI_GPT_API.Services
                 foreach (var (anchorText, sourceFile) in triggerMatches)
                 {
                     var chunks = await SearchChromaDBAsync(anchorText, embeddingModel, 3, plant);
+
 
                     // Same reasoning as the abbreviation-expansion boost above: without a
                     // boost, the original unexpanded query can fill every slot in the
