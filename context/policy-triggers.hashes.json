@@ -1,5 +1,513 @@
 [
   {
+    "SourceFile": "./policies\\Centralized\\01 Product Cybersecurity Policy_Rev00.docx",
+    "ContentHash": "8C90C600E7ADF0702D26BC98648EA2BA432264BAE5F2188BCC92EA3FA3CB2CEC"
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\37_Prevention of Sexual Harassment Policy (Centralized).docx",
+    "ContentHash": "26832539E378325F73BA1473BD30ECF8591C771EB94F08B892943E37060D628F"
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\41_Centralized Compliance Program.docx",
+    "ContentHash": "F1B47AE772821436080CC054FF56A3A0E6CE63CD017D8CBC6C6596A093B533F7"
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\51_Anti Bribery Policy Centralized).docx",
+    "ContentHash": "1EDE0DC1B22AE6935E2FFF44EEC7CF0ABAF90B8FB87430E496AA64EE6E6A44BC"
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\53_CSR Policy(Centralized).docx",
+    "ContentHash": "F916A9A653F8C5E7B0A6E3175FFAE2F853FBF786EE3B45F6217AAD3ED84C7469"
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\72_Policy for Reporting Illegal and Misconduct.docx",
+    "ContentHash": "79ED735CB618590A6CF41DD42F9BB3D08844F92E40D216AC5C669FC919791EBB"
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\73_Human Rights Policy (Centralized).docx",
+    "ContentHash": "E0FE15C68BC0945C3F6BEB8BB564C048376F20BAA2B48E01517F537ECA6829F6"
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\79_ESG Guidelines.docx",
+    "ContentHash": "F1E406197FBE4EAFDDA0B836916F8674C46F2AF5FB654735034E8E2545EABF90"
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\76_Personal Data Protection Policy_Final.docx",
+    "ContentHash": "51C21318D7FFD006D833210B25B967B0A66B75808F0474A8E4438DA12D5BB38C"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\01_Foreign Travel  Policy (Manesar Plant)_V1.docx",
+    "ContentHash": "3B0D81B3FA2CC4BED61275F95266460E80E515788F7D72609A4764F0A35FE648"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\02_General Information Policy (Manesar Plant).docx",
+    "ContentHash": "779582DA0B466BCF663D5D36730799B76AA72D45A79B6B9CE96C21C5A1FDEDDB"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\031_Mediclaim Policy (Manesar Plant).docx",
+    "ContentHash": "9D90128C2850464EF65A4E6DBD2C6A7474A6372F8557F04E1A2B671108820F0E"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\032_loan policy (below Supervisor).docx",
+    "ContentHash": "B250F97F67C6F59D6733D0DD42ABFE7BB68C3E953C15DF325BA48361E880C03D"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\03_LTA POLICY.docx",
+    "ContentHash": "45A4E1389A232D2049AFED5794411AE2906ADCE09068D6AA50E3362C803A6195"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\04_loan policy (Supervisor \u0026 Above).docx",
+    "ContentHash": "1A4CBE055C4989D5A43C560D5E9E37D87B61BD1E9011C9D5F8C2179AF7C73D57"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\05_Recruitment, Selection \u0026  Monitoring.docx",
+    "ContentHash": "3CF1C7607C9778174ED8371613E490669F8649400C91D9120DC339E4B6092D07"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\06_Marriage gift.docx",
+    "ContentHash": "E57D620C882D1D32FAFBCE87C224846BA80F988722A3143E550065038A3E3499"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\08_Attendance Allow Policy -Permanent.docx",
+    "ContentHash": "06872475BB170106C9B8823AB76B4D8F464F0A3972B4C623BAB3AC18F66D3A66"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\09_Uniform Policy.docx",
+    "ContentHash": "8AA46815FC7C1BA81B95690B85814B74D89725E4258E5DC0905002AA4487A11A"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\10_GPA Policy.docx",
+    "ContentHash": "ED946B4DCCC1C633CF9D9475C0AE43F282E9BA6129272D7F5C4A58BD041367AB"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\11_Mediclaim Policy(Employees).docx",
+    "ContentHash": "9A26E10912722EA0B2CC06A99CB986DDDEC411D38654121839DC0F00B0324DF9"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\13_Housing Interest Concession.docx",
+    "ContentHash": "643003571C7F34FCA1FE057425F57DE6C7B0F1C1E125A7E159D06765EDDDB5BC"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\14_Refreshment Policy(Manesar Plant).docx",
+    "ContentHash": "F5222EC042C1D32D949EDC04020760101189504BA26BD3C3FDC500B23A363DE6"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\15_Ethics Policy (Manesar Plant).docx",
+    "ContentHash": "490F35B0648EE4E764052717D4E324B9CBFF7EAAB9CD802C79FBB9BE55031C7C"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\17_Suggestion Scheme.docx",
+    "ContentHash": "3C135300228F937ABD1C8E9B0348233F4C0F3734CF6F6F3630D4CF9314EBAFF4"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\18_medical health checkup.docx",
+    "ContentHash": "12088B6A55DB9ED0642D59F654F64EC44428F164D18026ABD7FB90F7BD1337CA"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\20_Company car policy.docx",
+    "ContentHash": "56D1F4B52EBC22467775A1C0B12CB2083098D19D9A67553F19B4C2347AA069CB"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\21_long association.docx",
+    "ContentHash": "3056F991168AE8DA64ED51C2329ACA8AA24EA287274AEAF347FAA1E00260F925"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\22_MD Immediate Award.docx",
+    "ContentHash": "3A4476AC8A85D951D7B45C2C9346ED712D6679A5C162B1E6CD5DC9364D2A3184"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23A_ISMS Policy(Manesar Plant)_General Baseline_Rev21.docx",
+    "ContentHash": "24A9C8A3D13D75474286D1322A9BE15B4A27AA5E3F6BE24307A3B8DDD4BA44E5"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23B_ISMS Policy(Manesar Plant)_Technical_Rev18.docx",
+    "ContentHash": "7D20A04FFB742C70E859194DC79EE35A29CF9629CC7348B50B0C4747CB9D12D7"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\24_Settlement Policy_Ver 02.docx",
+    "ContentHash": "E2041A27B72A581D422A2A1BCA37A633B1EDB08A0E564C96AA0165619B0B967F"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\25_Mobile \u0026 its Usage Claim Policy.docx",
+    "ContentHash": "15925EF450FD9F27FE4522DAE7CEA5A9C6D2E8974497A26A055A4E015BA9ED0C"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\27_Trainee Policy.docx",
+    "ContentHash": "DCED4A57AACD5DBF325277BEE387FC876F377B114A493E1C9E1A599E44A59557"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\28_Production Incentive Scheme.docx",
+    "ContentHash": "9F6748566CF63090B44C58B8F6AA02742B2BAACC9CAFCCB796F9ADB1362ED8DF"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\29_Company car support (Manesar Plant).docx",
+    "ContentHash": "8EC4CA9A6B9DFAECF469721926FD97098A7288B18E76A45002D69BD8A064574D"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\29_Superannuation policy (below Jr. Svsr level).docx",
+    "ContentHash": "141DE52171B1A87BAEEBFE80BC48A3A38DBBB6ED2DC09EC3A830983BF30A6AF5"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\30_Rules governing phone usage in Foreign.docx",
+    "ContentHash": "07DB03E8B6EBE2AB3CEE66F708A4F414C0BCB139172C40120A072CFB37993A39"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\33_Office computer \u0026 usage Policy.docx",
+    "ContentHash": "DE16AA849802396B5905E82460BC51EE8E2F519E5CECA8036A5E20B58D22729E"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\35_Entertainment Policy (Manesar Plant) V2.docx",
+    "ContentHash": "52DB4297AB3A5CF08B761A32BAD2D2A399F34E24D94372BCCEBF92C2BF83A100"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\36_Anti Trust guidelines (Manesar Plant).docx",
+    "ContentHash": "995A142229FAD0ABB3446BFFB58EA8745E11E37A44114D09BAFA6603AE3653DD"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\38_Work permit rules - V1.docx",
+    "ContentHash": "0C205515F42164210392C08017255798ADFBE84CB13BCCAC1F61F2ACFC8EF0DF"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\39_Domestic Travel Scheme (Manesar Plant).docx",
+    "ContentHash": "4DCB02F55BA9DE5795B61AFB986ED04796A292323F4388D4121953CD7460FB25"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\43_Graphic Policy.docx",
+    "ContentHash": "79807C668B66D8443AD9E1B0D513E7500A7B7AE72ED089E829AEF6ED3AB73D99"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\46_Whistle Blower Policy (Manesar Plant).docx",
+    "ContentHash": "0BDDFF6C329023822110615E9162E7572FE886CAB6B55125F3DAAD01D2CE6874"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\47_Company Assets Theft Policy.docx",
+    "ContentHash": "FAF44F02C5C05E4307F38E4EC706A101354DA6C25867FC516727375ADF8541CB"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\48_CCTV Surveillance Camera Policy.docx",
+    "ContentHash": "0038205D86D09CD45111FF523AACA392D440BF08C648BD54579A609E2882F58B"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\49_Policy on Social Risks (Manesar Plant)..docx",
+    "ContentHash": "6959557E2EDFB0731A4429233C3B10D863E30716AEEC52000212789DA5530C51"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\50_Policy for Conflict of Interest (Manesar Plant).docx",
+    "ContentHash": "79590A7171A7B4DBB3C9FDAF5D45889C529558EBAF172AC47423925527E40273"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\52_Transport policy (Manesar Plant).docx",
+    "ContentHash": "15921A05B7CC991715E914734E531A44246E671C39904E2388DBD0FC5ED3127D"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\56_Export management \u0026 compliance policy(Manesar Plant).docx",
+    "ContentHash": "1AB3BCF062F2CDF061E2D7A7BBD832B585D21FECFEE075914CA7E871B13179E6"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\57_MEAI Litigation Policy.docx",
+    "ContentHash": "4C8E7D7D35C0F5AF83BE32047854E2D138A53EF97F7ED6E2FB1F760794B5B62F"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\59_Floor Marking or Taping Policy.docx",
+    "ContentHash": "7F78BE7F47963E5AD54CC20DAD704317E35CF33AC2E4B38F4F9AEABFF7CC4F50"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\61_Attendance Allow Policy - Temporary.docx",
+    "ContentHash": "209974F9C15B74E8C20AE3F273B6A16CC3BC8013FFB0D77E489AE38480382763"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\62_Visitor Rules - Rev01.docx",
+    "ContentHash": "DBDA5A2AB2D0F80D1AF852011A4915ED57BBB04DD534CFC2037B9099D4D5ADA5"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\63_Happy day and taxi tranportation guidelines.docx",
+    "ContentHash": "C7E8BAF45F4B9BC45D54CED810C75E1BA14CB9D288CCE39691432CABB67964E4"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\64_Shift Incharge Guideline Policy (Manesar Plant).docx",
+    "ContentHash": "9DC40BCE4394D188793E57A666C827E5FF1DE6E7336C0AB74093AE8B42859378"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\65_Reimbursement of Professional development fee.docx",
+    "ContentHash": "B20E7C9D339FB19253742C4903C12702B45F829F15D7D0FD1E390A65012D8634"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\67_Term Plan Policy.docx",
+    "ContentHash": "74DA58E4BC4D784C31948B76A4C98FB2005C1D801C9804AB1ABDEA72D404CE35"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\68_Birthday celebration.docx",
+    "ContentHash": "07CCC08029C3886F25EF60971BE1719B4AB352142DD8D0D7C26B6A8AE7A18040"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\70_Work From Home Policy (Manesar).docx",
+    "ContentHash": "8697D29D69D9862F3191BAD8CC9E0ECA72DF2DA57BE4639355B4C6CDF808592F"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\81_Voluntary Retirement Scheme.docx",
+    "ContentHash": "A1F9F737AB00054F534ACFCEBC541C0584A43CF14EC55946B7088C969A27644F"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Apprentice Scheme.docx",
+    "ContentHash": "7007C1A29F3B846D8A76A8A5E9023DFE606D635EE84C566A0ACE6C0C9899594E"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Documentation Policy.docx",
+    "ContentHash": "62054CE0E601CCA6FF768F9CD78733FDA939FE0605B7AFBCE508B2C0F6DD2B6C"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Good Performance Reward scheme_Trainees_New Revised.docx",
+    "ContentHash": "BA3BB7B1AEDB5E4507E96D5467DE018D1A631BE04F2C904A7D6FCE17743A9D65"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Company Profile policy policy.docx",
+    "ContentHash": "63C1DEEF5DD2152643F94DB9F43BFE08D17C0BAEB580A04592F1F9087C1660C8"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Mask Policy.docx",
+    "ContentHash": "7E2504A345673342BA7B033372A69A32D75C5F2FD7EFD6B73C3C56494A01B09E"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Parking Policy.docx",
+    "ContentHash": "A16D9AF38AEB252880E19F9FED6687B80463170DA2F75CC8D855B192E48B560E"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Site Emergency Preparedness \u0026 Response Policy - Rev04.docx",
+    "ContentHash": "E486FD531C4345886DF7DE41D6C87BDA8961583EEBF6C45AE614D110ED507A0E"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Transfer Policy.docx",
+    "ContentHash": "0F5B12111BC4D7BC620CD24DF1EA29AADBEAC814495E9071C18DC421AB5C9F82"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\01SP_Foreign Travel  Policy(Sanand Plant).docx",
+    "ContentHash": "94A456F6E0660ED35B0C94D4835EB7620B449B942FB728EDE17E6CD26442E572"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\02SP_General Information Policy (Sanand Plant).docx",
+    "ContentHash": "D2E1D638F3D9FFDA312AAD813D17922B4F51C86B6D4FA231D84A36B76B844EF9"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).docx",
+    "ContentHash": "3F49B66CECA327791F286337543E0C78D7D2343B9F5E69A3312D0F7301EC14A2"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\04SP_loan policy (Supervisor \u0026 Above) (Sanand Plant).docx",
+    "ContentHash": "23C785577537C6B6CE2B9070F6B0CF5B593EE508E31A5884C1FB4FCC71AA792A"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\05SP_Recruitment Selection   Monitoring.docx",
+    "ContentHash": "A1A6D8F818CCED4DC99C6DA4B90C06D470E98F5A43AA7CA0B668607A0A687EDD"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\06SP_Marriage gift (Sanand Plant).docx",
+    "ContentHash": "863D47B26D1CA8410C243D0DD214CB04BB1DD63DA00426D42DDD5FE90C9248D1"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\08SP_Attendance Allow Policy -Permanent employees (Sanand Plant.docx",
+    "ContentHash": "B802A1F8395091075BDD8C519431664638F3F02B0BB419081E89D1F72642935E"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\09SP_Uniform Policy (Sanand Plant).docx",
+    "ContentHash": "37C299E8C8AA2C17E234ED69A08DC2958C4AE186AED7110C75B8ECBCDDE25E60"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\10SP_GPA Policy (Sanand Plant).docx",
+    "ContentHash": "17E77D55E9410F02136B7038195BBCD1D12117312722BE8266FBEA93BA6A1B3F"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\11SP_Mediclaim Policy(Employees) (Sanand Plant).docx",
+    "ContentHash": "5891C8BFB3B3B644C725A302F534E555854BDC9EF4A3BF091C77889144DE6A40"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\14SP_Refreshment Reimbursement Policy(Sanand Plant).docx",
+    "ContentHash": "C702732F824C27C669EDAE8417DEE4D207AE276528A7F952BC73B293AA145BD9"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\15 SP_Ethics Policy (Sanand Plant).docx",
+    "ContentHash": "54DC10CAF780969A4F945ED08A8F81976D81A986EE27A4B49959C293BBDCFBF3"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\17SP_Suggestion Scheme-Sanand.docx",
+    "ContentHash": "6C22DBF84EECFA2C32A8288F63325E4D3462B6A060212878BAD58296670AB605"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\18SP_medical health checkup (Sanand Plant).docx",
+    "ContentHash": "1D64FC8F749B4A08C00637EA31CCA200E8ED14AA7394427B108AB617295E90D7"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\20SP_Company car policy (Sanand Plant).docx",
+    "ContentHash": "A535A22A4D6E557763DC4867B38168F1C8EAFFB6C34ED0110EA3C530D1724728"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\21SP_long association Policy (Sanand Plant).docx",
+    "ContentHash": "486E2F63FACB9A06308AA5B20CEEB75FA330B775F63475D37C857951F56E7CCA"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\22SP_Special Award for Extra Ordinary Efforts (Sanand Plant).docx",
+    "ContentHash": "21EB01EA5541036115CC5EA37A36881484C618E763F3EC607C99DEA682588550"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\23A_ISMS Policy(Sanand Plant)_General Baseline V2.docx",
+    "ContentHash": "A0C194CE63EE573D5B95FB9B2BA5A9E751AEF418FECC935674CA5A010B4F4967"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\24SP_Settlement Policy.docx",
+    "ContentHash": "554650D36D67841BC9EA7A38F5F43D1334AA310A7194A033DF6ADCCAD3EDA027"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\25SP_Mobile \u0026 its Usage Claim Policy (Sanand Plant).docx",
+    "ContentHash": "DC746D06CA5B3F758EBABCC8E9CB93A2BD01597A4C55541CFFA88FFDE331D29E"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\27SP_Trainee Scheme(Sanand Plant).docx",
+    "ContentHash": "C5A30D7AA620829CF41F624266033C3778FCAFB065D918568C613B961B4AB55E"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\29SP_Company Car Support Policy (Sanand Plant).docx",
+    "ContentHash": "11AC7BE8E917D0A458D20C82B9808E69872E2E506E477036538339A55571AE0B"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\30SP_Rules governing phone usage in Foreign.docx",
+    "ContentHash": "86F982F6056BC8F9885FF157E94FE75A020878F3613F5740DEC8007029C7BE21"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\31SP_Parent Mediclaim Policy (Sanand Plant).docx",
+    "ContentHash": "8DBD81600671113ED58A34652B6F4FB32466B3C33028B666CEAE01E442C1662E"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\32SP_loan policy (below Supervisor)_Sanand Plant.docx",
+    "ContentHash": "C92B0084432D0C9B34A9D6A64B5F8407F7075B83DE825F144D82CE40210C78A5"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\33SP_Office computer \u0026 usage Policy (Sanand Plant).docx",
+    "ContentHash": "4E88AB676755476553AB18D09142D9B6B063AF8BA13CA814F0C564AB04FF72BD"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\35SP_Entertainment Policy (Sanand Plant) .docx",
+    "ContentHash": "6BF027B34CD0874FFB657B9772BE97865450C84E22664A59470E69117252127E"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\36_Anti Trust guidelines Sanand.docx",
+    "ContentHash": "7E3D684601C1957837287C1C8AD8BD6A69090F0120536EE4A10CEA7444D3341A"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\38SP_Work permit rules (Sanand Plant) - V1.docx",
+    "ContentHash": "873768CFD3137D8306303BD01E829FA696A0F59F574987A76C4CC8F45FF6B404"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\39SP_Domestic Travel Scheme(Sanand Plant).docx",
+    "ContentHash": "62ECA43AB240D203323369AFA3C2E8D695C97268C5B20DE21184C8D857F8A88A"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\43SP_Graphic Standard Policy(Sanand Plant).docx",
+    "ContentHash": "CB8DCD456262B06AFD7F11769CBDFEB29D5AC54609B3E59DB322EE1D192AF2E5"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\45SP_Apprentice Scheme (Sanand Plant).docx",
+    "ContentHash": "05A307E5218F21961D4BA8107B3793D85E5AAD2EE6D17280743C50986D763CEF"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\46SP_Whistle Blower Policy (Sanand Plant).docx",
+    "ContentHash": "D101D5A413AE3A6639293664BEB98973B091F877918B046BB6B624A38252595B"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\47_Company Assets Theft Policy (Sanand Plant).docx",
+    "ContentHash": "56974CF9AFCEEB26BB7E9E520A014A7BB0E23DF7E67420405361E318AE35585A"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\48SP_CCTV Surveillance Camera Policy (Sanand Plant).docx",
+    "ContentHash": "3516069596E6BE2FAD09AF81C014C6031AFCD7661CCC16A03847FF72D4EF109E"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\49_Policy on social Risks (Sanand plant).docx",
+    "ContentHash": "FEAA76AB801EF7B7CE6BD06BCD02057D4916CECAB5BFB1FCA9F777305DEBB243"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\50SP_Policy for Conflict of Interest.docx",
+    "ContentHash": "1CB21AAB3129CE95D7A9192974B2A09A74A5B3111236152E0E1E986FD1265EBD"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\52SP_Transport Policy(Sanand Plant).docx",
+    "ContentHash": "B27B4EB29D76602C75ACB59D8F703425B9155783EB4AB85B92A09C0D1891EEDF"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\54SP_Parking Policy (Sanand Plant).docx",
+    "ContentHash": "DE8DB75CE84167AE1B7C49AD72B16CF459D59F69A39F5125C15B1AFA0CBBFCC3"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\55SP_Travel Suitcase policy(Sanand Plant).docx",
+    "ContentHash": "F61998DF7D6EEED55697A9BA12D1C27868FE7B6EB713DE22B6F8E06AA50FCF95"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\56SP_Export Control Policy_Sanand Plant.docx",
+    "ContentHash": "01C7C1497E99E29507D4A6EED0CE00D689DABDAB498205ECFFD66CF9E278F200"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\57SP_ Litigation Policy (Sanand Plant).docx",
+    "ContentHash": "4719DF625A438EEED115ECF56D2CF4FC2E78548A512FB13EC221330C5830B8A8"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\58SP_Company Profile policy(Sanand Plant).docx",
+    "ContentHash": "AB912F6767293AD5AC8B61123D8034D7CCCABA5705B5F9CC1AC456AB86581F09"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\59SP_Floor Marking or Taping Policy.docx",
+    "ContentHash": "8D113B17C8011BE861502655A8BA10B757B8ED6721C548F704D46DE507389776"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\60_Webpage updation Policy (Centralized).docx",
+    "ContentHash": "609BFA44123D7DC31574BD1AD684B7F77EF914A88687DF58FDAD0F7C0C75A3C5"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\61SP_Attendance Allow Policy (SP) - Trainee n FT.docx",
+    "ContentHash": "C8517742C59AD9CED2B1D663C0D9BB359873A75821FA5F66A8E9AA24F180412B"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\62SP_Visitor Management Rules Policy (Sanand).docx",
+    "ContentHash": "49308FA32FAF01E4E1BC371330AD77727398D754F64B948F7CC56BD7E881BE46"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\63SP_Happy Day \u0026 Taxi Transport guidelines.docx",
+    "ContentHash": "25249F45562288ED5725D02FCDF8DAF49604BFE77D0779F9F229E6314B5DADD8"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\65SP_Tuition fees policy (Sanand Plant).docx",
+    "ContentHash": "DF0E8EA9127FA2F7DE049F981B70A0BE5DCBEFC8941FF826C2C7B076222CEEA0"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\68SP_Birthday Celebration (Sanand Plant).docx",
+    "ContentHash": "025DADC112377316B8F3AF3D74600337FBEE115DA15076EEE59EB5ADADBD5950"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\69SP_Superannuation Policy (For Below Jr. Supervisor) (Sanand Plant).docx",
+    "ContentHash": "4751607855D43A094626BF201CB10606CB9EE36676CEDCE1DF861583A35EEBD1"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\70SP_Work From Home Policy (Sanand Plant).docx",
+    "ContentHash": "2758672C6329DB742200320F3379FA5D32EFA75507DF01ED6F235E341C85E9CB"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\71SP_Face mask policy(Sanand Plant).docx",
+    "ContentHash": "7CA2C10C0E13D0D5EEE3C1BAA5B333856C9600AD93960EC8F098AFB428C6CA9C"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\Documentation Policy.docx",
+    "ContentHash": "2C73C7CE2C5303839FDF216BA5576635CE5A4A3A79C77A5A39B472130AA45B6F"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\ISMS Policy(Sanand Plant)_Technical_Rev04.docx",
+    "ContentHash": "8CEBE2897171968612B228073DA484F877D08AECC12E7D17B44D637E541E8F22"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\Shift Incharge Guideline Policy.docx",
+    "ContentHash": "0DC543A8A6D799D0155DA12EA1417E604BE90538A5570EFC0BDC62328243EDCF"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\Term Plan Policy (Sanand Plant).docx",
+    "ContentHash": "B13556793AD76262E7773C3787C098AC2E8ABF7C64DAAC0E637610D17EB4DAA1"
+  },
+  {
     "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc",
     "ContentHash": "AD59C88884B08927B979196AA06CAAEE38C3A9E6A10AFB04491CD1772B4F148D"
   }

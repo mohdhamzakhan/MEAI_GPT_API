@@ -172,7 +172,7 @@ builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
 builder.Services.AddHostedService<QueuedHostedService>();
 
 // FIXED: Modified hosted service to use IServiceScopeFactory
-builder.Services.AddHostedService<RagInitializationService>();
+builder.Services.AddScoped<DynamicRAGInitializationService>();
 builder.Services.AddScoped<CodingDetectionResult>();
 builder.Services.AddScoped<DynamicCodingAssistanceService>();
 builder.Services.AddSingleton<CodingDetectionService>();
@@ -237,7 +237,7 @@ builder.Services.AddSingleton<AbbreviationExpansionService>(provider =>
 builder.Services.AddSingleton<TopicAnchorService>(provider =>
 {
     var logger = provider.GetRequiredService<ILogger<TopicAnchorService>>();
-    var topicAnchorPath = Path.Combine("context", "topic_anchors.json");
+    var topicAnchorPath = Path.Combine("context", "policy-triggers.json");
     return new TopicAnchorService(logger, topicAnchorPath);
 });
 
@@ -325,22 +325,26 @@ using (var scope = app.Services.CreateScope())
 try
 {
     var logger = app.Services.GetRequiredService<ILogger<Program>>();
-    var ragService = app.Services.GetRequiredService<IRAGService>();
 
     logger.LogInformation("🚀 Initializing RAG Service at startup...");
 
-    // Initialize synchronously at startup
-    await ragService.InitializeAsync();
+    using (var scope = app.Services.CreateScope())
+    {
+        var ragService = scope.ServiceProvider.GetRequiredService<IRAGService>();
+
+        await ragService.InitializeAsync();
+    }
 
     logger.LogInformation("✅ RAG Service initialization completed successfully");
 }
 catch (Exception ex)
 {
     var logger = app.Services.GetRequiredService<ILogger<Program>>();
+
     logger.LogError(ex, "❌ Failed to initialize RAG Service at startup");
 
-    // Optional: Decide whether to continue or stop the application
-    // throw; // Uncomment to stop application if RAG initialization fails
+    // Optional:
+    // throw;
 }
 
 if (app.Environment.IsDevelopment() || app.Environment.IsProduction())

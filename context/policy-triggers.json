@@ -1,25 +1,4285 @@
 [
   {
+    "SourceFile": "./policies\\Centralized\\01 Product Cybersecurity Policy_Rev00.docx",
+    "Triggers": [
+      "cybersecurity policy",
+      "product security management",
+      "iso/sae 21434",
+      "melmb japan cybersecurity",
+      "cybersecurity governance",
+      "continual improvement",
+      "cybersecurity plan",
+      "production control considerations",
+      "key generation procedures",
+      "vulnerability and incident response",
+      "tools for cybersecurity"
+    ],
+    "AnchorText": "Product Cybersecurity Policy"
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\01 Product Cybersecurity Policy_Rev00.docx",
+    "Triggers": [
+      "organization structure",
+      "roles and responsibilities",
+      "cybersecurity management system",
+      "person in charge ability level"
+    ],
+    "AnchorText": "MEAI Roles \u0026 Responsibility Matrix for Cybersecurity Management"
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\37_Prevention of Sexual Harassment Policy (Centralized).docx",
+    "Triggers": [
+      "sexual harassment policy",
+      "harassment at work",
+      "sex at work",
+      "unwelcome touching",
+      "sexual advances",
+      "pornography at workplace"
+    ],
+    "AnchorText": "Sexual Harassment includes any one or more of the following unwelcome acts or behaviour..."
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\37_Prevention of Sexual Harassment Policy (Centralized).docx",
+    "Triggers": [
+      "reporting harassment",
+      "how to complain about a colleague",
+      "complaint process for harassment"
+    ],
+    "AnchorText": "An aggrieved woman may make, in writing, a complaint of sexual harassment at workplace to the Internal Committee..."
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\37_Prevention of Sexual Harassment Policy (Centralized).docx",
+    "Triggers": [
+      "committee members",
+      "who is on the committee",
+      "roles and responsibilities of committee members"
+    ],
+    "AnchorText": "The Presiding Officer and every member will hold office for such period as specified but not exceeding 3 years."
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\37_Prevention of Sexual Harassment Policy (Centralized).docx",
+    "Triggers": [
+      "consequences of harassment",
+      "what happens if someone is found guilty",
+      "punishments for harassment"
+    ],
+    "AnchorText": "If the Internal Committee arrives at the conclusion that the allegation against the respondent has been proved..."
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\41_Centralized Compliance Program.docx",
+    "Triggers": [
+      "compliance program",
+      "centralized compliance",
+      "compliance risks",
+      "compliance committee",
+      "top management commitment"
+    ],
+    "AnchorText": "The objective of centralized compliance program is to ensure 100% compliance throughout the organization and to ensure operational transparency, updation and compliance control with Good Governance."
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\41_Centralized Compliance Program.docx",
+    "Triggers": [
+      "role of cco",
+      "cco responsibilities",
+      "compliance officer role"
+    ],
+    "AnchorText": "Corporate/ Chief Compliance Officer (CCO) is responsible for overall compliance activities in any Organization."
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\41_Centralized Compliance Program.docx",
+    "Triggers": [
+      "training plan",
+      "action plan",
+      "annual plan"
+    ],
+    "AnchorText": "Annual Action \u0026 Training Plan To ensure the above the CCO is required to: Prepare Action \u0026 Training Plan using the templates..."
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\51_Anti Bribery Policy Centralized).docx",
+    "Triggers": [
+      "bribery policy",
+      "zero tolerance",
+      "gifts and entertainment",
+      "conflict of interest",
+      "whistleblowing",
+      "social risk",
+      "anti-bribery laws"
+    ],
+    "AnchorText": "The purpose of this policy is to show our commitment to ethical and lawful business practices in India..."
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\53_CSR Policy(Centralized).docx",
+    "Triggers": [
+      "csr policy",
+      "csr rules",
+      "companies act 2013",
+      "2% rule",
+      "csf activities",
+      "social responsibility"
+    ],
+    "AnchorText": "CSR POLICY OF THE COMPANY"
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\53_CSR Policy(Centralized).docx",
+    "Triggers": [
+      "review process",
+      "updating policy",
+      "changes to csr",
+      "csr committee roles"
+    ],
+    "AnchorText": "MONITORING PROCESS \u0026 UPDATE"
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\53_CSR Policy(Centralized).docx",
+    "Triggers": [
+      "csr budget",
+      "spending on csr",
+      "accounting for csr"
+    ],
+    "AnchorText": "The Surplus arising out of the projects or programs or activities undertaken under CSR, shall not form part of the business profit of a Company."
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\53_CSR Policy(Centralized).docx",
+    "Triggers": [
+      "csr committee members",
+      "csr administrative roles",
+      "responsibilities of csr team"
+    ],
+    "AnchorText": "COMPOSITION OF CSR COMMITTEE"
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\72_Policy for Reporting Illegal and Misconduct.docx",
+    "Triggers": [
+      "reporting misconduct",
+      "illegal activities at work",
+      "embezzlement policy",
+      "personal and monetary misconduct",
+      "violation of laws and regulations",
+      "scandal in company",
+      "incident reporting procedure"
+    ],
+    "AnchorText": "INCIDENTS COVERED AND REPORTING PROCEDURE TO MELMB/MELCO"
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\72_Policy for Reporting Illegal and Misconduct.docx",
+    "Triggers": [
+      "what happens if i embezzel money from the company",
+      "consequences of violating competition laws or anti-bribery laws",
+      "how to report a scandal in the company"
+    ],
+    "AnchorText": "INCIDENT SUBJECT TO REPORTING AND REPORTING PROCEDURE TO MELMB/MELCO"
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\72_Policy for Reporting Illegal and Misconduct.docx",
+    "Triggers": [
+      "what is not covered by this policy",
+      "violations that are not related to the company",
+      "exceptional incidents that have a separate reporting system"
+    ],
+    "AnchorText": "INCIDENT EXCLUDED FROM REPORTING MELMB/MELCO"
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\73_Human Rights Policy (Centralized).docx",
+    "Triggers": [
+      "human rights",
+      "policy",
+      "commitment",
+      "ethics",
+      "mitsubishi electric"
+    ],
+    "AnchorText": "The purpose of this policy is to show our commitment to uphold our reputation for honesty and ethical conduct by respecting Human Rights..."
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\73_Human Rights Policy (Centralized).docx",
+    "Triggers": [
+      "employee rights",
+      "labor laws",
+      "forced labor",
+      "child labor",
+      "discrimination"
+    ],
+    "AnchorText": "EMPLOYEES, OUTSOURCED PERSONNEL AND SUPPLIER WORKERS: Forced labor: Acts of coercion, bondage (including debt bondage) or detained labor..."
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\73_Human Rights Policy (Centralized).docx",
+    "Triggers": [
+      "community impact",
+      "environmental problems",
+      "bribery",
+      "indigenous peoples"
+    ],
+    "AnchorText": "PEOPLE IN THE COMMUNITY: Environmental problems: E.g., health hazards due to environmental pollution caused by the company\u2019s plants and products."
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\73_Human Rights Policy (Centralized).docx",
+    "Triggers": [
+      "product safety",
+      "consumer protection",
+      "labeling",
+      "privacy"
+    ],
+    "AnchorText": "CUSTOMERS: Product safety: Health hazards to users because of the products."
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\79_ESG Guidelines.docx",
+    "Triggers": [
+      "esg policy",
+      "esg guidelines",
+      "environmental policy",
+      "social responsibility",
+      "corporate governance"
+    ],
+    "AnchorText": "ESG Policy: Objectives, Coverage, and Guidelines"
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\79_ESG Guidelines.docx",
+    "Triggers": [
+      "brrs reporting",
+      "csr report"
+    ],
+    "AnchorText": "Business Responsibility \u0026 Sustainability Reporting (BRSR)"
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\79_ESG Guidelines.docx",
+    "Triggers": [
+      "esg focus areas",
+      "environmental sustainability",
+      "social responsibility initiatives",
+      "corporate governance practices"
+    ],
+    "AnchorText": "ESG Focus Areas: Environment, Social, and Governance"
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\79_ESG Guidelines.docx",
+    "Triggers": [
+      "esg roles",
+      "responsibilities"
+    ],
+    "AnchorText": "ESG Organization: Leader, Controller, Coordinator Roles"
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\76_Personal Data Protection Policy_Final.docx",
+    "Triggers": [
+      "personal data protection",
+      "data privacy",
+      "sensitive information",
+      "confidentiality",
+      "gdpr",
+      "data breach",
+      "information security"
+    ],
+    "AnchorText": "The objective of this policy is to develop a personal data protection management framework..."
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\76_Personal Data Protection Policy_Final.docx",
+    "Triggers": [
+      "definition of personal data",
+      "what constitutes sensitive information",
+      "types of personal data"
+    ],
+    "AnchorText": "\u2018Personal Information/Personal data\u2019 means any information/data that relates to a natural person..."
+  },
+  {
+    "SourceFile": "./policies\\Centralized\\76_Personal Data Protection Policy_Final.docx",
+    "Triggers": [
+      "data protection officer",
+      "information security officer",
+      "responsibilities"
+    ],
+    "AnchorText": "\u0027Information Security Officer\u0027 means a person holding the title of Managing Director in MEAI..."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\01_Foreign Travel  Policy (Manesar Plant)_V1.docx",
+    "Triggers": [
+      "foreign travel",
+      "business trip abroad",
+      "travel allowance",
+      "kit allowance",
+      "daily allowance",
+      "accompanying family",
+      "passport processing"
+    ],
+    "AnchorText": "FOREIGN TRAVEL"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\01_Foreign Travel  Policy (Manesar Plant)_V1.docx",
+    "Triggers": [
+      "overseas training",
+      "long-term overseas training"
+    ],
+    "AnchorText": "Selection: The concerned persons will be advised for the Foreign Travel based on the business requirement of the Company which will be decided by Management."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\01_Foreign Travel  Policy (Manesar Plant)_V1.docx",
+    "Triggers": [
+      "hotel expenses",
+      "family trip abroad",
+      "vendor visit with family"
+    ],
+    "AnchorText": "In case of Employee is on Business trip, and if he/she may wish, his/her family (spouse \u0026 children only) can accompany the trip..."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\02_General Information Policy (Manesar Plant).docx",
+    "Triggers": [
+      "working hours",
+      "attendance policy",
+      "late coming",
+      "leave rules",
+      "casual leave",
+      "sick leave",
+      "esi leave",
+      "short leave",
+      "regularization of attendance"
+    ],
+    "AnchorText": "ATTENDANCE, PERMISSION \u0026 LATE COMING; LEAVE RULES"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\031_Mediclaim Policy (Manesar Plant).docx",
+    "Triggers": [
+      "mediclaim policy",
+      "parent coverage",
+      "insurance for parents",
+      "who is covered",
+      "how much does it cost"
+    ],
+    "AnchorText": "COVERAGE: Insurance of parents (Either one or both of them is Employee choice)"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\031_Mediclaim Policy (Manesar Plant).docx",
+    "Triggers": [
+      "pre-existing conditions",
+      "existing diseases",
+      "conditions not covered"
+    ],
+    "AnchorText": "Pre \u2013 existing diseases are not covered."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\031_Mediclaim Policy (Manesar Plant).docx",
+    "Triggers": [
+      "first year exclusions",
+      "diseases excluded first year"
+    ],
+    "AnchorText": "First year exclusion not waived (There are certain diseases which as per the policy are not covered only for the first year such as Cataract, Stone, Hernia etc,"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\031_Mediclaim Policy (Manesar Plant).docx",
+    "Triggers": [
+      "maternity leave",
+      "pregnancy coverage"
+    ],
+    "AnchorText": "Maternity not covered."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\031_Mediclaim Policy (Manesar Plant).docx",
+    "Triggers": [
+      "claim process",
+      "submitting claims",
+      "reimbursement of hospitalization expenses"
+    ],
+    "AnchorText": "All claims for reimbursement should be submitted within 30 days from the date of discharge in case of claim for hospitalization and Pre-hospitalization..."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\031_Mediclaim Policy (Manesar Plant).docx",
+    "Triggers": [
+      "exclusions list",
+      "expenses not covered"
+    ],
+    "AnchorText": "Expenditure towards registration/admission charges, Ambulance charges, Extra bed for attendant, Bed retaining charges, Laundry/telephone charges, Sanitary items/ toilet Tories, Vitamins/tonic, not related to treatment, Food \u0026 beverages to attendant..."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\032_loan policy (below Supervisor).docx",
+    "Triggers": [
+      "loan limit",
+      "how much i can borrow",
+      "max loan amount",
+      "personal loan policy",
+      "borrow money from company",
+      "financial assistance"
+    ],
+    "AnchorText": "Loan Limit per Associate \u2013 Rs. 4,00,000/- (Rupees Four Lacs only)"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\032_loan policy (below Supervisor).docx",
+    "Triggers": [
+      "interest free loan",
+      "financial support for education",
+      "student loan",
+      "loan for children education"
+    ],
+    "AnchorText": "Higher studies for self-development and enrichment, which is useful for company and not adversely affecting job role."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\032_loan policy (below Supervisor).docx",
+    "Triggers": [
+      "loan for marriage",
+      "marriage expenses",
+      "financial help for wedding"
+    ],
+    "AnchorText": "Marriage of self/children/sister"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\032_loan policy (below Supervisor).docx",
+    "Triggers": [
+      "accident loan",
+      "medical loan",
+      "illness expense",
+      "surgery financing"
+    ],
+    "AnchorText": "Illness or surgery calling for expenditure on self, wife dependent parents or child."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\032_loan policy (below Supervisor).docx",
+    "Triggers": [
+      "how to apply for loan",
+      "loan application process",
+      "submitting loan documents"
+    ],
+    "AnchorText": "Employee will submit the duly filled loan application in format (Annexure 1) to Respective FH"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\032_loan policy (below Supervisor).docx",
+    "Triggers": [
+      "repayment terms",
+      "emi payment schedule",
+      "loan repayment plan"
+    ],
+    "AnchorText": "Deduction will be affected from the next month in which loan has been disbursed."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\03_LTA POLICY.docx",
+    "Triggers": [
+      "lta policy",
+      "leave travel allowance",
+      "travel expenses reimbursement",
+      "tax benefit on lta",
+      "pro rata lta calculation",
+      "f\u0026f settlement lta"
+    ],
+    "AnchorText": "LTA AMOUNT and ELIGIBILITY"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\03_LTA POLICY.docx",
+    "Triggers": [
+      "lta claim form",
+      "how to submit lta claim",
+      "claiming lta without tax benefit",
+      "unclaimed lta allowance"
+    ],
+    "AnchorText": "LTA Claim with/without Tax Benefit"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\03_LTA POLICY.docx",
+    "Triggers": [
+      "lta eligibility period",
+      "waiting period for lta",
+      "how many months after previous lta travel can i take next one"
+    ],
+    "AnchorText": "PERIODICITY"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\04_loan policy (Supervisor \u0026 Above).docx",
+    "Triggers": [
+      "loan policy",
+      "personal loan",
+      "financial help",
+      "salary advance",
+      "employee benefits",
+      "ctc meaning",
+      "loan limit",
+      "emi calculation",
+      "interest rate",
+      "foreclosure"
+    ],
+    "AnchorText": "Personal Loan Policy for Employees (Supervisor and Above)"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\05_Recruitment, Selection \u0026  Monitoring.docx",
+    "Triggers": [
+      "probation period",
+      "probationary employee",
+      "probation duration",
+      "six month probation"
+    ],
+    "AnchorText": "Probationer Employee I.E. Permanent Employee On Probation"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\05_Recruitment, Selection \u0026  Monitoring.docx",
+    "Triggers": [
+      "permanent job",
+      "confirmed permanent",
+      "regular employment"
+    ],
+    "AnchorText": "Permanent Employee"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\05_Recruitment, Selection \u0026  Monitoring.docx",
+    "Triggers": [
+      "trainee scheme",
+      "training period",
+      "probation after training"
+    ],
+    "AnchorText": "Trainee"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\05_Recruitment, Selection \u0026  Monitoring.docx",
+    "Triggers": [
+      "get",
+      "graduate engineer trainee",
+      "fresh engineer recruitment"
+    ],
+    "AnchorText": "Graduate Engineer Trainee (GET)"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\06_Marriage gift.docx",
+    "Triggers": [
+      "marriage gift",
+      "wedding gift",
+      "gift for daughter\u0027s marriage",
+      "gift for son\u0027s marriage",
+      "self marriage gift",
+      "what is given on daughter\u0027s wedding",
+      "how much is given on daughter\u0027s wedding"
+    ],
+    "AnchorText": "Particulars of Gift for Occasion of Employee\u2019s Daughter or Son or Real Sister Marriage and Self Marriage"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\06_Marriage gift.docx",
+    "Triggers": [
+      "amount given on self marriage",
+      "gift amount for own marriage",
+      "what is the gift amount for self marriage"
+    ],
+    "AnchorText": "On the Occasion of Self Marriage"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\06_Marriage gift.docx",
+    "Triggers": [
+      "how to get wedding gift",
+      "who gets wedding gift",
+      "eligibility for wedding gift"
+    ],
+    "AnchorText": "Employee will be eligible for wedding gift for first marriage only."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\08_Attendance Allow Policy -Permanent.docx",
+    "Triggers": [
+      "attendance allowance",
+      "leave policy",
+      "monthly attendance",
+      "special attendance",
+      "full attendance",
+      "attendance rules",
+      "leave eligibility"
+    ],
+    "AnchorText": "Regular Attendance Allowance and Special Attendance Allowance"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\08_Attendance Allow Policy -Permanent.docx",
+    "Triggers": [
+      "deductions on allowance",
+      "esi pf deduction",
+      "statutory deductions"
+    ],
+    "AnchorText": "E.S.I and P.F will be deducted on Attendance allowance"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\08_Attendance Allow Policy -Permanent.docx",
+    "Triggers": [
+      "leave types",
+      "different kinds of leaves",
+      "cl sl el leave"
+    ],
+    "AnchorText": "EL/CL/SL leaves"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\09_Uniform Policy.docx",
+    "Triggers": [
+      "uniform policy",
+      "dress code",
+      "work attire",
+      "company dress code",
+      "what to wear to work"
+    ],
+    "AnchorText": "DRESS CODES and RESPONSIBILITY OF EMPLOYEES"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\09_Uniform Policy.docx",
+    "Triggers": [
+      "uniform distribution",
+      "how many uniforms do i get?",
+      "when is uniform issued?"
+    ],
+    "AnchorText": "Quantity for Uniform : Distribution"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\09_Uniform Policy.docx",
+    "Triggers": [
+      "safety shoes",
+      "white safety shoes",
+      "esd shoes"
+    ],
+    "AnchorText": "Safety shoes will be issued to the employees/trainees working in Production,QA, Warehouse, Maintenance and Utility Department once in a year."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\10_GPA Policy.docx",
+    "Triggers": [
+      "accident claim",
+      "gpa policy",
+      "death benefit",
+      "injury coverage",
+      "personal accident insurance",
+      "medical bills",
+      "leave certificate"
+    ],
+    "AnchorText": "COVERAGE: This GPA Policy provides for payment of specified amount as per the limits opted by us on happening of specified contingency due to the accident."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\10_GPA Policy.docx",
+    "Triggers": [
+      "claim procedure",
+      "how to file a claim",
+      "document required for claim",
+      "preliminary intimation"
+    ],
+    "AnchorText": "The employee shall send a preliminary intimation of any accident or unforeseen situations happened to them immediately to Admn. Department within 24 hrs."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\10_GPA Policy.docx",
+    "Triggers": [
+      "benefit entitlements",
+      "percentage of benefits",
+      "capital sum insured",
+      "permanent total disablement",
+      "temporary total disablement"
+    ],
+    "AnchorText": "The percentage of benefits available for the insurers are as mentioned below:- Death Only... Permanent Total Disablement (PTD)... Temporary Total Disablement (TTD)"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\10_GPA Policy.docx",
+    "Triggers": [
+      "ambulance charges",
+      "cost of clothing damaged",
+      "loss of employment",
+      "transportation cost of dead body"
+    ],
+    "AnchorText": "Apart from the above the following in-built features are also available... \u2022 Ambulance charges (actual)-upto Rs.1000/-"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\11_Mediclaim Policy(Employees).docx",
+    "Triggers": [
+      "mediclaim policy",
+      "hospitalization insurance",
+      "family coverage",
+      "critical illness",
+      "policy renewal",
+      "leave benefits",
+      "conversion to individual policy"
+    ],
+    "AnchorText": "COVERAGE AMOUNT \u0026 CONDITIONS, EFFECTIVE DATE, IMPORTANT GUIDELINES"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\13_Housing Interest Concession.docx",
+    "Triggers": [
+      "housing loan concession",
+      "interest concession",
+      "home loan benefit",
+      "concession on housing interest",
+      "max loan limit",
+      "how much is the max interest concession rate?",
+      "can i get a second time concession?"
+    ],
+    "AnchorText": "Interest Concession/ Interest Rates / Interest Allowance"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\13_Housing Interest Concession.docx",
+    "Triggers": [
+      "eligible for benefit",
+      "how many times can i avail benefit?",
+      "benefit period",
+      "max benefit period",
+      "when does benefit start and end?"
+    ],
+    "AnchorText": "Benefit Period: Maximum 15 years or loan period whichever is less from the start of benefit (or retirement age whichever is earlier)"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\13_Housing Interest Concession.docx",
+    "Triggers": [
+      "type a and type b locations",
+      "allowed location for purchased house/plot",
+      "housing loan eligibility"
+    ],
+    "AnchorText": "Allowed Location of Purchased House/Plot: Type A - Home Town/ Parental town, Type B - Near Company \u2013(in the range of 45-50 kms from company)"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\13_Housing Interest Concession.docx",
+    "Triggers": [
+      "ownership rules",
+      "who can own a property under this scheme?",
+      "property in name of spouse"
+    ],
+    "AnchorText": "Ownership of Property: Property should be purchased through Housing loan from bank or property considered under this policy should be titled in the name of Employee OR Employee with spouse only \u0026 no other case will be considered."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\13_Housing Interest Concession.docx",
+    "Triggers": [
+      "disbursement conditions",
+      "when does housing interest allowance start and end?",
+      "what happens if i default on loan?"
+    ],
+    "AnchorText": "Housing interest allowance disbursement condition: In case of House construction... (and similar conditions for buying builder/society floor or apartment in upcoming projects)"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\14_Refreshment Policy(Manesar Plant).docx",
+    "Triggers": [
+      "refreshment policy",
+      "reimbursement for lunch and dinner",
+      "breakfast allowance",
+      "snacks cost",
+      "weekly off refreshment",
+      "holiday reimbursement",
+      "overtime pay"
+    ],
+    "AnchorText": "Refreshment Reimbursement Norms for Personnel Working Beyond Normal Working Hours and on Weekly Off/Holidays"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\15_Ethics Policy (Manesar Plant).docx",
+    "Triggers": [
+      "ethics policy",
+      "corporate code of conduct",
+      "moral principles",
+      "compliance questions",
+      "whistleblowing"
+    ],
+    "AnchorText": "Corporate Philosophy System and Code of Conduct"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\15_Ethics Policy (Manesar Plant).docx",
+    "Triggers": [
+      "integrity",
+      "right thing to do",
+      "fairness",
+      "honesty",
+      "sincerity",
+      "accountability",
+      "moral dilemma",
+      "grey area",
+      "consult superior"
+    ],
+    "AnchorText": "\u0027Always act with Integrity\u0027"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\15_Ethics Policy (Manesar Plant).docx",
+    "Triggers": [
+      "compliance officer",
+      "corporate compliance",
+      "code of conduct",
+      "ethics hotline",
+      "anonymous reporting"
+    ],
+    "AnchorText": "Corporate Compliance Officer, etc."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\17_Suggestion Scheme.docx",
+    "Triggers": [
+      "suggestion scheme",
+      "improvement ideas",
+      "employee recognition",
+      "reward policy",
+      "company growth",
+      "cost reduction",
+      "productivity improvement"
+    ],
+    "AnchorText": "SCOPE OF THE SCHEME: Achieving cost reduction and improvement in terms of PQCDSEM."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\17_Suggestion Scheme.docx",
+    "Triggers": [
+      "eligibility criteria",
+      "who can suggest",
+      "suggestion policy for employees"
+    ],
+    "AnchorText": "ELIGIBILITY CONDITION FOR GIVING SUGGESTION: All permanent employees below Asst manager level and trainees"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\17_Suggestion Scheme.docx",
+    "Triggers": [
+      "invalid suggestions",
+      "what not to suggest",
+      "policy exclusions"
+    ],
+    "AnchorText": "INVALID SUGGESTIONS: Suggestions on the following matters may not be considered for awards under suggestion scheme."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\17_Suggestion Scheme.docx",
+    "Triggers": [
+      "suggestion evaluation criteria",
+      "how suggestions are scored",
+      "scoring system"
+    ],
+    "AnchorText": "Parameters: Originality \u0026 Suitability, Implementation, Tangible/Intangible Impact (PQCSDEM)"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\18_medical health checkup.docx",
+    "Triggers": [
+      "health checkup",
+      "medical exam",
+      "annual health check",
+      "employee health benefits",
+      "wellness policy"
+    ],
+    "AnchorText": "PURPOSE - The policy aims to provide the wellness benefits..."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\18_medical health checkup.docx",
+    "Triggers": [
+      "family medical exam",
+      "spouse medical checkup"
+    ],
+    "AnchorText": "FAMILY MEMBER\u0027S HEALTH CHECKUP: Eligibility and Coverage..."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\20_Company car policy.docx",
+    "Triggers": [
+      "company car policy",
+      "car loan eligibility",
+      "max car cost budget",
+      "hypothecation of vehicle",
+      "repaying loan",
+      "sell my car",
+      "family car support",
+      "reimbursement for loan from outside bank"
+    ],
+    "AnchorText": "CAR BENEFIT DETAILS and VEHICLE SUPPORT"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\20_Company car policy.docx",
+    "Triggers": [
+      "car loan application",
+      "loan approval form",
+      "draft agreement for car loan",
+      "car service approval"
+    ],
+    "AnchorText": "APPLICABLE FORMS"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\21_long association.docx",
+    "Triggers": [
+      "long service award",
+      "service milestones",
+      "loyalty reward",
+      "years of service recognition",
+      "employee benefits"
+    ],
+    "AnchorText": "The long association, consistent performance and high commitment have helped MEAI to achieve business growth."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\21_long association.docx",
+    "Triggers": [
+      "leaves policy",
+      "holiday pay",
+      "paid time off",
+      "vacation days",
+      "special leave"
+    ],
+    "AnchorText": "On Completion of 5 yrs: 1 Day paid leave, On Completion of 10 yrs: 4 Days paid leave"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\21_long association.docx",
+    "Triggers": [
+      "gift policy",
+      "management gift",
+      "employee incentives",
+      "rewards for employees",
+      "welfare benefits"
+    ],
+    "AnchorText": "Management Gift (any of the items in the categories mentioned below)"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\21_long association.docx",
+    "Triggers": [
+      "cost sharing policy",
+      "financial assistance",
+      "employee support",
+      "benefits for long service",
+      "reimbursement for purchases"
+    ],
+    "AnchorText": "Support by cost sharing in purchase of below items i.e."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\22_MD Immediate Award.docx",
+    "Triggers": [
+      "extra effort award",
+      "recognize employee contributions",
+      "special award for good work",
+      "how to get special award",
+      "criteria for special award"
+    ],
+    "AnchorText": "Special Award for Extra ordinary Efforts:"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\22_MD Immediate Award.docx",
+    "Triggers": [
+      "defect prevention",
+      "quality consciousness"
+    ],
+    "AnchorText": "Employees have to pay proper attention towards their job assignments towards work requirements."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\22_MD Immediate Award.docx",
+    "Triggers": [
+      "great social contribution",
+      "voluntary act for society",
+      "award for rescuing life"
+    ],
+    "AnchorText": "We all are responsible towards our society at a large and have to be ready for any voluntary act which can save life, property or nation belongings."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\22_MD Immediate Award.docx",
+    "Triggers": [
+      "how to apply for award",
+      "who decides about the award",
+      "amend/revise/discontinue this scheme"
+    ],
+    "AnchorText": "Management will decide about the award after reviewing it on case to case basis. Management reserves the right to amend / revise or discontinue this scheme."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23A_ISMS Policy(Manesar Plant)_General Baseline_Rev21.docx",
+    "Triggers": [
+      "what is the policy on information security",
+      "information security management policy",
+      "confidential corporate info",
+      "leakage loss or damage of confidential info",
+      "compliance with laws and regulations",
+      "incident accident management",
+      "physical access control",
+      "remote work security measures",
+      "data protection photography videography recording",
+      "personal data management"
+    ],
+    "AnchorText": "Information Security Management Policy for Confidential Corporate Information"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23A_ISMS Policy(Manesar Plant)_General Baseline_Rev21.docx",
+    "Triggers": [
+      "who is responsible for submitting pledges",
+      "pledge submission process",
+      "employee education and training on security protocols"
+    ],
+    "AnchorText": "Submission of Pledges (Section 5 - People Security)"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23A_ISMS Policy(Manesar Plant)_General Baseline_Rev21.docx",
+    "Triggers": [
+      "how to report incidents accidents",
+      "incident accident reporting criteria",
+      "accident reporting system"
+    ],
+    "AnchorText": "Reporting Incidents/Accidents (Section 7 - Incident/Accident Management)"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23B_ISMS Policy(Manesar Plant)_Technical_Rev18.docx",
+    "Triggers": [
+      "isms policy",
+      "infosec policy",
+      "cyber security policy",
+      "data protection",
+      "confidential info",
+      "information asset misuse",
+      "unauthorized access"
+    ],
+    "AnchorText": "An information security management policy is necessary to: Protect safety and integrity of information. Prevent unauthorized access. Insure proper use of communications."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23B_ISMS Policy(Manesar Plant)_Technical_Rev18.docx",
+    "Triggers": [
+      "hardware asset management",
+      "software asset management",
+      "website management",
+      "domain management"
+    ],
+    "AnchorText": "Hardware Asset Management (Technical Baseline)"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23B_ISMS Policy(Manesar Plant)_Technical_Rev18.docx",
+    "Triggers": [
+      "config management",
+      "change control",
+      "configuration management of information system"
+    ],
+    "AnchorText": "Configuration Management of Information System"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23B_ISMS Policy(Manesar Plant)_Technical_Rev18.docx",
+    "Triggers": [
+      "security controls",
+      "implementation plan for security controls",
+      "confirmation of the implementation status of security controls"
+    ],
+    "AnchorText": "Planning Security Controls"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23B_ISMS Policy(Manesar Plant)_Technical_Rev18.docx",
+    "Triggers": [
+      "cyber attack detection",
+      "accident response and reporting structure",
+      "investigation structure for cyber-attack detection"
+    ],
+    "AnchorText": "Establishment of an Accident Response and Reporting Structure"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23B_ISMS Policy(Manesar Plant)_Technical_Rev18.docx",
+    "Triggers": [
+      "cloud service usage guidelines",
+      "external information processing services",
+      "use of external information processing services"
+    ],
+    "AnchorText": "Use of External Information Processing Services"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23B_ISMS Policy(Manesar Plant)_Technical_Rev18.docx",
+    "Triggers": [
+      "identification and authentication settings",
+      "access control",
+      "management of information related to identification and authentication"
+    ],
+    "AnchorText": "Identification and Authentication"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23B_ISMS Policy(Manesar Plant)_Technical_Rev18.docx",
+    "Triggers": [
+      "maintenance work",
+      "planning maintenance work",
+      "preparation for maintenance work",
+      "implementation of maintenance work"
+    ],
+    "AnchorText": "Maintenance"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23B_ISMS Policy(Manesar Plant)_Technical_Rev18.docx",
+    "Triggers": [
+      "vulnerability management",
+      "discovering vulnerabilities caused by software or inadequate settings",
+      "collecting information on vulnerabilities caused by defects of software manufacturer"
+    ],
+    "AnchorText": "Vulnerability Management"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23B_ISMS Policy(Manesar Plant)_Technical_Rev18.docx",
+    "Triggers": [
+      "anti-malware settings",
+      "prevention of malware intrusion, diffusion and damage into the internal network"
+    ],
+    "AnchorText": "Anti-Malware"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23B_ISMS Policy(Manesar Plant)_Technical_Rev18.docx",
+    "Triggers": [
+      "backup implementation",
+      "protection of backup data",
+      "log review"
+    ],
+    "AnchorText": "Logging and Review"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23B_ISMS Policy(Manesar Plant)_Technical_Rev18.docx",
+    "Triggers": [
+      "monitoring target",
+      "monitoring system and operation"
+    ],
+    "AnchorText": "Monitoring"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23B_ISMS Policy(Manesar Plant)_Technical_Rev18.docx",
+    "Triggers": [
+      "server equipment management",
+      "server configuration",
+      "operation of servers"
+    ],
+    "AnchorText": "Server Management"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23B_ISMS Policy(Manesar Plant)_Technical_Rev18.docx",
+    "Triggers": [
+      "network equipment management",
+      "network configuration",
+      "use of wireless lan",
+      "use of remote access (mobile access)"
+    ],
+    "AnchorText": "Network Management"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23B_ISMS Policy(Manesar Plant)_Technical_Rev18.docx",
+    "Triggers": [
+      "oa device settings",
+      "management of oa devices",
+      "use of oa devices"
+    ],
+    "AnchorText": "OA Device Management"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23B_ISMS Policy(Manesar Plant)_Technical_Rev18.docx",
+    "Triggers": [
+      "smartphone settings",
+      "smartphone management",
+      "personally owned smartphones (byod)"
+    ],
+    "AnchorText": "Smartphone Management"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\23B_ISMS Policy(Manesar Plant)_Technical_Rev18.docx",
+    "Triggers": [
+      "storage device settings",
+      "management of storage devices",
+      "use of storage devices"
+    ],
+    "AnchorText": "Storage Device Management"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\24_Settlement Policy_Ver 02.docx",
+    "Triggers": [
+      "full and final settlement",
+      "f\u0026f",
+      "fnf",
+      "salary after resignation",
+      "notice pay",
+      "leave encashment",
+      "gratuity",
+      "medical reimbursement",
+      "lta"
+    ],
+    "AnchorText": "FULL \u0026 FINAL SETTLEMENT"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\24_Settlement Policy_Ver 02.docx",
+    "Triggers": [
+      "termination of employment",
+      "reasons for termination",
+      "separation from company",
+      "resignation notice"
+    ],
+    "AnchorText": "TERMINATION/SEPARATION OF EMPLOYEE"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\24_Settlement Policy_Ver 02.docx",
+    "Triggers": [
+      "outstanding dues",
+      "company property",
+      "salary recovery"
+    ],
+    "AnchorText": "In case of employee having outstanding dues like training bond amount, vehicle loan, interest concession on housing loan etc,"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\25_Mobile \u0026 its Usage Claim Policy.docx",
+    "Triggers": [
+      "mobile reimbursement",
+      "new phone policy",
+      "handset replacement",
+      "bill reimbursement",
+      "personal calls on company bill",
+      "password protection"
+    ],
+    "AnchorText": "Payment/Reimbursements:"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\25_Mobile \u0026 its Usage Claim Policy.docx",
+    "Triggers": [
+      "company mobile use",
+      "personal mobile use"
+    ],
+    "AnchorText": "Employees using company mobile as per previous scheme"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\25_Mobile \u0026 its Usage Claim Policy.docx",
+    "Triggers": [
+      "repair maintenance cost",
+      "broken phone repair"
+    ],
+    "AnchorText": "Responsibility of Repair \u0026 maintenance"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\25_Mobile \u0026 its Usage Claim Policy.docx",
+    "Triggers": [
+      "mobile bill limit",
+      "maximum reimbursement"
+    ],
+    "AnchorText": "The maximum limit of mobile bill reimbursement is inclusive of monthly rental"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\27_Trainee Policy.docx",
+    "Triggers": [
+      "trainee policy",
+      "what is the duration of training",
+      "how long is trainee scheme",
+      "training period for new employees",
+      "compensation during training"
+    ],
+    "AnchorText": "TRAINING PERIOD OF TRAINEES (Minimum Training period will be 1 year from the date of joining...)"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\27_Trainee Policy.docx",
+    "Triggers": [
+      "benefits for trainees",
+      "what benefits do trainees get",
+      "shift allowance",
+      "company uniform",
+      "transport facility"
+    ],
+    "AnchorText": "OTHER BENEFITS (Subsidized Lunch will be provided as per the Company Policy. Trainees will be provided Company Uniform...)"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\27_Trainee Policy.docx",
+    "Triggers": [
+      "evaluation criteria for trainees",
+      "how are trainee performances evaluated",
+      "what is the evaluation process"
+    ],
+    "AnchorText": "13.Evaluation Criteria (Each Supervisor/Engineer will prepare a training schedule for each trainee in Annexure I...)"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\27_Trainee Policy.docx",
+    "Triggers": [
+      "types of trainees",
+      "different categories of trainees",
+      "non iti trainee vs iti trainee"
+    ],
+    "AnchorText": "4.2Trainee \u2013 Trainee is defined as the new Joinee who will be joining the company under the Trainee Scheme and will be classified in three categories:...)"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\28_Production Incentive Scheme.docx",
+    "Triggers": [
+      "production incentive",
+      "incentive scheme",
+      "bonus pay",
+      "salary increase",
+      "work incentives",
+      "employee benefits",
+      "pay for performance"
+    ],
+    "AnchorText": "Production Incentive Scheme"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\28_Production Incentive Scheme.docx",
+    "Triggers": [
+      "eligibility criteria",
+      "who is eligible",
+      "requirements for incentive",
+      "conditions of service"
+    ],
+    "AnchorText": "ELIGIBILITY"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\28_Production Incentive Scheme.docx",
+    "Triggers": [
+      "payment terms",
+      "when will i get paid",
+      "incentive payment schedule",
+      "bonus pay frequency"
+    ],
+    "AnchorText": "REGULAR INCENTIVE CONDITIONS"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\28_Production Incentive Scheme.docx",
+    "Triggers": [
+      "disciplinary actions",
+      "behavioral expectations",
+      "conduct requirements for incentive",
+      "performance standards"
+    ],
+    "AnchorText": "Any employee who engage in disciplinary matters or engage in any activity that is disrupting/hampering production..."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\29_Company car support (Manesar Plant).docx",
+    "Triggers": [
+      "car loan",
+      "company car",
+      "vehicle support",
+      "daily to and fro",
+      "fuel reimbursement",
+      "toll charges",
+      "parking"
+    ],
+    "AnchorText": "Reimbursements for Daily To \u0026 Fro, Fuel Reimbursement Rates"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\29_Company car support (Manesar Plant).docx",
+    "Triggers": [
+      "loan limit",
+      "car loan amount",
+      "interest free",
+      "repayment instalments"
+    ],
+    "AnchorText": "Loan Facility: New Car and Old/Used Car Limits"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\29_Company car support (Manesar Plant).docx",
+    "Triggers": [
+      "residential address",
+      "change in address",
+      "disciplinary action"
+    ],
+    "AnchorText": "Benefit Based on Declared Place of Residence"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\29_Company car support (Manesar Plant).docx",
+    "Triggers": [
+      "cesion of employment",
+      "full and final settlement",
+      "retrials benefits"
+    ],
+    "AnchorText": "Recovery of Balance Car Loan in Case of Cession of Employment"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\29_Company car support (Manesar Plant).docx",
+    "Triggers": [
+      "company transport",
+      "exigency emergency situation"
+    ],
+    "AnchorText": "Employee Availing Benefit under this Scheme Will Not be Eligible for Company Transport"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\29_Superannuation policy (below Jr. Svsr level).docx",
+    "Triggers": [
+      "superannuation policy",
+      "retirement benefits",
+      "eligibility criteria",
+      "contribution percentage",
+      "final contribution",
+      "benefits payable on leaving",
+      "benefits on retirement before normal date",
+      "benefits on death in service"
+    ],
+    "AnchorText": "ELIGIBILITY, CONTRIBUTIONS, BENEFITS PAYABLE, ETC."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\30_Rules governing phone usage in Foreign.docx",
+    "Triggers": [
+      "phone bill",
+      "mobile usage abroad",
+      "work phone policy"
+    ],
+    "AnchorText": "RULES GOVERNING USAGE OF MOBILE/PHONE DURING TRAINING IN FOREIGN COUNTRY"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\30_Rules governing phone usage in Foreign.docx",
+    "Triggers": [
+      "internet for calls",
+      "receiving calls instead of making"
+    ],
+    "AnchorText": "Request the following for personal/official usage: Use of internet for making calls...To encourage more receiving calls instead of making calls..."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\30_Rules governing phone usage in Foreign.docx",
+    "Triggers": [
+      "lost phone",
+      "mis-happening"
+    ],
+    "AnchorText": "In case of any mis-happening/ lost of phone etc, the same should be reported immediately..."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\33_Office computer \u0026 usage Policy.docx",
+    "Triggers": [
+      "laptop replacement",
+      "replace laptop",
+      "lost my laptop",
+      "broken laptop",
+      "new laptop",
+      "when will i get a new laptop",
+      "can i get a laptop",
+      "laptop usage policy"
+    ],
+    "AnchorText": "REPLACEMENT/DISPOSAL OF DESKTOP/LAPTOP"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\33_Office computer \u0026 usage Policy.docx",
+    "Triggers": [
+      "internet access",
+      "email access",
+      "ms team",
+      "vpn connection",
+      "meai servers"
+    ],
+    "AnchorText": "TYPES OF FACILITIES PROVIDED TO USERS AND MEAI VPN CONNECTION"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\33_Office computer \u0026 usage Policy.docx",
+    "Triggers": [
+      "official email",
+      "work email",
+      "company email",
+      "email usage policy",
+      "email confidentiality"
+    ],
+    "AnchorText": "EMPLOYEES WHO ALL ARE ASSIGNED WITH OFFICIAL E-MAIL"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\33_Office computer \u0026 usage Policy.docx",
+    "Triggers": [
+      "it department contact",
+      "who to contact for it issues",
+      "reporting it issues",
+      "it system maintenance"
+    ],
+    "AnchorText": "FH-IT RESPONSIBILITY AND IT DEPARTMENT CONTACT DETAILS"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\35_Entertainment Policy (Manesar Plant) V2.docx",
+    "Triggers": [
+      "entertainment expenses",
+      "work-related events",
+      "client meetings",
+      "gifts for employees",
+      "golf entertainment"
+    ],
+    "AnchorText": "The purpose of this policy is to recognize that there are many occasions which require entertainment expenses i.e. significant work related accomplishments, meetings with customers and subsidiaries requiring lunch/dinner etc..."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\35_Entertainment Policy (Manesar Plant) V2.docx",
+    "Triggers": [
+      "approval for lunches",
+      "who can approve what",
+      "expense reimbursement"
+    ],
+    "AnchorText": "Approval authority will be as per below table:"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\35_Entertainment Policy (Manesar Plant) V2.docx",
+    "Triggers": [
+      "golf expenses",
+      "souvenirs"
+    ],
+    "AnchorText": "Golf Entertainment, Gifts/Souvenirs"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\36_Anti Trust guidelines (Manesar Plant).docx",
+    "Triggers": [
+      "cartel",
+      "price fixing",
+      "antitrust laws",
+      "competition law",
+      "leniency program",
+      "whistleblower",
+      "red flag",
+      "suspicious activity",
+      "exchange of sensitive information"
+    ],
+    "AnchorText": "Violations of competition/antitrust law, especially cartels"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\38_Work permit rules - V1.docx",
+    "Triggers": [
+      "work permit",
+      "permission for work",
+      "rules and regulations",
+      "safety procedures",
+      "emergency plan",
+      "incident investigation",
+      "full and final settlement"
+    ],
+    "AnchorText": "Work Permit Rules and Regulations for External Parties"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\39_Domestic Travel Scheme (Manesar Plant).docx",
+    "Triggers": [
+      "domestic travel",
+      "business trip expenses",
+      "travel policy",
+      "air tickets",
+      "hotel arrangements",
+      "conveyance reimbursement",
+      "trip settlement",
+      "cancellation charges"
+    ],
+    "AnchorText": "Travel Scheme lay down the conditions and allowances provided by the Company to its employees when they undertake travel on duty."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\43_Graphic Policy.docx",
+    "Triggers": [
+      "graphic policy",
+      "visual identity",
+      "branding guidelines",
+      "logos and symbols"
+    ],
+    "AnchorText": "Graphic Standards"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\43_Graphic Policy.docx",
+    "Triggers": [
+      "business card design",
+      "letterhead template",
+      "press release format"
+    ],
+    "AnchorText": "Usage Guidelines for specific applications"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\43_Graphic Policy.docx",
+    "Triggers": [
+      "unauthorized use of company logo",
+      "disciplinary action"
+    ],
+    "AnchorText": "Unauthorized use of graphic standards"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\43_Graphic Policy.docx",
+    "Triggers": [
+      "policy review",
+      "document update frequency"
+    ],
+    "AnchorText": "Review and revision of this policy"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\46_Whistle Blower Policy (Manesar Plant).docx",
+    "Triggers": [
+      "whistleblower policy",
+      "report misconduct",
+      "abuse of authority",
+      "breach of contract",
+      "false allegations",
+      "grievance procedures",
+      "malicious complaints",
+      "unfounded accusations"
+    ],
+    "AnchorText": "Protected Disclosure"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\46_Whistle Blower Policy (Manesar Plant).docx",
+    "Triggers": [
+      "whistleblower protection",
+      "disciplinary action",
+      "frivolous disclosures",
+      "false or malicious allegations"
+    ],
+    "AnchorText": "Disqualifications and Disciplinary Action"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\46_Whistle Blower Policy (Manesar Plant).docx",
+    "Triggers": [
+      "complaints procedure",
+      "how to report misconduct",
+      "who to contact for help"
+    ],
+    "AnchorText": "Procedure for Filing a Complaint"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\47_Company Assets Theft Policy.docx",
+    "Triggers": [
+      "asset theft",
+      "company property stolen",
+      "theft at work",
+      "lost assets",
+      "stolen inventory"
+    ],
+    "AnchorText": "Theft in connection with MEAI assets"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\47_Company Assets Theft Policy.docx",
+    "Triggers": [
+      "reporting theft",
+      "what to do if something\u0027s stolen",
+      "how to report a theft incident"
+    ],
+    "AnchorText": "All the theft cases must be reported telephonically immediately and should be reported in Form 1 within 24 hours of the incident."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\47_Company Assets Theft Policy.docx",
+    "Triggers": [
+      "investigating theft",
+      "theft investigation process",
+      "what happens after reporting theft"
+    ],
+    "AnchorText": "Theft/Loss of asset reported will be thoroughly investigated by the Committee members."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\47_Company Assets Theft Policy.docx",
+    "Triggers": [
+      "disciplinary actions for theft",
+      "consequences of stealing from work",
+      "penalties for employee theft"
+    ],
+    "AnchorText": "Managing Director will review the report/ actions and take such disciplinary or corrective actions as necessary within maximum 10 days from the date of submission of report from committee."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\48_CCTV Surveillance Camera Policy.docx",
+    "Triggers": [
+      "cctv policy",
+      "cctv surveillance",
+      "camera policy",
+      "is cctv installed in toilets",
+      "can i record employees",
+      "what is monitored by cctv"
+    ],
+    "AnchorText": "The CCTV surveillance cameras are used to monitor/investigate any incidents involving threats to employees or public safety, theft and unauthorized access to \u201Cstaff only\u201D areas."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\48_CCTV Surveillance Camera Policy.docx",
+    "Triggers": [
+      "how long is footage stored",
+      "can i view cctv footage",
+      "who can access cctv footage"
+    ],
+    "AnchorText": "Footage recorded \u0026 retained by the CCTV surveillance cameras will be used for the sole purpose of monitoring and investigating incidents."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\48_CCTV Surveillance Camera Policy.docx",
+    "Triggers": [
+      "what is allowed to use cctv footage for",
+      "can i share cctv footage with police"
+    ],
+    "AnchorText": "In case of any incident where police has been involved footage of an incident may be disclosed to a third party such as police as per CPC Act guidelines, and copies may be provided on the condition that the third party has an official role in investigating the incident or some other legitimate reason for requiring access to the footage."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\49_Policy on Social Risks (Manesar Plant)..docx",
+    "Triggers": [
+      "social risk policy",
+      "risk management mitsubishi electric",
+      "labour disputes",
+      "sexual harassment at work",
+      "data breach reporting",
+      "terrorism at workplace",
+      "environmental risks",
+      "anti-trust laws",
+      "bribery and corruption",
+      "fraudulent activities",
+      "scandals in the company",
+      "fatal accidents at work",
+      "serious accidents at work",
+      "minor accidents at work"
+    ],
+    "AnchorText": "Social Risks which may adversely affect company directly or indirectly i.e. Financials, Business, Operations, Goodwill, Human being"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\50_Policy for Conflict of Interest (Manesar Plant).docx",
+    "Triggers": [
+      "conflict of interest policy",
+      "what is conflict of interest",
+      "coi definition",
+      "policy on coi",
+      "guidelines for coi",
+      "what is applicable to all personnel",
+      "business activities coverage",
+      "effective date of policy change",
+      "revising and updating policy"
+    ],
+    "AnchorText": "This policy shall apply to all Personnel and to all of the Company\u2019s business activities wherever they may be conducted."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\52_Transport policy (Manesar Plant).docx",
+    "Triggers": [
+      "transport reimbursement",
+      "commuting expenses",
+      "company transport",
+      "routes",
+      "reimbursement amount",
+      "distance limit",
+      "residential address change"
+    ],
+    "AnchorText": "Reimbursement for Commuting Expenses Under Transport Policy"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\52_Transport policy (Manesar Plant).docx",
+    "Triggers": [
+      "overtime transport",
+      "business travel reimbursement",
+      "domestic travel policy"
+    ],
+    "AnchorText": "Transport Reimbursement for Overtime and Business Travel"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\56_Export management \u0026 compliance policy(Manesar Plant).docx",
+    "Triggers": [
+      "export policy",
+      "compliance",
+      "wmd definition",
+      "controlled items",
+      "export license",
+      "end-use certificate",
+      "foreign trade laws",
+      "scomet list",
+      "melco group companies"
+    ],
+    "AnchorText": "BASIC EXPORT POLICY and EXPORT CONTROL STRUCTURE"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\56_Export management \u0026 compliance policy(Manesar Plant).docx",
+    "Triggers": [
+      "who is responsible for export control",
+      "export control administrator role",
+      "eca responsibilities"
+    ],
+    "AnchorText": "RESPONSIBILITIES OF EXPORT CONTROL ADMINISTRATOR (ECA)"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\57_MEAI Litigation Policy.docx",
+    "Triggers": [
+      "litigation policy",
+      "what happens if i\u0027m sued?",
+      "indemnification for employees",
+      "who to contact for legal issues",
+      "company policies on lawsuits"
+    ],
+    "AnchorText": "LITIGATION INITIATED AGAINST MEAI BY EMPLOYEES/ THIRD PARTY"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\57_MEAI Litigation Policy.docx",
+    "Triggers": [
+      "initiating a lawsuit against an employee",
+      "when can we sue someone?",
+      "types of claims that can be initiated by the company",
+      "how to handle labor disputes"
+    ],
+    "AnchorText": "LITIGATION INITIATED BY MEAI"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\57_MEAI Litigation Policy.docx",
+    "Triggers": [
+      "who is responsible for handling legal issues",
+      "what role does the legal team play",
+      "communicating with the court or government",
+      "preparing documents for a lawsuit"
+    ],
+    "AnchorText": "ROLE OF LEGAL TEAM"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\59_Floor Marking or Taping Policy.docx",
+    "Triggers": [
+      "floor marking policy",
+      "taping guidelines",
+      "59 floor marking policy",
+      "meai policy on taping",
+      "floor markings in meai"
+    ],
+    "AnchorText": "TAPING GUIDELINES"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\59_Floor Marking or Taping Policy.docx",
+    "Triggers": [
+      "effective date of new policy",
+      "when does new policy start",
+      "new policy effective from"
+    ],
+    "AnchorText": "EFFECTIVE DATE"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\59_Floor Marking or Taping Policy.docx",
+    "Triggers": [
+      "who is responsible for floor markings",
+      "who marks and tapes in meai",
+      "floor marking responsibility"
+    ],
+    "AnchorText": "Respective FHs/ Section Heads are responsible for Marking \u0026 taping in respective areas."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\59_Floor Marking or Taping Policy.docx",
+    "Triggers": [
+      "amendment of policy",
+      "changing policy",
+      "withdrawing policy"
+    ],
+    "AnchorText": "The management reserves the right to amend any clause under this policy or even withdraw this policy."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\61_Attendance Allow Policy - Temporary.docx",
+    "Triggers": [
+      "attendance policy",
+      "leave allowance",
+      "attendance pay",
+      "monthly attendance bonus",
+      "special leave rules",
+      "quarterly attendance reward"
+    ],
+    "AnchorText": "Regular Attendance Allowance and Special Attendance Allowance"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\61_Attendance Allow Policy - Temporary.docx",
+    "Triggers": [
+      "how many leaves can i take",
+      "leave policy for temporary staff",
+      "max leaves per quarter",
+      "leaves for temporary employees"
+    ],
+    "AnchorText": "Max. Leaves, if Availed, during the Quarter"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\62_Visitor Rules - Rev01.docx",
+    "Triggers": [
+      "visitor rules",
+      "work permit",
+      "plant visit",
+      "shop floor tour",
+      "general visit",
+      "approval process",
+      "emergency awareness",
+      "photography policy"
+    ],
+    "AnchorText": "The objective of this policy is to outline the rules for managing visitors at our premises..."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\62_Visitor Rules - Rev01.docx",
+    "Triggers": [
+      "what to do when approval authority is unavailable",
+      "alternate approvals",
+      "forwarding requests"
+    ],
+    "AnchorText": "In case non-availability of approval authority at any level (except ED san and MD san), the user may forward the same..."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\62_Visitor Rules - Rev01.docx",
+    "Triggers": [
+      "safety measures during plant visit",
+      "visitor safety guidelines"
+    ],
+    "AnchorText": "User department will ensure that no visitors remain unattended and during plant visit all the safety measures have been taken in consideration."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\63_Happy day and taxi tranportation guidelines.docx",
+    "Triggers": [
+      "happy day",
+      "wednesdays off",
+      "overtime policy",
+      "late stay",
+      "work life balance"
+    ],
+    "AnchorText": "Work Life Balance \u2013 Every Wednesday will be celebrated as \u201CHAPPY DAY\u201D..."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\63_Happy day and taxi tranportation guidelines.docx",
+    "Triggers": [
+      "taxi policy",
+      "call taxi",
+      "uber ola",
+      "transportation to work"
+    ],
+    "AnchorText": "employee can use Call Taxi (OLA/Uber) within City Limits for any movement in Delhi/NCR region..."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\63_Happy day and taxi tranportation guidelines.docx",
+    "Triggers": [
+      "emergency leave",
+      "form 1",
+      "reporting emergency"
+    ],
+    "AnchorText": "These cases will be reported to MD san by 03.30 pm in Form 1 ."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\63_Happy day and taxi tranportation guidelines.docx",
+    "Triggers": [
+      "company car scheme",
+      "car policy"
+    ],
+    "AnchorText": "Company car scheme, users should not be selected only on position based..."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\64_Shift Incharge Guideline Policy (Manesar Plant).docx",
+    "Triggers": [
+      "shift duties",
+      "incharge responsibilities",
+      "quality issues",
+      "material availability",
+      "manpower availability",
+      "emergency preparedness",
+      "health and safety"
+    ],
+    "AnchorText": "FOCUS \u0026 RESPONSIBILITY"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\64_Shift Incharge Guideline Policy (Manesar Plant).docx",
+    "Triggers": [
+      "shift incharge selection",
+      "nominations",
+      "approval process",
+      "review periods"
+    ],
+    "AnchorText": "SELECTION OF SHIFT INCHARGE"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\64_Shift Incharge Guideline Policy (Manesar Plant).docx",
+    "Triggers": [
+      "daily reporting",
+      "concerns and issues",
+      "emergency communication",
+      "hierarchy of contact"
+    ],
+    "AnchorText": "FLOW OF ACTIVITIES"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\65_Reimbursement of Professional development fee.docx",
+    "Triggers": [
+      "professional development fee",
+      "education reimbursement",
+      "tuition fees",
+      "reimbursement policy",
+      "f\u0026f for education",
+      "educational expenses"
+    ],
+    "AnchorText": "The purpose of this policy is to provide financial assistance to all associates for education..."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\65_Reimbursement of Professional development fee.docx",
+    "Triggers": [
+      "eligibility criteria",
+      "who is eligible",
+      "education reimbursement limit"
+    ],
+    "AnchorText": "Employee will be eligible for Professional development fee per year as follows:"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\65_Reimbursement of Professional development fee.docx",
+    "Triggers": [
+      "submission guidelines",
+      "what to submit",
+      "proof of payment required"
+    ],
+    "AnchorText": "The employee will submit Form 1 along with proof of tuition fees..."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\65_Reimbursement of Professional development fee.docx",
+    "Triggers": [
+      "tax implications",
+      "income tax on reimbursement"
+    ],
+    "AnchorText": "Income tax will be applicable as per Income tax act."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\67_Term Plan Policy.docx",
+    "Triggers": [
+      "insurance for death",
+      "death benefit policy",
+      "life insurance company",
+      "claim rejection"
+    ],
+    "AnchorText": "COVERAGE: All Permanent Employees below Jr. Supervisor Level"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\67_Term Plan Policy.docx",
+    "Triggers": [
+      "insurance nomination",
+      "beneficiary declaration",
+      "nominating nominee"
+    ],
+    "AnchorText": "Nominee \u2013 If Nominee declared by Employee: As per nomination/declaration provided in accordance with law."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\67_Term Plan Policy.docx",
+    "Triggers": [
+      "claim settlement process",
+      "documents required for claim",
+      "death certificate needed"
+    ],
+    "AnchorText": "DOCUMENTS REQUIRED Nominee, may have to submit the following documents* as per the requirements:"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\67_Term Plan Policy.docx",
+    "Triggers": [
+      "policy effective date",
+      "insurance policy start date"
+    ],
+    "AnchorText": "EFFECTIVE DATE: This policy will be effective from 19th August 2019."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\68_Birthday celebration.docx",
+    "Triggers": [
+      "birthday celebration policy",
+      "gift card for employees",
+      "company celebrations",
+      "employee recognition",
+      "milestone celebration"
+    ],
+    "AnchorText": "Celebrations give employees recognition for accomplishments and milestones in both business and their personal lives..."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\70_Work From Home Policy (Manesar).docx",
+    "Triggers": [
+      "work from home policy",
+      "wfh policy",
+      "working from home",
+      "can i work from home",
+      "f\u0026f for wfh",
+      "wfh rules"
+    ],
+    "AnchorText": "WORK FROM HOME CRITERIA:"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\70_Work From Home Policy (Manesar).docx",
+    "Triggers": [
+      "wfh eligibility",
+      "who can work from home",
+      "what are the requirements for wfh",
+      "can i work from home with vpn"
+    ],
+    "AnchorText": "ELIGIBILITY:"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\70_Work From Home Policy (Manesar).docx",
+    "Triggers": [
+      "responsibilities while working from home",
+      "wfh expectations",
+      "what do i need to do when working from home"
+    ],
+    "AnchorText": "RESPONSIBILITY OF EMPLOYEE:"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\70_Work From Home Policy (Manesar).docx",
+    "Triggers": [
+      "how often can i work from home",
+      "can i work from home multiple days a week",
+      "wfh frequency"
+    ],
+    "AnchorText": "WORK FROM HOME CRITERIA:"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\81_Voluntary Retirement Scheme.docx",
+    "Triggers": [
+      "vrs",
+      "voluntary retirement scheme",
+      "full and final settlement",
+      "f\u0026f",
+      "fnf",
+      "retirement benefits",
+      "long service reward",
+      "how to apply for vrs"
+    ],
+    "AnchorText": "VOLUNTARY RETIREMENT SCHEME AND BENEFITS"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\81_Voluntary Retirement Scheme.docx",
+    "Triggers": [
+      "eligibility criteria",
+      "who is eligible for vrs",
+      "age and service requirements"
+    ],
+    "AnchorText": "ELIGIBILITY"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\81_Voluntary Retirement Scheme.docx",
+    "Triggers": [
+      "application process",
+      "how to apply for vrs",
+      "vrs application form"
+    ],
+    "AnchorText": "VRS GUIDELINES AND APPLICATION PROCESS"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\81_Voluntary Retirement Scheme.docx",
+    "Triggers": [
+      "taxes and deductions",
+      "income tax on vrs benefits"
+    ],
+    "AnchorText": "TAXES AND DEDUCTIONS"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Apprentice Scheme.docx",
+    "Triggers": [
+      "apprentice scheme",
+      "eligibility for apprentice",
+      "how to apply for apprentice",
+      "what are the requirements for apprentice",
+      "apprentice training duration"
+    ],
+    "AnchorText": "Eligibility Criteria and Application Process for Apprentice Scheme"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Apprentice Scheme.docx",
+    "Triggers": [
+      "stipend for apprentice",
+      "compensation for apprentice",
+      "how much does an apprentice get paid"
+    ],
+    "AnchorText": "Compensation: Stipend Paid as per Company Policy"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Apprentice Scheme.docx",
+    "Triggers": [
+      "leave policy for apprentice",
+      "vacation time for apprentice",
+      "can i take a leave as an apprentice"
+    ],
+    "AnchorText": "Leaves will be provided as per Apprentice Act,1961."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Apprentice Scheme.docx",
+    "Triggers": [
+      "job after completing apprentice training",
+      "chances of getting hired after apprentice",
+      "what happens after finishing the apprentice program"
+    ],
+    "AnchorText": "Absorption / Regularization: No Guarantee of Employment"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Documentation Policy.docx",
+    "Triggers": [
+      "document control policy",
+      "document retrieval time",
+      "doc management",
+      "file organization",
+      "document retention"
+    ],
+    "AnchorText": "The objective of the policy is to provide guidelines for controlling document to minimize the document retrieval time and to have better document control."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Documentation Policy.docx",
+    "Triggers": [
+      "amending policies",
+      "policy changes",
+      "withdrawal of policy"
+    ],
+    "AnchorText": "The management reserves the right to amend any clause under this policy or even withdraw this policy"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Good Performance Reward scheme_Trainees_New Revised.docx",
+    "Triggers": [
+      "good performance reward",
+      "trainee scheme benefits",
+      "incentive amount calculation",
+      "productivity rate per part",
+      "quality ok policy"
+    ],
+    "AnchorText": "Good Performance Reward Scheme"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Good Performance Reward scheme_Trainees_New Revised.docx",
+    "Triggers": [
+      "absenteeism reduction",
+      "motivation boost",
+      "improvement in efficiency",
+      "financial gain for trainees"
+    ],
+    "AnchorText": "Objective of the Good Performance Reward Scheme"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Good Performance Reward scheme_Trainees_New Revised.docx",
+    "Triggers": [
+      "terms and conditions",
+      "incentive amount payment rules",
+      "minimum base rate amount",
+      "uncommon reasons affecting production"
+    ],
+    "AnchorText": "Terms \u0026 Conditions of Scheme"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Company Profile policy policy.docx",
+    "Triggers": [
+      "company profile",
+      "organisation chart",
+      "employee responsibilities",
+      "policy update",
+      "effective date",
+      "revision"
+    ],
+    "AnchorText": "Company Profile Policy"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Company Profile policy policy.docx",
+    "Triggers": [
+      "update company profile",
+      "add new employee",
+      "remove old employee",
+      "change organisation structure"
+    ],
+    "AnchorText": "Responsibility \u0026 Frequency of Updation of Presentation"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Company Profile policy policy.docx",
+    "Triggers": [
+      "company presentation",
+      "share with external agency",
+      "approval needed for sharing"
+    ],
+    "AnchorText": "GUIDELINES FOR COMPANY PROFILE PRESENTATION"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Mask Policy.docx",
+    "Triggers": [
+      "mask policy",
+      "face mask at work",
+      "covid rules",
+      "social distancing",
+      "coronavirus at office",
+      "mask mandate"
+    ],
+    "AnchorText": "Implementation of face mask during a contagious pandemic or epidemic to mitigate the spread of disease."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Parking Policy.docx",
+    "Triggers": [
+      "parking policy",
+      "car parking rules",
+      "vehicle parking inside company",
+      "parking for employees",
+      "company car parking",
+      "parking slots inside factory",
+      "parking outside factory"
+    ],
+    "AnchorText": "CATEGORIES and GUIDELINES sections regarding vehicle parking"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Parking Policy.docx",
+    "Triggers": [
+      "lost or damaged vehicles",
+      "responsibility for vehicle damage",
+      "vehicle safety in company premises"
+    ],
+    "AnchorText": "Company has no responsibility in case of any loss or damage..."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Parking Policy.docx",
+    "Triggers": [
+      "visitors parking",
+      "vip customer parking",
+      "parking for contractors"
+    ],
+    "AnchorText": "Visitors: Visitors vehicles will be parked outside the premises except for VIP/customers."
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Site Emergency Preparedness \u0026 Response Policy - Rev04.docx",
+    "Triggers": [
+      "emergency evacuation",
+      "evacuation plan",
+      "fire extinguishers",
+      "first aid",
+      "safety protocols"
+    ],
+    "AnchorText": "Evacuation Plan"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Site Emergency Preparedness \u0026 Response Policy - Rev04.docx",
+    "Triggers": [
+      "hazardous chemicals",
+      "chemical hazards",
+      "oil hazard"
+    ],
+    "AnchorText": "Action during Chemical/Oil Hazard"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Site Emergency Preparedness \u0026 Response Policy - Rev04.docx",
+    "Triggers": [
+      "earthquake",
+      "natural disasters",
+      "emergency response"
+    ],
+    "AnchorText": "Action during Earthquake"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Site Emergency Preparedness \u0026 Response Policy - Rev04.docx",
+    "Triggers": [
+      "occupational health",
+      "safety and environment policy",
+      "environmental sustainability"
+    ],
+    "AnchorText": "Occupational Health, Safety and Environment Policy (Group EHS Policy)"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Transfer Policy.docx",
+    "Triggers": [
+      "transfer policy",
+      "relocation benefits",
+      "moving to new location",
+      "company relocation support",
+      "transfer expenses reimbursed",
+      "deputation policy",
+      "short term transfer rules"
+    ],
+    "AnchorText": "Transfer Guidelines and Benefits for Permanent Transfers"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Transfer Policy.docx",
+    "Triggers": [
+      "look and see visit",
+      "visit to new location before moving",
+      "expenses for relocation"
+    ],
+    "AnchorText": "Benefits in Case of Permanent Transfer - Look \u0026 See Visit"
+  },
+  {
+    "SourceFile": "./policies\\Manesar\\Transfer Policy.docx",
+    "Triggers": [
+      "transportation costs reimbursed",
+      "moving household items",
+      "car shifting expenses"
+    ],
+    "AnchorText": "Benefits in Case of Permanent Transfer - Transportation for Relocation"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\01SP_Foreign Travel  Policy(Sanand Plant).docx",
+    "Triggers": [
+      "foreign travel policy",
+      "business trip abroad",
+      "passport requirements",
+      "kit allowance",
+      "flight travel allowance",
+      "daily allowance",
+      "accompanying family on business trip"
+    ],
+    "AnchorText": "FOREIGN TRAVEL Purpose, SCOPE, EFFECTIVE DATE, APPLICABLE DOCUMENTATION, FOREIGN TRAVEL"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\01SP_Foreign Travel  Policy(Sanand Plant).docx",
+    "Triggers": [
+      "passport processing cost",
+      "reimbursement of passport application fees"
+    ],
+    "AnchorText": "Passport \u2013 Processing Cost"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\01SP_Foreign Travel  Policy(Sanand Plant).docx",
+    "Triggers": [
+      "kit allowance rules",
+      "max kit allowance amount",
+      "how to get kit allowance"
+    ],
+    "AnchorText": "Kit Allowance"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\01SP_Foreign Travel  Policy(Sanand Plant).docx",
+    "Triggers": [
+      "flight travel allowance per day",
+      "travel expenses abroad"
+    ],
+    "AnchorText": "Flight Travel Allowance"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\02SP_General Information Policy (Sanand Plant).docx",
+    "Triggers": [
+      "attendance",
+      "punch in punch out",
+      "late coming",
+      "absence",
+      "regularization"
+    ],
+    "AnchorText": "Attendance, Permission \u0026 Late Coming"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\02SP_General Information Policy (Sanand Plant).docx",
+    "Triggers": [
+      "leave policy",
+      "casual leave",
+      "sick leave",
+      "esi leave"
+    ],
+    "AnchorText": "LEAVE RULES"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\02SP_General Information Policy (Sanand Plant).docx",
+    "Triggers": [
+      "short leave",
+      "half day leave"
+    ],
+    "AnchorText": "Permission for short Leave"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\02SP_General Information Policy (Sanand Plant).docx",
+    "Triggers": [
+      "working hours",
+      "shift timings",
+      "overtime",
+      "extra time"
+    ],
+    "AnchorText": "WORKING DAYS \u0026 HOURS"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\02SP_General Information Policy (Sanand Plant).docx",
+    "Triggers": [
+      "female employees",
+      "women working hours",
+      "restriction on women working hours"
+    ],
+    "AnchorText": "RESTRICTIONS ON WORKING HOURS OF WOMEN"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).docx",
+    "Triggers": [
+      "lta policy",
+      "leave travel allowance",
+      "lta claim form",
+      "pro-rata lta",
+      "severance pay",
+      "voluntary retirement",
+      "death in service",
+      "disablement benefits"
+    ],
+    "AnchorText": "Eligibility for Leave Travel Assistance (LTA)"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).docx",
+    "Triggers": [
+      "lta amount",
+      "leave travel allowance payment",
+      "travel expense reimbursement"
+    ],
+    "AnchorText": "LTA Payable to an Employee"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).docx",
+    "Triggers": [
+      "lta claim without tax benefit",
+      "unclaimed lta",
+      "it benefit opt-out"
+    ],
+    "AnchorText": "LTA Claim without Tax Benefit"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).docx",
+    "Triggers": [
+      "pro-rata calculation",
+      "new employee benefits",
+      "basic pay revision"
+    ],
+    "AnchorText": "Pro-Rata Calculation for New Employees"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).docx",
+    "Triggers": [
+      "employee responsibility",
+      "tax liability",
+      "income tax authorities"
+    ],
+    "AnchorText": "Employee Responsibility and Tax Liability"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\04SP_loan policy (Supervisor \u0026 Above) (Sanand Plant).docx",
+    "Triggers": [
+      "loan policy",
+      "personal loan",
+      "interest free loan",
+      "max loan limit",
+      "loan application",
+      "how to get a loan",
+      "loan approval process"
+    ],
+    "AnchorText": "LOAN LIMIT AND PROCESS"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\04SP_loan policy (Supervisor \u0026 Above) (Sanand Plant).docx",
+    "Triggers": [
+      "employee benefits",
+      "ctc meaning",
+      "what is ctc",
+      "salary allowance",
+      "pf and lta"
+    ],
+    "AnchorText": "Loan Budget and Salary Allowances"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\04SP_loan policy (Supervisor \u0026 Above) (Sanand Plant).docx",
+    "Triggers": [
+      "loan repayment",
+      "installment plan",
+      "emi calculation",
+      "interest on loan",
+      "late payment fees"
+    ],
+    "AnchorText": "Deduction of Loan Amount from Salary"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\04SP_loan policy (Supervisor \u0026 Above) (Sanand Plant).docx",
+    "Triggers": [
+      "disciplinary action",
+      "loan misuse",
+      "returning loan amount",
+      "late repayment consequences"
+    ],
+    "AnchorText": "Employee Obligation and Management Rights"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\05SP_Recruitment Selection   Monitoring.docx",
+    "Triggers": [
+      "probation period",
+      "confirmation letter",
+      "regular employment",
+      "terminate employment",
+      "performance review",
+      "salary range",
+      "job offer details"
+    ],
+    "AnchorText": "Probationary Employee and Performance Monitoring"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\05SP_Recruitment Selection   Monitoring.docx",
+    "Triggers": [
+      "permanent employee",
+      "classification of employees",
+      "employment status",
+      "fixed term employment",
+      "temporary task"
+    ],
+    "AnchorText": "CLASSIFICATION OF EMPLOYEE"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\05SP_Recruitment Selection   Monitoring.docx",
+    "Triggers": [
+      "recruitment process",
+      "selection criteria",
+      "remuneration finalization",
+      "equal employment opportunity",
+      "job analysis"
+    ],
+    "AnchorText": "RECRUITMENT, SELECTION \u0026 REMUNERATION FINALIZATION"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\06SP_Marriage gift (Sanand Plant).docx",
+    "Triggers": [
+      "wedding gift",
+      "marriage benefits",
+      "gift for daughter\u0027s marriage",
+      "gift for son\u0027s marriage",
+      "self-marriage gift",
+      "employee wedding gift",
+      "what is the gift amount for employee\u0027s daughter/son marriage?",
+      "how much is the self-marriage gift?"
+    ],
+    "AnchorText": "PARTICULARS OF GIFT"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\06SP_Marriage gift (Sanand Plant).docx",
+    "Triggers": [
+      "gift eligibility",
+      "can i get a wedding gift if my child is getting married?",
+      "what is the first marriage rule for employee\u0027s child?"
+    ],
+    "AnchorText": "Employee will be eligible for wedding gift for first marriage only."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\06SP_Marriage gift (Sanand Plant).docx",
+    "Triggers": [
+      "policy review",
+      "when is the policy reviewed?",
+      "how often is the policy updated?"
+    ],
+    "AnchorText": "This policy will be reviewed bi-annually preferably in June and December or as and when required"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\08SP_Attendance Allow Policy -Permanent employees (Sanand Plant.docx",
+    "Triggers": [
+      "attendance allowance",
+      "leave policy",
+      "monthly attendance",
+      "special attendance"
+    ],
+    "AnchorText": "Regular Attendance Allowance"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\08SP_Attendance Allow Policy -Permanent employees (Sanand Plant.docx",
+    "Triggers": [
+      "quarters",
+      "quarterly special attendance",
+      "4-month block",
+      "2 months full attendance"
+    ],
+    "AnchorText": "Special Attendance Allowance"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\09SP_Uniform Policy (Sanand Plant).docx",
+    "Triggers": [
+      "uniform policy",
+      "dress code",
+      "work clothes",
+      "company attire",
+      "what to wear to work"
+    ],
+    "AnchorText": "DRESS CODES"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\09SP_Uniform Policy (Sanand Plant).docx",
+    "Triggers": [
+      "who gets uniforms"
+    ],
+    "AnchorText": "COVERAGE"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\09SP_Uniform Policy (Sanand Plant).docx",
+    "Triggers": [
+      "when to get uniform",
+      "uniform distribution schedule",
+      "new employee uniform issue date"
+    ],
+    "AnchorText": "EFFECTIVE DATE"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\09SP_Uniform Policy (Sanand Plant).docx",
+    "Triggers": [
+      "replacement of lost uniform"
+    ],
+    "AnchorText": "OTHER CONDITIONS"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\09SP_Uniform Policy (Sanand Plant).docx",
+    "Triggers": [
+      "outsourced staff uniforms",
+      "contractor responsibilities for employees",
+      "uniforms for temporary workers"
+    ],
+    "AnchorText": "FOR OUTSOURCED STAFF"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\10SP_GPA Policy (Sanand Plant).docx",
+    "Triggers": [
+      "gpa policy",
+      "group personal accident insurance",
+      "death benefits",
+      "injury claim",
+      "ambulance charges",
+      "clothing damage",
+      "loss of employment",
+      "transportation cost"
+    ],
+    "AnchorText": "GROUP PERSONAL ACCIDENT INSURANCE provides monetary relief..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\10SP_GPA Policy (Sanand Plant).docx",
+    "Triggers": [
+      "claim process",
+      "documents required",
+      "how to file a claim",
+      "what documents do i need"
+    ],
+    "AnchorText": "The Company shall provide Personal Accident insurance..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\11SP_Mediclaim Policy(Employees) (Sanand Plant).docx",
+    "Triggers": [
+      "mediclaim policy",
+      "coverage amount",
+      "eligibility criteria",
+      "family coverage",
+      "getting mediclaim after leaving company"
+    ],
+    "AnchorText": "COVERAGE, COVERAGE AMOUNT \u0026 CONDITIONS, IMPORTANT GUIDELINES, EFFECT OF TERMINATION"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\11SP_Mediclaim Policy(Employees) (Sanand Plant).docx",
+    "Triggers": [
+      "critical illness definition",
+      "how to claim for critical illness",
+      "double sum insured for married employees"
+    ],
+    "AnchorText": "Critical Illness, Double Compensation (of Sum Insured) for Single Employee"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\11SP_Mediclaim Policy(Employees) (Sanand Plant).docx",
+    "Triggers": [
+      "claim submission deadline",
+      "delayed claims",
+      "extra payment for delayed claims"
+    ],
+    "AnchorText": "All Claims for Reimbursement Should be Submitted within 30/45 Days from the Date of Discharge"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\14SP_Refreshment Reimbursement Policy(Sanand Plant).docx",
+    "Triggers": [
+      "refreshment reimbursement",
+      "travel allowance",
+      "lunch dinner allowance",
+      "breakfast allowance",
+      "snacks allowance",
+      "overtime pay",
+      "weekly off pay",
+      "holiday pay"
+    ],
+    "AnchorText": "Refreshment Reimbursement Norms for Personnel Working Beyond Normal Working Hours and on Weekly Off/Holidays"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\14SP_Refreshment Reimbursement Policy(Sanand Plant).docx",
+    "Triggers": [
+      "guest reimbursement",
+      "enterting clients policy",
+      "customer visitor allowance",
+      "vendor visit pay"
+    ],
+    "AnchorText": "For Lunch/Dinner arrangement for guests within Company from Outside, the Maximum Limit is Rs. 1000 Per person subject to AFH/Section Incharge approval as per Annexure 1."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\14SP_Refreshment Reimbursement Policy(Sanand Plant).docx",
+    "Triggers": [
+      "claim reimbursement",
+      "submit bills channel",
+      "settlement of claim"
+    ],
+    "AnchorText": "Subject to submission of bills through proper channel."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\15 SP_Ethics Policy (Sanand Plant).docx",
+    "Triggers": [
+      "ethics policy",
+      "company values",
+      "compliance",
+      "integrity",
+      "whistleblowing",
+      "code of conduct"
+    ],
+    "AnchorText": "Mitsubishi Electric Group Code of Conduct is a uniform code of conduct that consolidates and summarizes laws and regulations and social norms to be observed and respected by each and every employee of MEAI in the execution of business."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\15 SP_Ethics Policy (Sanand Plant).docx",
+    "Triggers": [
+      "what to do when unsure",
+      "how to report concerns",
+      "consulting with superiors"
+    ],
+    "AnchorText": "If you are at a loss as to whether our action or decision is right, ask yourself the following questions."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\17SP_Suggestion Scheme-Sanand.docx",
+    "Triggers": [
+      "suggestion scheme",
+      "employee suggestions",
+      "reward policy",
+      "innovation incentives",
+      "cost reduction ideas"
+    ],
+    "AnchorText": "SCOPE OF THE SCHEME - Achieving cost reduction and improvement in terms of PQCDSEM."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\17SP_Suggestion Scheme-Sanand.docx",
+    "Triggers": [
+      "eligibility for suggestion scheme",
+      "who can submit suggestions",
+      "employee participation"
+    ],
+    "AnchorText": "ELIGIBILITY CONDITION FOR GIVING SUGGESTION - All permanent employees below Asst. Manager level and trainees/Apprentice/Fixed Term."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\17SP_Suggestion Scheme-Sanand.docx",
+    "Triggers": [
+      "types of suggestions accepted",
+      "what kind of ideas are encouraged"
+    ],
+    "AnchorText": "TYPE OF SUGGESTIONS (SCOPE) - The scheme generally invites all types of Suggestions, which will benefit the organization or its employees."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\17SP_Suggestion Scheme-Sanand.docx",
+    "Triggers": [
+      "suggestion evaluation criteria",
+      "how suggestions are assessed"
+    ],
+    "AnchorText": "Suggestion evaluation will be based on parameters decided by Management (Suggestion evaluation criteria -Annexure 2)."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\17SP_Suggestion Scheme-Sanand.docx",
+    "Triggers": [
+      "award levels for suggestions",
+      "reward structure for top performers"
+    ],
+    "AnchorText": "AWARDING LEVEL - Vice President, The Awarding Level (Level III) shall receive suggestions with \u003E 70 score from Level II and will select top 3 suggestions."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\18SP_medical health checkup (Sanand Plant).docx",
+    "Triggers": [
+      "health checkup",
+      "medical exam",
+      "wellness benefits",
+      "annual health check",
+      "family member\u0027s health check"
+    ],
+    "AnchorText": "EMPLOYEE ANNUAL HEALTH CHECK UP GUIDELINE and FAMILY MEMBER\u0027S HEALTH CHECKUP"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\18SP_medical health checkup (Sanand Plant).docx",
+    "Triggers": [
+      "who is eligible",
+      "coverage",
+      "who can get medical exam",
+      "medical benefits for employees"
+    ],
+    "AnchorText": "COVERAGE"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\18SP_medical health checkup (Sanand Plant).docx",
+    "Triggers": [
+      "claim process",
+      "how to claim reimbursement",
+      "health checkup reimbursement"
+    ],
+    "AnchorText": "CLAIM PROCESS"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\18SP_medical health checkup (Sanand Plant).docx",
+    "Triggers": [
+      "policy changes",
+      "amendments",
+      "withdrawal of policy"
+    ],
+    "AnchorText": "AMENDMENT / WITHDRAWAL"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\20SP_Company car policy (Sanand Plant).docx",
+    "Triggers": [
+      "car loan policy",
+      "company car policy",
+      "car benefits for employees",
+      "reimbursement for car expenses",
+      "car cost budget"
+    ],
+    "AnchorText": "CAR BENEFIT DETAILS"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\20SP_Company car policy (Sanand Plant).docx",
+    "Triggers": [
+      "loan from company",
+      "outside bank loan"
+    ],
+    "AnchorText": "Loan from Company and Loan from Outside Bank:"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\20SP_Company car policy (Sanand Plant).docx",
+    "Triggers": [
+      "car loan repayment",
+      "selling car",
+      "informing admin about car changes"
+    ],
+    "AnchorText": "In case employee repays loan or sell his/her vehicle he will inform Admin dept. immediately."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\21SP_long association Policy (Sanand Plant).docx",
+    "Triggers": [
+      "long service award",
+      "5 year service",
+      "10 year service",
+      "award for long service",
+      "service milestone"
+    ],
+    "AnchorText": "On Completion of 5 yrs, On Completion of 10 yrs, etc."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\21SP_long association Policy (Sanand Plant).docx",
+    "Triggers": [
+      "leaves",
+      "special leaves",
+      "paid leave",
+      "days off",
+      "vacation days"
+    ],
+    "AnchorText": "Leaves"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\21SP_long association Policy (Sanand Plant).docx",
+    "Triggers": [
+      "gift",
+      "management gift",
+      "present",
+      "award",
+      "reward"
+    ],
+    "AnchorText": "Management Gift"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\21SP_long association Policy (Sanand Plant).docx",
+    "Triggers": [
+      "cost sharing",
+      "reimbursement",
+      "allowance",
+      "support",
+      "financial help"
+    ],
+    "AnchorText": "Support by cost sharing in purchase of below items i.e."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\21SP_long association Policy (Sanand Plant).docx",
+    "Triggers": [
+      "tax deduction",
+      "income tax",
+      "salary tax",
+      "government regulations",
+      "tax laws"
+    ],
+    "AnchorText": "Employee will be liable for tax deduction as per Government regulation"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\22SP_Special Award for Extra Ordinary Efforts (Sanand Plant).docx",
+    "Triggers": [
+      "special award",
+      "extra ordinary efforts",
+      "defect prevention",
+      "quality consciousness",
+      "great social contribution",
+      "employee recognition"
+    ],
+    "AnchorText": "To appreciate and recognize employees for the extra ordinary efforts made by employees towards defect prevention, quality consciousness and great social contribution."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\22SP_Special Award for Extra Ordinary Efforts (Sanand Plant).docx",
+    "Triggers": [
+      "100% attention",
+      "detecting mistakes",
+      "preventing defective products",
+      "voluntary acts"
+    ],
+    "AnchorText": "Employee who pay 100% attention towards their job and also detect some mistake in other related process which has not been executed by them..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\22SP_Special Award for Extra Ordinary Efforts (Sanand Plant).docx",
+    "Triggers": [
+      "awards for bravery",
+      "recognizing outstanding jobs",
+      "helping management"
+    ],
+    "AnchorText": "There is also a need to recognize and award such employees who assist in such great social contribution like rescuing a life, fire fighting etc."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\22SP_Special Award for Extra Ordinary Efforts (Sanand Plant).docx",
+    "Triggers": [
+      "amending policy",
+      "withdrawing policy",
+      "reviewing policy"
+    ],
+    "AnchorText": "The management reserves the right to amend any clause under this policy or even withdraw this policy."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\23A_ISMS Policy(Sanand Plant)_General Baseline V2.docx",
+    "Triggers": [
+      "information security",
+      "isms policy",
+      "confidential info",
+      "data protection",
+      "leaked data",
+      "company secrets"
+    ],
+    "AnchorText": "The purpose of this document is to define and clarify policies, principles, standards, guidelines, and responsibilities related to the security of the information technology and resources."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\23A_ISMS Policy(Sanand Plant)_General Baseline V2.docx",
+    "Triggers": [
+      "remote work",
+      "working from home",
+      "secure data handling"
+    ],
+    "AnchorText": "Security measures during remote work"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\23A_ISMS Policy(Sanand Plant)_General Baseline V2.docx",
+    "Triggers": [
+      "physical security",
+      "site access control",
+      "room access control"
+    ],
+    "AnchorText": "Protection of Devices storing confidential Corporate Information and Secure Areas"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\23A_ISMS Policy(Sanand Plant)_General Baseline V2.docx",
+    "Triggers": [
+      "incident management",
+      "accident reporting",
+      "security breach"
+    ],
+    "AnchorText": "Reporting Incidents/Accidents and Preventive Measures"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\23A_ISMS Policy(Sanand Plant)_General Baseline V2.docx",
+    "Triggers": [
+      "data protection act",
+      "company regulations",
+      "compliance"
+    ],
+    "AnchorText": "The Company shall manage all confidential corporate information concerning business activities appropriately in accordance with the laws of India and Company Regulations."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\24SP_Settlement Policy.docx",
+    "Triggers": [
+      "final settlement",
+      "f\u0026f",
+      "fnf",
+      "full and final",
+      "settling account",
+      "dues after leaving",
+      "no dues certificate"
+    ],
+    "AnchorText": "Full \u0026 Final Settlement"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\24SP_Settlement Policy.docx",
+    "Triggers": [
+      "notice period",
+      "leave travel allowance",
+      "lta",
+      "medical reimbursement",
+      "gratuity",
+      "leave encashment",
+      "notice pay recovery"
+    ],
+    "AnchorText": "COVERAGE and GUIDELINES for Settlement"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\24SP_Settlement Policy.docx",
+    "Triggers": [
+      "termination of employment",
+      "separation from company",
+      "unsatisfactory services",
+      "serious misconduct"
+    ],
+    "AnchorText": "TERMINATION/SEPARATION OF EMPLOYEE"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\24SP_Settlement Policy.docx",
+    "Triggers": [
+      "final settlement",
+      "f\u0026f",
+      "fnf",
+      "full and final",
+      "settling account",
+      "dues after leaving",
+      "no dues certificate",
+      "resign",
+      "resigning",
+      "resignation",
+      "resigned employee",
+      "leaving the company",
+      "leaving the organisation",
+      "leaving the organization",
+      "exit formalities",
+      "exit process",
+      "exit clearance",
+      "relieving",
+      "last working day",
+      "notice period",
+      "what formalities"
+    ],
+    "AnchorText": "Full \u0026 Final Settlement"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\25SP_Mobile \u0026 its Usage Claim Policy (Sanand Plant).docx",
+    "Triggers": [
+      "mobile phone policy",
+      "handset reimbursement",
+      "new phone for promotion",
+      "leaving company mobile phone",
+      "company owned handset",
+      "personal calls on corporate bill"
+    ],
+    "AnchorText": "Guidelines related to Mobile phone handset and its Reimbursement"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\25SP_Mobile \u0026 its Usage Claim Policy (Sanand Plant).docx",
+    "Triggers": [
+      "mobile bill reimbursement",
+      "reimbursing personal calls",
+      "monthly rental in mobile bill"
+    ],
+    "AnchorText": "Guidelines related to Mobile bills/connection"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\27SP_Trainee Scheme(Sanand Plant).docx",
+    "Triggers": [
+      "trainee scheme",
+      "non iti trainee",
+      "iti trainee",
+      "diploma trainee",
+      "stipend",
+      "compensation during training",
+      "evaluation criteria",
+      "regularisation scheme"
+    ],
+    "AnchorText": "Trainee Scheme and Selection Procedure"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\27SP_Trainee Scheme(Sanand Plant).docx",
+    "Triggers": [
+      "minimum education",
+      "qualification requirements",
+      "eligibility for absorption"
+    ],
+    "AnchorText": "Minimum Education and Eligibility Requirements"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\27SP_Trainee Scheme(Sanand Plant).docx",
+    "Triggers": [
+      "training period",
+      "strength of trainees",
+      "rotation schedule"
+    ],
+    "AnchorText": "Training Period and Strength of Trainees"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\27SP_Trainee Scheme(Sanand Plant).docx",
+    "Triggers": [
+      "compensation during training",
+      "stipend approval form",
+      "statutory deductions"
+    ],
+    "AnchorText": "Compensation During Training and Statutory Deductions"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\27SP_Trainee Scheme(Sanand Plant).docx",
+    "Triggers": [
+      "evaluation criteria",
+      "training progress report",
+      "written test"
+    ],
+    "AnchorText": "Evaluation Criteria for Trainees"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\29SP_Company Car Support Policy (Sanand Plant).docx",
+    "Triggers": [
+      "car loan eligibility",
+      "max car loan amount",
+      "car loan repayment",
+      "f\u0026f settlement",
+      "loan sanction proof"
+    ],
+    "AnchorText": "Recovery of balance car loan in case cessation of employment"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\29SP_Company Car Support Policy (Sanand Plant).docx",
+    "Triggers": [
+      "fuel reimbursement rates",
+      "daily to \u0026 fro fuel rate"
+    ],
+    "AnchorText": "Fuel **Reimbursement Rate for Daily To \u0026 Fro"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\29SP_Company Car Support Policy (Sanand Plant).docx",
+    "Triggers": [
+      "car loan interest",
+      "interest on car loan",
+      "car loan support scheme"
+    ],
+    "AnchorText": "Employees will also have an option to take equivalent amount of loan from outside bank"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\30SP_Rules governing phone usage in Foreign.docx",
+    "Triggers": [
+      "phone bill reimbursement",
+      "international phone usage policy",
+      "foreign training rules",
+      "mobile data limits",
+      "internet use abroad"
+    ],
+    "AnchorText": "USAGE LIMITS AND GUIDELINES FOR PHONE USAGE BY EMPLOYEES ON TRAINING OUTSIDE THE COUNTRY"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\30SP_Rules governing phone usage in Foreign.docx",
+    "Triggers": [
+      "lost phone procedure",
+      "phone safety while abroad"
+    ],
+    "AnchorText": "In case of any mis-happening/ lost of phone etc, the same should be reported immediately to window person in host country and at MEAI."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\30SP_Rules governing phone usage in Foreign.docx",
+    "Triggers": [
+      "payment for initial cost",
+      "new connection procedures"
+    ],
+    "AnchorText": "Initial cost (i.e. for new connection etc) will be taken care by MELCO/ Host country."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\31SP_Parent Mediclaim Policy (Sanand Plant).docx",
+    "Triggers": [
+      "mediclaim policy",
+      "parent health insurance",
+      "employee benefits",
+      "health insurance for parents",
+      "policy for parents"
+    ],
+    "AnchorText": "COVERAGE: Insurance of parents (Either one or both of them is Employee choice)"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\31SP_Parent Mediclaim Policy (Sanand Plant).docx",
+    "Triggers": [
+      "exclusions from mediclaim",
+      "what\u0027s not covered in policy",
+      "policy exclusions list"
+    ],
+    "AnchorText": "Exclusions: Insurance Company is not liable to pay any expenses incurred on treatment which comes under the exclusion clause of the policy..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\31SP_Parent Mediclaim Policy (Sanand Plant).docx",
+    "Triggers": [
+      "claim process for parents",
+      "how to file claim for mediclaim",
+      "what are the steps to submit a claim"
+    ],
+    "AnchorText": "It is the responsibility of the employee to give intimation to TPA at least 48 hours before admission into the hospital in respect of all claims..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\31SP_Parent Mediclaim Policy (Sanand Plant).docx",
+    "Triggers": [
+      "policy changes 2025",
+      "new policy updates january 2025",
+      "changes to mediclaim policy"
+    ],
+    "AnchorText": "EFFECTIVE DATE: The revision in this policy will be effective from 1st January 2025."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\32SP_loan policy (below Supervisor)_Sanand Plant.docx",
+    "Triggers": [
+      "loan policy",
+      "interest free loan",
+      "personal loan",
+      "financial support",
+      "borrow money from company",
+      "company loan rules",
+      "employee loan limit",
+      "max emi\u0027s",
+      "how to get a loan from company"
+    ],
+    "AnchorText": "The personal loan may be sanctioned for the following purposes (broad guidelines): "
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\32SP_loan policy (below Supervisor)_Sanand Plant.docx",
+    "Triggers": [
+      "loan amount",
+      "borrowed money",
+      "repayment schedule",
+      "emi\u0027s deduction",
+      "salary deductions",
+      "deduction from salary"
+    ],
+    "AnchorText": "Deduction will be effected from the next month in which loan has been disbursed."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\32SP_loan policy (below Supervisor)_Sanand Plant.docx",
+    "Triggers": [
+      "second loan",
+      "multiple loans",
+      "loan limit exceeded",
+      "exceeding loan limit",
+      "availing second loan"
+    ],
+    "AnchorText": "Employee cannot avail second loan unless proper justification for the necessity of loan is available."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\32SP_loan policy (below Supervisor)_Sanand Plant.docx",
+    "Triggers": [
+      "amendment policy",
+      "withdrawal of policy",
+      "policy changes",
+      "loan policy update"
+    ],
+    "AnchorText": "The management reserves the right to amend any clause under this policy or even withdraw this policy."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\33SP_Office computer \u0026 usage Policy (Sanand Plant).docx",
+    "Triggers": [
+      "laptop replacement policy",
+      "replacement of laptop",
+      "how to get a new laptop",
+      "when do i get a new laptop",
+      "is my laptop eligible for replacement"
+    ],
+    "AnchorText": "REPLACEMENT/DISPOSAL: Desktop/Laptop 5 years or above will be replaced by IT Deptt."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\33SP_Office computer \u0026 usage Policy (Sanand Plant).docx",
+    "Triggers": [
+      "internet usage policy",
+      "can i use internet at office",
+      "office internet rules",
+      "is internet allowed"
+    ],
+    "AnchorText": "TYPES OF FACILITIES PROVIDED TO USERS: Internet facility, MS team etc. may be provided with VP Operations prior approval."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\33SP_Office computer \u0026 usage Policy (Sanand Plant).docx",
+    "Triggers": [
+      "vpn policy",
+      "meai vpn connection",
+      "how to use meai vpn"
+    ],
+    "AnchorText": "MEAI VPN Connection (For MEAI Servers only): VPN Connection will be installed by IT Department and used for accessing MEAI applications, Files and folders or any other applicable IT infra..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\33SP_Office computer \u0026 usage Policy (Sanand Plant).docx",
+    "Triggers": [
+      "data security policy",
+      "how to secure my laptop",
+      "confidentiality of official data"
+    ],
+    "AnchorText": "GENERAL GUIDELINES: Employees will ensure the confidentiality of official data."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\35SP_Entertainment Policy (Sanand Plant) .docx",
+    "Triggers": [
+      "entertainment policy",
+      "company expense reimbursement",
+      "gifts for guests",
+      "golf entertainment",
+      "lunch dinner expenses"
+    ],
+    "AnchorText": "The purpose of this policy is to recognize that there are many occasions which require entertainment expenses..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\35SP_Entertainment Policy (Sanand Plant) .docx",
+    "Triggers": [
+      "approval process",
+      "who approves entertainment expenses",
+      "entertainment expense approval levels"
+    ],
+    "AnchorText": "Approval authority will be as per below table:"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\35SP_Entertainment Policy (Sanand Plant) .docx",
+    "Triggers": [
+      "reimbursing guests",
+      "long-term guest expenses",
+      "guest stay reimbursement"
+    ],
+    "AnchorText": "In case guest is staying for long duration, entertainment expenses can be reimbursed..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\36_Anti Trust guidelines Sanand.docx",
+    "Triggers": [
+      "cartel",
+      "price fixing",
+      "antitrust law",
+      "competition laws",
+      "leniency program",
+      "whistleblower",
+      "fines",
+      "penalties",
+      "prison sentences"
+    ],
+    "AnchorText": "Violations of competition/antitrust law, especially cartels, are punished with huge fines..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\36_Anti Trust guidelines Sanand.docx",
+    "Triggers": [
+      "trade association",
+      "meetings",
+      "illegal information exchange",
+      "price fixing",
+      "customer boycott",
+      "output restrictions",
+      "bid rigging",
+      "dividing up sales territories and markets"
+    ],
+    "AnchorText": "Trade associations are subject to competition/antitrust laws..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\36_Anti Trust guidelines Sanand.docx",
+    "Triggers": [
+      "leniency program",
+      "cooperate in investigation",
+      "avoid penalties",
+      "report cartel activity",
+      "whistleblower"
+    ],
+    "AnchorText": "Companies and individuals who report their cartel activity... can avoid (or receive substantial discounts)... if they meet the requirements..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\38SP_Work permit rules (Sanand Plant) - V1.docx",
+    "Triggers": [
+      "work permit",
+      "sanand plant rules",
+      "safety norms",
+      "risk assessment",
+      "emergency plan"
+    ],
+    "AnchorText": "Guidelines for Work Permits at Sanand Plant"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\38SP_Work permit rules (Sanand Plant) - V1.docx",
+    "Triggers": [
+      "repair work",
+      "maintenance",
+      "service of equipment"
+    ],
+    "AnchorText": "Repair and Maintenance Guidelines"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\38SP_Work permit rules (Sanand Plant) - V1.docx",
+    "Triggers": [
+      "annexure 1",
+      "electronic approval process",
+      "work permit application"
+    ],
+    "AnchorText": "Electronic Work Permit Application Process"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\39SP_Domestic Travel Scheme(Sanand Plant).docx",
+    "Triggers": [
+      "business travel policy",
+      "trip approval",
+      "travel expenses reimbursed",
+      "hotel arrangements",
+      "flight booking",
+      "cab fare reimbursement",
+      "local transportation",
+      "advance payment"
+    ],
+    "AnchorText": "POLICY GUIDELINES/ PROCEDURE, APPLICABLE DOCUMENTATION, EFFECTIVE DATE"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\39SP_Domestic Travel Scheme(Sanand Plant).docx",
+    "Triggers": [
+      "business trip approval form",
+      "trip settlement form",
+      "f\u0026f settlement",
+      "fnf settlement"
+    ],
+    "AnchorText": "Business Trip Approval form \u2013 Form-1, Trip Settlement form \u2013 Form-2"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\39SP_Domestic Travel Scheme(Sanand Plant).docx",
+    "Triggers": [
+      "cancellation of trip",
+      "trip cancellation policy"
+    ],
+    "AnchorText": "In case of cancellation of trip, cancellation charges shall be admissible under the written approval of the Head of Department."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\43SP_Graphic Standard Policy(Sanand Plant).docx",
+    "Triggers": [
+      "graphic standards",
+      "corporate identity",
+      "visual communication",
+      "branding guidelines",
+      "policy for company logo",
+      "using corporate logo on products",
+      "uniforms and flags"
+    ],
+    "AnchorText": "COMPOSITION OF GRAPHICS STANDARDS AND GUIDELINES"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\43SP_Graphic Standard Policy(Sanand Plant).docx",
+    "Triggers": [
+      "business cards template",
+      "letterhead format",
+      "press release example",
+      "website design guidelines"
+    ],
+    "AnchorText": "USAGE GUIDELINES FOR SPECIFIC APPLICATIONS"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\43SP_Graphic Standard Policy(Sanand Plant).docx",
+    "Triggers": [
+      "unauthorized use of company logo",
+      "using company materials for personal gain",
+      "disciplinary actions for misuse"
+    ],
+    "AnchorText": "GENERAL - USE OF GRAPHIC STANDARDS IS RESTRICTED TO OFFICIAL USAGE"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\45SP_Apprentice Scheme (Sanand Plant).docx",
+    "Triggers": [
+      "apprenticeship duration",
+      "how long is the training period",
+      "when does the apprenticeship start",
+      "apprentice scheme details"
+    ],
+    "AnchorText": "COMMENCEMENT DATE: The scheme will be effective from 1st March 2022."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\45SP_Apprentice Scheme (Sanand Plant).docx",
+    "Triggers": [
+      "eligibility criteria for apprentice",
+      "what are the requirements to join the apprenticeship program",
+      "do i need iti or diploma"
+    ],
+    "AnchorText": "ELIGIBILITY CRITERIA: A person is qualified/eligible for being engaged as an apprentice..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\45SP_Apprentice Scheme (Sanand Plant).docx",
+    "Triggers": [
+      "stipend payment",
+      "how much will i get paid as an apprentice",
+      "apprentice allowance"
+    ],
+    "AnchorText": "COMPENSATION: Stipend will be paid as per the company policy and should not be less than..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\45SP_Apprentice Scheme (Sanand Plant).docx",
+    "Triggers": [
+      "leave policy for apprentices",
+      "how many days of leave can i take as an apprentice",
+      "apprentice holiday entitlement"
+    ],
+    "AnchorText": "Leaves will be provided as per Apprentice Act,1961."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\45SP_Apprentice Scheme (Sanand Plant).docx",
+    "Triggers": [
+      "termination of apprentice contract",
+      "when can the company terminate my apprenticeship",
+      "why was my apprenticeship terminated"
+    ],
+    "AnchorText": "TERMINATION: Management reserves the right to terminate apprentice engagement contract..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\46SP_Whistle Blower Policy (Sanand Plant).docx",
+    "Triggers": [
+      "whistleblower policy",
+      "protected disclosure",
+      "good faith",
+      "abuse of authority",
+      "fraudulent activity"
+    ],
+    "AnchorText": "Protected Disclosure and Whistle Blower Policy"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\46SP_Whistle Blower Policy (Sanand Plant).docx",
+    "Triggers": [
+      "malpractice",
+      "company data manipulation"
+    ],
+    "AnchorText": "Malpractices \u0026 Events Covered under this Policy"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\46SP_Whistle Blower Policy (Sanand Plant).docx",
+    "Triggers": [
+      "false allegations",
+      "frivolous complaints",
+      "disciplinary action"
+    ],
+    "AnchorText": "Disqualification and Disciplinary Action"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\47_Company Assets Theft Policy (Sanand Plant).docx",
+    "Triggers": [
+      "theft policy",
+      "company assets stolen",
+      "lost property report",
+      "cctv footage policy",
+      "disciplinary action"
+    ],
+    "AnchorText": "The objective of this policy is to create policies and procedures in order to achieve the below: Identify the incidents of theft of company assets..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\47_Company Assets Theft Policy (Sanand Plant).docx",
+    "Triggers": [
+      "report a theft",
+      "what to do if something\u0027s stolen",
+      "investigation process"
+    ],
+    "AnchorText": "In case of theft, the following procedure will be as follows: ... The investigation must include 5 W\u2019s \u0026 1 H i.e. What, When, Where, Who, Why and How..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\47_Company Assets Theft Policy (Sanand Plant).docx",
+    "Triggers": [
+      "retention policy",
+      "document retention"
+    ],
+    "AnchorText": "All incidents documents along with the results of investigation relating thereto shall be retained by the Company for a minimum period of five years."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\48SP_CCTV Surveillance Camera Policy (Sanand Plant).docx",
+    "Triggers": [
+      "cctv policy",
+      "camera surveillance",
+      "employee monitoring",
+      "data protection",
+      "video footage"
+    ],
+    "AnchorText": "The use of CCTV cameras and recorded footage"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\48SP_CCTV Surveillance Camera Policy (Sanand Plant).docx",
+    "Triggers": [
+      "incident investigation",
+      "security protocols",
+      "police disclosure",
+      "footage access"
+    ],
+    "AnchorText": "Access to and usage of CCTV footage in incident investigations"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\48SP_CCTV Surveillance Camera Policy (Sanand Plant).docx",
+    "Triggers": [
+      "cctv installation",
+      "maintenance",
+      "location changes",
+      "user access"
+    ],
+    "AnchorText": "Installation, maintenance, and management of CCTV systems"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\49_Policy on social Risks (Sanand plant).docx",
+    "Triggers": [
+      "social risks",
+      "policy on social risks",
+      "material product failure",
+      "environment risk",
+      "anti-trust",
+      "anti-bribery",
+      "fraud",
+      "scandal",
+      "labour dispute",
+      "labour unrest",
+      "human rights issues",
+      "discrimination",
+      "harassment",
+      "sexual harassment",
+      "isms breach",
+      "natural disaster",
+      "terrorism",
+      "crime groups",
+      "organized crimes",
+      "foreign exchange law",
+      "security export control",
+      "media risk"
+    ],
+    "AnchorText": "Social Risks Response Process"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\50SP_Policy for Conflict of Interest.docx",
+    "Triggers": [
+      "conflict of interest policy",
+      "what is coi",
+      "coi rules",
+      "meai conflict of interest",
+      "policy on conflict of interest"
+    ],
+    "AnchorText": "The details of this policy are stipulated in MEAI Conflict of Interest Rules in Annexure-1, which are forming part of this policy."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\50SP_Policy for Conflict of Interest.docx",
+    "Triggers": [
+      "who is covered by coi policy",
+      "coi policy applicability",
+      "who does coi apply to"
+    ],
+    "AnchorText": "This policy shall apply to all Personnel and to all of the Company\u2019s business activities wherever they may be conducted."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\50SP_Policy for Conflict of Interest.docx",
+    "Triggers": [
+      "when is coi policy effective",
+      "effective date of coi policy"
+    ],
+    "AnchorText": "The revised policy will be effective from 20th March 2026."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\50SP_Policy for Conflict of Interest.docx",
+    "Triggers": [
+      "how often is coi policy reviewed",
+      "coi policy review cycle"
+    ],
+    "AnchorText": "This policy will be reviewed bi-annually preferably in June and December or as and when required..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\52SP_Transport Policy(Sanand Plant).docx",
+    "Triggers": [
+      "transport reimbursement",
+      "commuting expenses",
+      "company transport facility",
+      "self-arrangement",
+      "kms from factory",
+      "benefit under policy",
+      "reimbursement claim"
+    ],
+    "AnchorText": "GUIDELINES: Reimbursement for Employees\u0027 Commuting Expenses"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\52SP_Transport Policy(Sanand Plant).docx",
+    "Triggers": [
+      "residential address change",
+      "address update",
+      "moving to new place",
+      "new home"
+    ],
+    "AnchorText": "In case an employee changes their residential address..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\52SP_Transport Policy(Sanand Plant).docx",
+    "Triggers": [
+      "overtime transport",
+      "business travel",
+      "using own vehicle for work",
+      "transport for additional working hours"
+    ],
+    "AnchorText": "...The reimbursement for using their own mode for business purposes/Overtime on holidays/weekly offs or OD..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\52SP_Transport Policy(Sanand Plant).docx",
+    "Triggers": [
+      "false information",
+      "lying to get money",
+      "fraudulent claims",
+      "misusing company policy"
+    ],
+    "AnchorText": "If any employee gives false information to the company..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\54SP_Parking Policy (Sanand Plant).docx",
+    "Triggers": [
+      "parking policy",
+      "company car parking",
+      "employee vehicle parking",
+      "visitor parking",
+      "transporter parking",
+      "leakage from car"
+    ],
+    "AnchorText": "Parking inside the premises will be allowed only for Assistant Manager \u0026 above level employees and company cars."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\54SP_Parking Policy (Sanand Plant).docx",
+    "Triggers": [
+      "parking slots",
+      "allotted parking",
+      "non-allotted parking",
+      "parking outside factory"
+    ],
+    "AnchorText": "Vehicles of all others will be parked in non-allotted parking slots, if available, else they have to manage outside the factory at their own arrangement and risk."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\54SP_Parking Policy (Sanand Plant).docx",
+    "Triggers": [
+      "maintenance of vehicle",
+      "damage to car",
+      "oil leakage from vehicle"
+    ],
+    "AnchorText": "All personnel will ensure that there is no damage and leakage from the vehicle..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\55SP_Travel Suitcase policy(Sanand Plant).docx",
+    "Triggers": [
+      "suitcase policy",
+      "travel reimbursement",
+      "luggage allowance",
+      "reimbursement for suitcase",
+      "travel bag policy",
+      "max amount for travel bag"
+    ],
+    "AnchorText": "The purpose of this policy is to ensure that while travelling employee\u2019s complete attire including luggage, they carry must represent pleasant goodwill of MEAI."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\55SP_Travel Suitcase policy(Sanand Plant).docx",
+    "Triggers": [
+      "replacement after 3 years",
+      "second reimbursement",
+      "stolen/damaged luggage"
+    ],
+    "AnchorText": "The employees taking benefit of reimbursement will be responsible for proper upkeep \u0026 safety of the luggage. In case the luggage stolen/damaged, the employee will be eligible for second benefit only after expiry of three years from the date of last purchase as per the eligibility mentioned in clause 4 above."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\55SP_Travel Suitcase policy(Sanand Plant).docx",
+    "Triggers": [
+      "full and final settlement",
+      "leaving company",
+      "returning luggage"
+    ],
+    "AnchorText": "In case of employee leaving the organisation before 18 months, then the luggage will be returned to MEAI or 50% of eligible amount will be recovered at the time of Full \u0026 final settlement of employee."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\55SP_Travel Suitcase policy(Sanand Plant).docx",
+    "Triggers": [
+      "reimbursement process",
+      "form 1 submission"
+    ],
+    "AnchorText": "The employee will submit Form 1 for reimbursement of above amount after the purchase and reimbursement will be taken at once only."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\56SP_Export Control Policy_Sanand Plant.docx",
+    "Triggers": [
+      "export control",
+      "what\u0027s the policy on exporting products",
+      "how to get export license",
+      "controlled items",
+      "scomet list"
+    ],
+    "AnchorText": "BASIC EXPORT POLICY"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\56SP_Export Control Policy_Sanand Plant.docx",
+    "Triggers": [
+      "definition of controlled item",
+      "what is a controlled item"
+    ],
+    "AnchorText": "Controlled Item refers to ITEM which is regulated by the LAWS and REGULATIONS of the India, any applicable laws and regulations..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\56SP_Export Control Policy_Sanand Plant.docx",
+    "Triggers": [
+      "export control structure",
+      "who\u0027s responsible for export control",
+      "export control team"
+    ],
+    "AnchorText": "EXPORT CONTROL STRUCTURE"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\56SP_Export Control Policy_Sanand Plant.docx",
+    "Triggers": [
+      "responsibilities of eca",
+      "eca duties",
+      "what does the export control administrator do"
+    ],
+    "AnchorText": "RESPONSIBILITIES OF EXPORT CONTROL ADMINISTRATOR (ECA)"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\57SP_ Litigation Policy (Sanand Plant).docx",
+    "Triggers": [
+      "litigation policy",
+      "legal team role",
+      "handling lawsuits",
+      "board appointed members",
+      "indemnification policy",
+      "lawsuit against company",
+      "employee disputes",
+      "third party claims"
+    ],
+    "AnchorText": "LITIGATION INITIATED BY MEAI AND AGAINST MEAI"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\58SP_Company Profile policy(Sanand Plant).docx",
+    "Triggers": [
+      "company profile",
+      "organisation structure",
+      "safety policy",
+      "environmental policy",
+      "quality policy",
+      "contact information",
+      "corporate social responsibility"
+    ],
+    "AnchorText": "SCOPE OF COMPANY PROFILE"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\58SP_Company Profile policy(Sanand Plant).docx",
+    "Triggers": [
+      "update company profile",
+      "change in leadership",
+      "operations change",
+      "organisation structure change"
+    ],
+    "AnchorText": "RESPONSIBILITY \u0026 FREQUENCY OF UPDATION OF PRESENTATION"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\58SP_Company Profile policy(Sanand Plant).docx",
+    "Triggers": [
+      "company profile presentation",
+      "internal customers",
+      "external customers",
+      "interested parties"
+    ],
+    "AnchorText": "USE OF COMPANY PROFILE PRESENTATION"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\58SP_Company Profile policy(Sanand Plant).docx",
+    "Triggers": [
+      "organisation chart",
+      "admn58_form_001",
+      "key positions"
+    ],
+    "AnchorText": "GUIDELINES FOR ORGANISATION CHART"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\59SP_Floor Marking or Taping Policy.docx",
+    "Triggers": [
+      "floor marking policy",
+      "taping guidelines",
+      "meai policy",
+      "effective date of new policy",
+      "who is responsible for taping"
+    ],
+    "AnchorText": "Scope and TAPING GUIDELINES"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\60_Webpage updation Policy (Centralized).docx",
+    "Triggers": [
+      "webpage update policy",
+      "update company website",
+      "keep webpage updated",
+      "credibility and impression"
+    ],
+    "AnchorText": "The purpose of this policy is to keep the webpage updated because it gives credibility and impression about the business to the viewers."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\60_Webpage updation Policy (Centralized).docx",
+    "Triggers": [
+      "legal compliance",
+      "compliance requirements",
+      "manesar \u0026 sanand plant"
+    ],
+    "AnchorText": "To add web page/content in Mitsubishi Electric Website for legal compliance of both Manesar \u0026 Sanand Plant."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\60_Webpage updation Policy (Centralized).docx",
+    "Triggers": [
+      "data collection process",
+      "process flow for data collection",
+      "data update frequency"
+    ],
+    "AnchorText": "PROCESS FLOW FOR DATA COLLECTION"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\60_Webpage updation Policy (Centralized).docx",
+    "Triggers": [
+      "review and record keeping",
+      "policy review",
+      "bi-annual review"
+    ],
+    "AnchorText": "This policy will be reviewed bi-annually preferably in June \u0026 December or as and when required and record of the same will be kept by HR Dept."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\61SP_Attendance Allow Policy (SP) - Trainee n FT.docx",
+    "Triggers": [
+      "attendance allowance",
+      "leave policy",
+      "attendance rules",
+      "full attendance bonus",
+      "special attendance allowance"
+    ],
+    "AnchorText": "REGULAR ATTENDANCE ALLOWANCE and SPECIAL ATTENDANCE ALLOWANCE"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\61SP_Attendance Allow Policy (SP) - Trainee n FT.docx",
+    "Triggers": [
+      "joining date",
+      "eligibility for attendance allowance",
+      "new employee policy"
+    ],
+    "AnchorText": "Applicability: temporary or fixed term employees, Trainees and Apprentices"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\61SP_Attendance Allow Policy (SP) - Trainee n FT.docx",
+    "Triggers": [
+      "deductions from attendance allowance",
+      "esi pf deduction"
+    ],
+    "AnchorText": "E.S.I and P.F will be deducted on Attendance allowance"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\62SP_Visitor Management Rules Policy (Sanand).docx",
+    "Triggers": [
+      "visitor policy",
+      "visitors at work",
+      "security clearance",
+      "plant visit approval",
+      "line tour approval",
+      "visitor rules"
+    ],
+    "AnchorText": "PRODUCTION LINE/S VISIT (INSIDE THE SHOP FLOOR)"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\62SP_Visitor Management Rules Policy (Sanand).docx",
+    "Triggers": [
+      "work permit policy",
+      "external visitors",
+      "contractor access",
+      "guest visit rules"
+    ],
+    "AnchorText": "The visit for performing any specific work in the premises by external parties will be covered under Rules for Work Permit."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\62SP_Visitor Management Rules Policy (Sanand).docx",
+    "Triggers": [
+      "visitors on plant tour",
+      "factory visit rules",
+      "plant facility visit"
+    ],
+    "AnchorText": "SHOP FLOOR/PLANT TOUR (FROM OUTSIDE)"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\63SP_Happy Day \u0026 Taxi Transport guidelines.docx",
+    "Triggers": [
+      "happy day",
+      "overtime policy",
+      "taxi rules",
+      "cab usage",
+      "work life balance",
+      "emergency leave",
+      "form 1",
+      "form 2"
+    ],
+    "AnchorText": "Work Life Balance \u2013 Every Wednesday will be celebrated as \u0027HAPPY DAY\u0027"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\63SP_Happy Day \u0026 Taxi Transport guidelines.docx",
+    "Triggers": [
+      "taxi fare reimbursement",
+      "travel expense claim",
+      "company car usage"
+    ],
+    "AnchorText": "In case travel is required from Plant or for outside city limits..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\65SP_Tuition fees policy (Sanand Plant).docx",
+    "Triggers": [
+      "tuition fee reimbursement",
+      "education fees",
+      "policy for education expenses",
+      "financial assistance for children",
+      "how to claim tuition fees",
+      "what is covered under this policy"
+    ],
+    "AnchorText": "ELIGIBLE AMOUNT"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\65SP_Tuition fees policy (Sanand Plant).docx",
+    "Triggers": [
+      "who is eligible",
+      "which employees are covered",
+      "permanent employee benefits",
+      "juniors and supervisor level",
+      "education assistance for all associates"
+    ],
+    "AnchorText": "SCOPE"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\65SP_Tuition fees policy (Sanand Plant).docx",
+    "Triggers": [
+      "how to apply",
+      "what documents needed",
+      "forms to submit",
+      "proof of tuition fees",
+      "when to submit claims"
+    ],
+    "AnchorText": "GUIDELINES"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\68SP_Birthday Celebration (Sanand Plant).docx",
+    "Triggers": [
+      "birthday celebration",
+      "gift on birthday",
+      "company birthday wishes",
+      "monthly get together",
+      "celebrations for employees",
+      "employee milestones",
+      "personal life recognition"
+    ],
+    "AnchorText": "Celebrations give employees recognition for accomplishments and milestones in both business and their personal lives..."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\69SP_Superannuation Policy (For Below Jr. Supervisor) (Sanand Plant).docx",
+    "Triggers": [
+      "superannuation",
+      "retirement benefits",
+      "policy for below jr supervisor",
+      "age eligibility",
+      "service eligibility",
+      "contribution rate",
+      "management rights to exclude",
+      "termination due to misconduct",
+      "fraud and misconduct",
+      "eligibility after 3 years of service"
+    ],
+    "AnchorText": "ELIGIBILITY, CONTRIBUTIONS, MANAGEMENT RIGHTS, BENEFITS PAYABLE"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\70SP_Work From Home Policy (Sanand Plant).docx",
+    "Triggers": [
+      "work from home policy",
+      "wfh eligibility",
+      "can i work from home",
+      "home office policy",
+      "remote work"
+    ],
+    "AnchorText": "ELIGIBILITY"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\70SP_Work From Home Policy (Sanand Plant).docx",
+    "Triggers": [
+      "approval for wfh",
+      "apply for work from home",
+      "get approval for remote work",
+      "when can i work from home",
+      "how to get wfh approved"
+    ],
+    "AnchorText": "Approval will depend on factors such as job requirements, performance history, and operational feasibility."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\70SP_Work From Home Policy (Sanand Plant).docx",
+    "Triggers": [
+      "work from home criteria",
+      "wfh rules",
+      "what are the conditions for work from home",
+      "can i work from home one day a week",
+      "how many days can i work from home"
+    ],
+    "AnchorText": "Work from home, can be allowed only in cases where the work is of such nature where physical presence is not mandatory and absence does not cause any disruption in job requirements."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\70SP_Work From Home Policy (Sanand Plant).docx",
+    "Triggers": [
+      "employee responsibilities",
+      "work from home expectations",
+      "what are my duties while working from home",
+      "how to maintain productivity while working from home"
+    ],
+    "AnchorText": "Employee must maintain a professional and distraction free environment at home. Deliverables must meet the same quality, timelines, and expectations as when working from the office."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\70SP_Work From Home Policy (Sanand Plant).docx",
+    "Triggers": [
+      "cancelling work from home",
+      "cancel wfh approval",
+      "stop remote work",
+      "what if my performance is not up to mark while working from home"
+    ],
+    "AnchorText": "In case of employee\u2019s efficiency and performance is not up to the mark, the FH will have the right to cancel the WFH anytime."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\71SP_Face mask policy(Sanand Plant).docx",
+    "Triggers": [
+      "face mask policy",
+      "mask policy company",
+      "pandemic rules at work",
+      "covid guidelines for employees"
+    ],
+    "AnchorText": "IMPLEMENTATION OF FACE MASK POLICY DURING PANDEMIC OR EPIDEMIC"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\71SP_Face mask policy(Sanand Plant).docx",
+    "Triggers": [
+      "when do i get a new mask",
+      "how often will i get a mask",
+      "mask replacement policy"
+    ],
+    "AnchorText": "ISSUANCE AND REPLACEMENT OF FACE MASKS"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\71SP_Face mask policy(Sanand Plant).docx",
+    "Triggers": [
+      "who is responsible for giving masks",
+      "who issues masks in the company"
+    ],
+    "AnchorText": "SECURITY PERSONNEL RESPONSIBILITIES FOR ISSUING FACE MASKS"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\71SP_Face mask policy(Sanand Plant).docx",
+    "Triggers": [
+      "what if i forget my mask at home",
+      "lost or damaged mask policy"
+    ],
+    "AnchorText": "PROCEDURE IN CASE OF LOST OR DAMAGED FACE MASKS"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\Documentation Policy.docx",
+    "Triggers": [
+      "document control policy",
+      "document retrieval time",
+      "policy update",
+      "amend document policy",
+      "withdraw document policy"
+    ],
+    "AnchorText": "The objective of the policy is to provide guidelines for controlling document to minimize the document retrieval time and to have better document control."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\Documentation Policy.docx",
+    "Triggers": [
+      "file organization",
+      "document storage",
+      "racking system",
+      "emergency documents"
+    ],
+    "AnchorText": "All dept. will arrange the documents as per the Master list of documents."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\Documentation Policy.docx",
+    "Triggers": [
+      "record retention",
+      "document disposal",
+      "safe custody",
+      "locked boxes"
+    ],
+    "AnchorText": "Old documents/files which are within retention limit are to be kept in safe custody (in Record Room) or in locked boxes as per category"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\ISMS Policy(Sanand Plant)_Technical_Rev04.docx",
+    "Triggers": [
+      "what are the rules for using company computers",
+      "can i use personal devices at work",
+      "how do i report a virus",
+      "do i need permission to access cloud services",
+      "what happens if i lose my phone"
+    ],
+    "AnchorText": "Use of Hardware and Software"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\ISMS Policy(Sanand Plant)_Technical_Rev04.docx",
+    "Triggers": [
+      "how do i access company resources from outside",
+      "can i use wireless lan at work",
+      "what are the security measures for remote access"
+    ],
+    "AnchorText": "Network Management"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\ISMS Policy(Sanand Plant)_Technical_Rev04.docx",
+    "Triggers": [
+      "what to do in case of a cyber attack",
+      "how to report an accident or incident",
+      "what is the process for investigating a security breach"
+    ],
+    "AnchorText": "Establishment of an Accident Response and Reporting Structure"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\Shift Incharge Guideline Policy.docx",
+    "Triggers": [
+      "shift incharge",
+      "who is shift incharge today",
+      "shift timings",
+      "emergency preparedness",
+      "hsems policy",
+      "pqc dsm",
+      "material availability",
+      "manpower issues"
+    ],
+    "AnchorText": "FOCUS \u0026 RESPONSIBILITY and SCOPE of these guidelines"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\Shift Incharge Guideline Policy.docx",
+    "Triggers": [
+      "how to select shift incharge",
+      "who nominates shift incharge",
+      "eligibility for shift incharge"
+    ],
+    "AnchorText": "SELECTION OF SHIFT INCHARGE"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\Shift Incharge Guideline Policy.docx",
+    "Triggers": [
+      "daily reporting",
+      "shift incharge daily report",
+      "focus areas"
+    ],
+    "AnchorText": "FLOW OF ACTIVITIES: Shift In-charge will perform daily reporting as follows:"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\Term Plan Policy (Sanand Plant).docx",
+    "Triggers": [
+      "death insurance",
+      "term plan",
+      "insurance policy for employees",
+      "what happens if i die",
+      "who gets the money",
+      "insurance benefits"
+    ],
+    "AnchorText": "OBJECTIVE: The objective of this policy is to provide financial support in case of death of employee through Insurance Policy."
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\Term Plan Policy (Sanand Plant).docx",
+    "Triggers": [
+      "how much insurance do i get",
+      "insurance coverage for employees",
+      "employee insurance levels"
+    ],
+    "AnchorText": "Levels | Total Insured amount Below Jr. Supervisor | 25 Lacs each"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\Term Plan Policy (Sanand Plant).docx",
+    "Triggers": [
+      "claim process",
+      "what documents do i need",
+      "how to claim insurance"
+    ],
+    "AnchorText": "DOCUMENTS REQUIRED Nominee, may have to submit the following documents* as per the requirements:"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\Term Plan Policy (Sanand Plant).docx",
+    "Triggers": [
+      "amendments to policy",
+      "changes to term plan",
+      "policy updates"
+    ],
+    "AnchorText": "The Management further reserves the right to amend / alter or / and extend/ withdraw the scheme."
+  },
+  {
     "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc",
     "Triggers": [
+      "lta",
       "leave travel allowance",
+      "leave travel expenses",
+      "travel allowance",
       "lta policy",
-      "sanand plant lta",
-      "employee benefits",
-      "travel expenses reimbursement",
-      "rest and recuperation leave",
-      "eligibility for lta",
-      "pro-rata calculation",
-      "tax benefit on lta",
-      "claiming lta without tax benefit",
-      "leave travel application form",
-      "lta claim with tax benefit",
-      "employee responsibility for lta",
-      "amendment to lta policy",
+      "lta claim",
+      "lta form",
+      "lta application",
+      "lta reimbursement",
+      "what is lta",
+      "how to claim lta",
+      "who is eligible for lta",
+      "how much is lta",
+      "when can i claim lta",
+      "how to apply for lta",
       "03sp lta policy (sanand plant)",
       "03sp lta (sanand plant)",
       "03sp",
-      "lta",
       "(sanand",
       "plant)",
       "03sp lta",
@@ -28,6 +4288,37 @@
       "03sp lta (sanand",
       "lta (sanand plant)"
     ],
-    "AnchorText": "03SP_LTA Policy (Sanand Plant)"
+    "AnchorText": "LEAVE TRAVEL ALLOWANCE POLICY (SANAND PLANT)"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc",
+    "Triggers": [
+      "eligibility",
+      "who is eligible",
+      "what are the eligibility criteria",
+      "when can i claim lta",
+      "how long do i need to work before claiming lta"
+    ],
+    "AnchorText": "ELIGIBILITY"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc",
+    "Triggers": [
+      "guidelines",
+      "lta guidelines",
+      "how to apply for lta",
+      "what documents do i need to submit",
+      "what is the process of claiming lta"
+    ],
+    "AnchorText": "GUIDELINES"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc",
+    "Triggers": [
+      "periodicity",
+      "when can i claim lta again",
+      "how often can i travel on lta"
+    ],
+    "AnchorText": "PERIODICITY"
   }
 ]
