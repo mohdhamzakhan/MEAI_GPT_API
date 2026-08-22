@@ -248,8 +248,8 @@ namespace MEAI_GPT_API.Services
 
         These abbreviations are standard across all MEAI HR policies and should be interpreted consistently.
               ";
-
-                File.WriteAllText(abbreviationsPath, abbreviationContent);
+      
+        File.WriteAllText(abbreviationsPath, abbreviationContent);
                 _logger.LogInformation("Created abbreviations context file");
             }
         }
@@ -268,11 +268,13 @@ namespace MEAI_GPT_API.Services
                     var plantOrgContent = $@"MEAI {plant} Plant - Organization Details
         
           These are the fixed organizational details
-          for {plant}
+          for {
+                            plant
+          }
                     plant.
                   ";
-
-                    File.WriteAllText(plantOrgPath, plantOrgContent);
+        
+          File.WriteAllText(plantOrgPath, plantOrgContent);
                     _logger.LogInformation($"Created organization context file for {plant}");
                 }
             }
@@ -330,8 +332,7 @@ namespace MEAI_GPT_API.Services
                 }
             }
 
-            var tasks = embeddingModels.Select(async model =>
-            {
+            var tasks = embeddingModels.Select(async model => {
                 _logger.LogInformation($"🔄 Processing documents for model: {model.Name}");
 
                 var collectionId = await _collectionManager.GetOrCreateCollectionAsync(model);
@@ -1038,8 +1039,7 @@ namespace MEAI_GPT_API.Services
                 var scored = await Task.WhenAll(
                   relevantChunks.OrderByDescending(x => x.Similarity)
                   .Take(5)
-                  .Select(async chunk =>
-                  {
+                  .Select(async chunk => {
                       var emb = await GetPerRequestEmbeddingAsync(chunk.Text);
                       var sim = CosineSimilarity(answerEmbedding, emb);
                       chunk.Similarity = sim;
@@ -2905,8 +2905,7 @@ namespace MEAI_GPT_API.Services
                 // Filter and prepare chunks
                 var validChunks = chunks
                   .Where(chunk => !string.IsNullOrWhiteSpace(chunk.Text))
-                  .Select(chunk => new
-                  {
+                  .Select(chunk => new {
                       Text = _stringProcessor.CleanText(chunk.Text),
                       SourceFile = chunk.SourceFile,
                       ChunkId = GenerateChunkId(chunk.SourceFile, chunk.Text, lastModified, model.Name),
@@ -3202,8 +3201,7 @@ namespace MEAI_GPT_API.Services
         private readonly ConcurrentDictionary<string, (List<RelevantChunk> Results, DateTime Timestamp)> _searchCache = new();
         public static void ConfigureOptimizedHttpClient(IServiceCollection services)
         {
-            services.AddHttpClient("OllamaAPI", client =>
-            {
+            services.AddHttpClient("OllamaAPI", client => {
                 client.Timeout = TimeSpan.FromSeconds(60);
                 client.DefaultRequestHeaders.Add("Connection", "keep-alive");
             })
@@ -3213,8 +3211,7 @@ namespace MEAI_GPT_API.Services
                   UseCookies = false
               });
 
-            services.AddHttpClient("ChromaDB", client =>
-            {
+            services.AddHttpClient("ChromaDB", client => {
                 client.Timeout = TimeSpan.FromSeconds(15); // Reduced from 30
                 client.DefaultRequestHeaders.Add("Connection", "keep-alive");
                 client.DefaultRequestHeaders.Add("Keep-Alive", "timeout=30, max=100");
@@ -3241,8 +3238,7 @@ namespace MEAI_GPT_API.Services
           "HR policy warm-up text"
         };
 
-                var tasks = embeddingModels.Select(async model =>
-                {
+                var tasks = embeddingModels.Select(async model => {
                     try
                     {
                         foreach (var text in warmUpTexts)
@@ -3694,10 +3690,10 @@ namespace MEAI_GPT_API.Services
                 // 3. Baseline Thresholding: Filter out extremely low-quality matches early
                 // This prevents garbage data from wasting processing time in your hybrid/reranking steps.
                 var highQualityCandidates = candidates
-             .Where(c => c.Similarity >= 0.25) // Filter out low-quality matches
-             .OrderByDescending(c => c.Similarity) // <-- GUARANTEE highest similarity at the top
-             .Take(maxResults * 2) // Return a rich pool for upstream steps
-             .ToList();
+                  .Where(c => c.Similarity >= 0.25) // Filter out low-quality matches
+                  .OrderByDescending(c => c.Similarity) // <-- GUARANTEE highest similarity at the top
+                  .Take(maxResults * 2) // Return a rich pool for upstream steps
+                  .ToList();
 
                 return highQualityCandidates;
             }
@@ -3876,8 +3872,7 @@ namespace MEAI_GPT_API.Services
         private bool IsExactSectionMatch(string lowerText, string sectionNumber)
         {
             if (string.IsNullOrWhiteSpace(sectionNumber)) return false;
-            var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num =>
-            {
+            var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num => {
                 var escaped = Regex.Escape(num);
                 return new Regex($@"\b(?:section|clause|part)\.?\s*{escaped}(?:\.\d+)*\b" + $@"|(?:^|\n)\s*{escaped}\.(?:\d+\.?)*\s", RegexOptions.IgnoreCase | RegexOptions.Compiled);
             });
@@ -4375,7 +4370,7 @@ namespace MEAI_GPT_API.Services
                 // candidate pool before truncation, not just a
                 // post-truncation reorder.
                 var topicAnchors = _topicAnchorService.GetMatchingAnchors(query);
-                allChunks.Clear();
+                var anchorMatchedChunks = new List<RelevantChunk>();
                 foreach (var anchorText in topicAnchors)
                 {
                     var anchoredQuery = $"{query} {anchorText}";
@@ -4383,6 +4378,7 @@ namespace MEAI_GPT_API.Services
                     var best = anchoredChunks.Take(2).ToList();
                     foreach (var c in best) c.RelevanceScore *= 1.15;
                     allChunks.AddRange(best);
+                    anchorMatchedChunks.AddRange(best);
                 }
 
                 // 2b. Trigger-anchor expansion search — same pattern as abbreviation
@@ -4396,7 +4392,6 @@ namespace MEAI_GPT_API.Services
                 {
                     var chunks = await SearchChromaDBAsync(anchorText, embeddingModel, 3, plant);
 
-
                     // Same reasoning as the abbreviation-expansion boost above: without a
                     // boost, the original unexpanded query can fill every slot in the
                     // final Take(maxResults), silently dropping the anchor-matched chunk
@@ -4404,6 +4399,7 @@ namespace MEAI_GPT_API.Services
                     var best = chunks.Take(2).ToList();
                     foreach (var c in best) c.RelevanceScore *= 1.20;
                     allChunks.AddRange(best);
+                    anchorMatchedChunks.AddRange(best);
                 }
 
                 // 2c. Dynamic document router. TopicAnchorService above only
@@ -4422,6 +4418,7 @@ namespace MEAI_GPT_API.Services
                     var best = anchoredChunks.Take(2).ToList();
                     foreach (var c in best) c.RelevanceScore *= 1.15;
                     allChunks.AddRange(best);
+                    anchorMatchedChunks.AddRange(best);
                 }
 
                 // 3. Topic-continuity search. A boost applied only AFTER
@@ -4449,11 +4446,61 @@ namespace MEAI_GPT_API.Services
                 }
 
                 // 4. Deduplicate and rank by similarity
-                // 4. Deduplicate and rank by similarity
                 var dedupedChunks = allChunks
                   .GroupBy(c => c.Text)
                   .Select(g => g.OrderByDescending(c => c.RelevanceScore).First())
                   .ToList();
+
+                // Helper: reserves the top anchor-matched chunks (from topic
+                // anchors, policy triggers, or the document router) at the
+                // FRONT of the result, guaranteeing their inclusion, then
+                // fills any remaining slots with the best-scoring chunks
+                // from the full deduped pool. This replaces an earlier
+                // version of this method that unconditionally cleared the
+                // whole candidate pool right after the topic-anchor step --
+                // that "fixed" anchor chunks losing the ranking, but broke
+                // retrieval for every query that didn't match an anchor at
+                // all (the dedupedChunks pool would be empty for the
+                // majority of ordinary questions, likely also behind the
+                // /api/chat 500s). A 1.15x/1.20x score boost alone often
+                // isn't enough to overcome a large raw-similarity gap
+                // against a strong-but-wrong competing document (that's
+                // what "clearing allChunks fixes it" was actually revealing
+                // -- not that the pool needed to be emptied, but that the
+                // boost needed to guarantee inclusion, not just compete on
+                // score). Reserving slots gets the same fix without
+                // sacrificing every other query.
+                List<RelevantChunk> SelectWithGuaranteedAnchors(List<RelevantChunk> candidatePool)
+                {
+                    const double anchorGuaranteeFloor = 0.35; // below this, treat as noise even if an anchor search technically returned it
+                    const int maxGuaranteedAnchorSlots = 2;
+
+                    var dedupedAnchorTexts = new HashSet<string>(anchorMatchedChunks.Select(c => c.Text));
+
+                    var guaranteed = candidatePool
+                      .Where(c => dedupedAnchorTexts.Contains(c.Text) && c.RelevanceScore >= anchorGuaranteeFloor)
+                      .OrderByDescending(c => c.RelevanceScore)
+                      .Take(maxGuaranteedAnchorSlots)
+                      .ToList();
+
+                    var remainingSlots = maxResults - guaranteed.Count;
+                    var guaranteedTexts = new HashSet<string>(guaranteed.Select(c => c.Text));
+
+                    var filler = candidatePool
+                      .Where(c => !guaranteedTexts.Contains(c.Text))
+                      .OrderByDescending(c => c.RelevanceScore)
+                      .Take(Math.Max(0, remainingSlots))
+                      .ToList();
+
+                    if (guaranteed.Any())
+                    {
+                        _logger.LogInformation(
+                          "🎯 Guaranteed {Count} anchor-matched chunk(s) a reserved slot instead of relying on score alone: {Sources}",
+                          guaranteed.Count, string.Join(", ", guaranteed.Select(c => c.Source).Distinct()));
+                    }
+
+                    return guaranteed.Concat(filler).ToList();
+                }
 
                 List<RelevantChunk> uniqueChunks;
 
@@ -4490,18 +4537,12 @@ namespace MEAI_GPT_API.Services
                           "🔗 Anchor document '{AnchorDoc}' had insufficient relevant content ({Count} chunks) — falling back to broader retrieval",
                           lastTurnSources.First(), anchorChunks.Count);
 
-                        uniqueChunks = dedupedChunks
-                          .OrderByDescending(c => c.RelevanceScore)
-                          .Take(maxResults)
-                          .ToList();
+                        uniqueChunks = SelectWithGuaranteedAnchors(dedupedChunks);
                     }
                 }
                 else
                 {
-                    uniqueChunks = dedupedChunks
-                      .OrderByDescending(c => c.RelevanceScore)
-                      .Take(maxResults)
-                      .ToList();
+                    uniqueChunks = SelectWithGuaranteedAnchors(dedupedChunks);
                 }
                 _logger.LogInformation($"🔍 Multi-query search: {originalChunks.Count} original + {allChunks.Count - originalChunks.Count} expanded = {uniqueChunks.Count} final chunks");
 
