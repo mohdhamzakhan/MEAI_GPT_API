@@ -77,6 +77,16 @@ builder.Services.AddHttpClient("OllamaAPI", client =>
 
 // Register the wrapper as a singleton
 builder.Services.AddSingleton<OllamaHttpClient>();
+builder.Services.AddSingleton<PolicyTriggerService>(provider =>
+{
+    var ollamaClient = provider.GetRequiredService<OllamaHttpClient>();
+    var logger = provider.GetRequiredService<ILogger<PolicyTriggerService>>();
+    var triggersPath = builder.Configuration["PolicyTriggers:FilePath"] ?? "./context/policy-triggers.json";
+    // Reuse whatever your default generation model is (e.g. llama3.1:8b) —
+    // read the same config key DynamicRagService falls back to.
+    var generationModel = builder.Configuration["DynamicRAG:DefaultGenerationModel"] ?? "llama3.1:8b";
+    return new PolicyTriggerService(ollamaClient, logger, triggersPath, generationModel);
+});
 
 // Dedicated cross-encoder reranking microservice -- see RerankerService.cs.
 // Config-driven BaseAddress/timeout so this can be pointed at a different

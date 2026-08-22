@@ -106,6 +106,7 @@ namespace MEAI_GPT_API.Services
         private readonly AgentExecutor _agentExecutor;
         private readonly SelfVerifier _selfVerifier;
         private readonly AgentDecisionLogger _agentLogger;
+        private readonly PolicyTriggerService _policyTriggerService;
 
         private readonly QueryIntentAnalyzer _queryIntentAnalyzer;
         public DynamicRagService(
@@ -143,7 +144,8 @@ namespace MEAI_GPT_API.Services
           AgentDecisionLogger agentLogger,
           ConversationHistoryService historyService,
           AppreciatedAnswerStore appreciatedAnswerStore,
-          AnnexureLinkService annexureLinkService)
+          AnnexureLinkService annexureLinkService,
+          PolicyTriggerService policyTriggerService)
         {
             _modelManager = modelManager;
             _collectionManager = collectionManager;
@@ -189,6 +191,7 @@ namespace MEAI_GPT_API.Services
             _agentLogger = agentLogger;
 
             RegisterAgentTools();
+            _policyTriggerService = policyTriggerService;
         }
 
         //For Agentic AI
@@ -245,8 +248,8 @@ namespace MEAI_GPT_API.Services
 
         These abbreviations are standard across all MEAI HR policies and should be interpreted consistently.
               ";
-      
-        File.WriteAllText(abbreviationsPath, abbreviationContent);
+
+                File.WriteAllText(abbreviationsPath, abbreviationContent);
                 _logger.LogInformation("Created abbreviations context file");
             }
         }
@@ -265,13 +268,11 @@ namespace MEAI_GPT_API.Services
                     var plantOrgContent = $@"MEAI {plant} Plant - Organization Details
         
           These are the fixed organizational details
-          for {
-                            plant
-          }
+          for {plant}
                     plant.
                   ";
-        
-          File.WriteAllText(plantOrgPath, plantOrgContent);
+
+                    File.WriteAllText(plantOrgPath, plantOrgContent);
                     _logger.LogInformation($"Created organization context file for {plant}");
                 }
             }
@@ -313,7 +314,24 @@ namespace MEAI_GPT_API.Services
 
             _logger.LogInformation($"📄 Processing {policyFiles.Count} policy files + {contextFiles.Count} context files for {embeddingModels.Count} embedding models");
 
-            var tasks = embeddingModels.Select(async model => {
+            // ✅ NEW: generate/refresh query triggers once per file, independent of
+            // how many embedding models are configured. Failures here are logged
+            // and swallowed inside the service itself — they never affect indexing.
+            foreach (var filePath in policyFiles) // context files don't need triggers
+            {
+                try
+                {
+                    var content = await _documentProcessor.ExtractTextAsync(filePath);
+                    await _policyTriggerService.GenerateTriggersForDocumentAsync(filePath, content);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, $"⚠️ Trigger generation skipped for {filePath}");
+                }
+            }
+
+            var tasks = embeddingModels.Select(async model =>
+            {
                 _logger.LogInformation($"🔄 Processing documents for model: {model.Name}");
 
                 var collectionId = await _collectionManager.GetOrCreateCollectionAsync(model);
@@ -1020,7 +1038,8 @@ namespace MEAI_GPT_API.Services
                 var scored = await Task.WhenAll(
                   relevantChunks.OrderByDescending(x => x.Similarity)
                   .Take(5)
-                  .Select(async chunk => {
+                  .Select(async chunk =>
+                  {
                       var emb = await GetPerRequestEmbeddingAsync(chunk.Text);
                       var sim = CosineSimilarity(answerEmbedding, emb);
                       chunk.Similarity = sim;
@@ -2886,7 +2905,8 @@ namespace MEAI_GPT_API.Services
                 // Filter and prepare chunks
                 var validChunks = chunks
                   .Where(chunk => !string.IsNullOrWhiteSpace(chunk.Text))
-                  .Select(chunk => new {
+                  .Select(chunk => new
+                  {
                       Text = _stringProcessor.CleanText(chunk.Text),
                       SourceFile = chunk.SourceFile,
                       ChunkId = GenerateChunkId(chunk.SourceFile, chunk.Text, lastModified, model.Name),
@@ -3182,7 +3202,8 @@ namespace MEAI_GPT_API.Services
         private readonly ConcurrentDictionary<string, (List<RelevantChunk> Results, DateTime Timestamp)> _searchCache = new();
         public static void ConfigureOptimizedHttpClient(IServiceCollection services)
         {
-            services.AddHttpClient("OllamaAPI", client => {
+            services.AddHttpClient("OllamaAPI", client =>
+            {
                 client.Timeout = TimeSpan.FromSeconds(60);
                 client.DefaultRequestHeaders.Add("Connection", "keep-alive");
             })
@@ -3192,7 +3213,8 @@ namespace MEAI_GPT_API.Services
                   UseCookies = false
               });
 
-            services.AddHttpClient("ChromaDB", client => {
+            services.AddHttpClient("ChromaDB", client =>
+            {
                 client.Timeout = TimeSpan.FromSeconds(15); // Reduced from 30
                 client.DefaultRequestHeaders.Add("Connection", "keep-alive");
                 client.DefaultRequestHeaders.Add("Keep-Alive", "timeout=30, max=100");
@@ -3219,7 +3241,8 @@ namespace MEAI_GPT_API.Services
           "HR policy warm-up text"
         };
 
-                var tasks = embeddingModels.Select(async model => {
+                var tasks = embeddingModels.Select(async model =>
+                {
                     try
                     {
                         foreach (var text in warmUpTexts)
@@ -3835,7 +3858,8 @@ namespace MEAI_GPT_API.Services
         private bool IsExactSectionMatch(string lowerText, string sectionNumber)
         {
             if (string.IsNullOrWhiteSpace(sectionNumber)) return false;
-            var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num => {
+            var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num =>
+            {
                 var escaped = Regex.Escape(num);
                 return new Regex($@"\b(?:section|clause|part)\.?\s*{escaped}(?:\.\d+)*\b" + $@"|(?:^|\n)\s*{escaped}\.(?:\d+\.?)*\s", RegexOptions.IgnoreCase | RegexOptions.Compiled);
             });
@@ -4339,6 +4363,26 @@ namespace MEAI_GPT_API.Services
                     var anchoredChunks = await SearchChromaDBAsync(anchoredQuery, embeddingModel, 3, plant);
                     var best = anchoredChunks.Take(2).ToList();
                     foreach (var c in best) c.RelevanceScore *= 1.15;
+                    allChunks.AddRange(best);
+                }
+
+                // 2b. Trigger-anchor expansion search — same pattern as abbreviation
+                // expansion above, but driven by the auto-generated policy-triggers.json
+                // map instead of a hand-maintained abbreviations file. Closes vocabulary
+                // gaps like "resigned employee formalities" -> "Settlement Policy" /
+                // "full and final settlement", where the query and the document's own
+                // language share almost no words in common.
+                var triggerMatches = _policyTriggerService.MatchTriggers(query);
+                foreach (var (anchorText, sourceFile) in triggerMatches)
+                {
+                    var chunks = await SearchChromaDBAsync(anchorText, embeddingModel, 3, plant);
+
+                    // Same reasoning as the abbreviation-expansion boost above: without a
+                    // boost, the original unexpanded query can fill every slot in the
+                    // final Take(maxResults), silently dropping the anchor-matched chunk
+                    // even when it's clearly the right document.
+                    var best = chunks.Take(2).ToList();
+                    foreach (var c in best) c.RelevanceScore *= 1.20;
                     allChunks.AddRange(best);
                 }
 
