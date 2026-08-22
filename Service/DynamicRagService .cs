@@ -70,6 +70,8 @@ namespace MEAI_GPT_API.Services
         private readonly PlantSettings _plants;
         private readonly IConversationStorageService _conversationStorage;
         private readonly AbbreviationExpansionService _abbreviationService;
+        private readonly TopicAnchorService _topicAnchorService;
+        private readonly DocumentRouterService _documentRouterService;
         private readonly HelperMethods _helperMethods;
 
         //new code by Hamza
@@ -120,6 +122,8 @@ namespace MEAI_GPT_API.Services
           IMetricsCollector metrics,
           IConversationStorageService conversationStorage,
           AbbreviationExpansionService abbreviationService,
+          TopicAnchorService topicAnchorService,
+          DocumentRouterService documentRouterService,
           //new code by Hamza
           StringProcessingService stringProcessor,
           PolicyAnalysisService policyAnalysis,
@@ -155,6 +159,8 @@ namespace MEAI_GPT_API.Services
             _plants = plants.Value;
             _conversationStorage = conversationStorage;
             _abbreviationService = abbreviationService;
+            _topicAnchorService = topicAnchorService;
+            _documentRouterService = documentRouterService;
             _cacheCleanupTimer = new Timer(CleanupEmbeddingCache, null,
               TimeSpan.FromMinutes(15), TimeSpan.FromMinutes(15));
 
@@ -4304,6 +4310,52 @@ namespace MEAI_GPT_API.Services
                     // pulling in unrelated General Information Policy
                     // chunks instead of the Earned Leave accrual clause.
                     var best = chunks.Take(1).ToList();
+                    foreach (var c in best) c.RelevanceScore *= 1.15;
+                    allChunks.AddRange(best);
+                }
+
+                // 2b. Topic-anchor search. Different gap than the
+                // abbreviation expansion above: that only matches a single
+                // fixed word ("EL"). A concept like resignation gets
+                // phrased many different ways ("resigning", "notice
+                // period", "F&F", "relieving", "last working day") and no
+                // single dictionary word covers all of them, so a
+                // resignation question can keep losing the similarity
+                // search to a differently-worded-but-topically-adjacent
+                // document (e.g. an ISMS policy's asset-return clause)
+                // instead of the actual Settlement Policy, even though the
+                // Settlement Policy is fully indexed. TopicAnchorService
+                // checks the whole query text for ANY of a list of trigger
+                // phrases per concept (see context/topic_anchors.json) and,
+                // same pattern as the continuity/abbreviation anchors
+                // above, folds the target document's title terms into an
+                // additional search so it gets a fair shot at the
+                // candidate pool before truncation, not just a
+                // post-truncation reorder.
+                var topicAnchors = _topicAnchorService.GetMatchingAnchors(query);
+                foreach (var anchorText in topicAnchors)
+                {
+                    var anchoredQuery = $"{query} {anchorText}";
+                    var anchoredChunks = await SearchChromaDBAsync(anchoredQuery, embeddingModel, 3, plant);
+                    var best = anchoredChunks.Take(2).ToList();
+                    foreach (var c in best) c.RelevanceScore *= 1.15;
+                    allChunks.AddRange(best);
+                }
+
+                // 2c. Dynamic document router. TopicAnchorService above only
+                // covers documents someone manually wrote trigger phrases
+                // for -- doesn't scale to 130+ policies. This asks one fast
+                // model call which 1-2 documents (from the LIVE, current
+                // document list) the query is likely about, then anchors
+                // toward those the same way, without needing any per-
+                // document config. Fails open (empty list) on any error, so
+                // a router hiccup never blocks the main retrieval path.
+                var routedTitles = await _documentRouterService.RouteAsync(query, plant, embeddingModel.Name);
+                foreach (var routedTitle in routedTitles)
+                {
+                    var anchoredQuery = $"{query} {routedTitle}";
+                    var anchoredChunks = await SearchChromaDBAsync(anchoredQuery, embeddingModel, 3, plant);
+                    var best = anchoredChunks.Take(2).ToList();
                     foreach (var c in best) c.RelevanceScore *= 1.15;
                     allChunks.AddRange(best);
                 }

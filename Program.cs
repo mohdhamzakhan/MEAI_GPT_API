@@ -216,6 +216,30 @@ builder.Services.AddSingleton<AbbreviationExpansionService>(provider =>
     var abbreviationPath = Path.Combine("context", "abbreviations.txt");
     return new AbbreviationExpansionService(logger, abbreviationPath);
 });
+
+// TopicAnchorService fixes a different gap than AbbreviationExpansionService
+// above: that one matches a single fixed word ("EL" -> "Earned Leave").
+// This one matches ANY of a list of real-world phrasings of a concept
+// ("resigning", "notice period", "F&F", "relieving", ...) against the
+// whole query text, and anchors retrieval toward a document that wording
+// alone wasn't pulling in reliably. See TopicAnchorService.cs and
+// context/topic_anchors.json.
+builder.Services.AddSingleton<TopicAnchorService>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<TopicAnchorService>>();
+    var topicAnchorPath = Path.Combine("context", "topic_anchors.json");
+    return new TopicAnchorService(logger, topicAnchorPath);
+});
+
+// DocumentRouterService: the scalable replacement for hand-writing
+// TopicAnchorService entries across 130+ policy documents. Fetches the
+// live document list (via the same ChromaDB collection DynamicRagService
+// uses) and asks one fast model call per query which 1-2 documents are
+// likely relevant. TopicAnchorService is kept alongside this, not
+// replaced -- useful as a manual override for specific cases you want
+// guaranteed behavior for, rather than trusting the router every time.
+builder.Services.AddSingleton<DocumentRouterService>();
+
 builder.Services.Configure<PlantSettings>(options =>
 {
     options.Plants = builder.Configuration.GetSection("Plant").Get<Dictionary<string, string>>()!;
