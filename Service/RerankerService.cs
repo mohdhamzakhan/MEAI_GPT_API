@@ -125,10 +125,7 @@ namespace MEAI_GPT_API.Service
                     chunks[result.Index].RerankScore = result.Score;
                 }
 
-                return chunks
-                    .OrderByDescending(c => c.RerankScore ?? c.Similarity)
-                    .Take(topK)
-                    .ToList();
+                return SelectWithGuaranteedAnchors(chunks, topK, c => c.RerankScore ?? c.Similarity);
             }
             catch (Exception ex)
             {
@@ -142,10 +139,45 @@ namespace MEAI_GPT_API.Service
 
         private List<RelevantChunk> FallbackToSimilarity(List<RelevantChunk> chunks, int topK)
         {
-            return chunks
-                .OrderByDescending(c => c.Similarity)
-                .Take(topK)
+            return SelectWithGuaranteedAnchors(chunks, topK, c => c.Similarity);
+        }
+
+        // Confirmed in production: a chunk correctly guaranteed a slot
+        // upstream (see DynamicRagService's SelectWithGuaranteedAnchors --
+        // topic anchor, policy trigger, or document-router match) survived
+        // that guarantee only to be cut here moments later, because
+        // reranking re-scores and re-selects top-K with zero awareness of
+        // what was reserved earlier in the pipeline. This re-applies the
+        // same reserve-then-fill principle after reranking, so a guarantee
+        // made upstream can't be silently undone by this step.
+        private List<RelevantChunk> SelectWithGuaranteedAnchors(
+            List<RelevantChunk> chunks, int topK, Func<RelevantChunk, double> scoreSelector)
+        {
+            const int maxGuaranteedSlots = 2;
+
+            var guaranteed = chunks
+                .Where(c => c.IsAnchorGuaranteed)
+                .OrderByDescending(scoreSelector)
+                .Take(Math.Min(maxGuaranteedSlots, topK))
                 .ToList();
+
+            var guaranteedIds = new HashSet<string>(guaranteed.Select(c => c.Id));
+            var remainingSlots = topK - guaranteed.Count;
+
+            var filler = chunks
+                .Where(c => !guaranteedIds.Contains(c.Id))
+                .OrderByDescending(scoreSelector)
+                .Take(Math.Max(0, remainingSlots))
+                .ToList();
+
+            if (guaranteed.Any())
+            {
+                _logger.LogInformation(
+                    "Reranker preserved {Count} anchor-guaranteed chunk(s) post-rerank: {Sources}",
+                    guaranteed.Count, string.Join(", ", guaranteed.Select(c => c.Source).Distinct()));
+            }
+
+            return guaranteed.Concat(filler).ToList();
         }
     }
 }

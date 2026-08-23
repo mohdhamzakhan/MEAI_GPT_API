@@ -23,6 +23,20 @@
         /// </summary>
         public double? RerankScore { get; set; }
 
+        /// <summary>
+        /// Set by GetRelevantChunksWithExpansionAsync's SelectWithGuaranteedAnchors
+        /// when this chunk was reserved a slot because it matched a topic anchor,
+        /// policy trigger, or document-router selection -- i.e. a high-confidence
+        /// signal this document IS the right one for the query, found upstream of
+        /// pure similarity ranking. RerankerService.RerankAsync must respect this
+        /// flag and re-reserve a slot after its own re-scoring, or the guarantee
+        /// given here gets silently undone by reranking (this happened in
+        /// production: a correctly-anchored Settlement Policy chunk survived
+        /// retrieval's guarantee only to be cut by the reranker's independent
+        /// cross-encoder judgment moments later).
+        /// </summary>
+        public bool IsAnchorGuaranteed { get; set; } = false;
+
         // ✅ NEW: populated from ChromaDB metadata in ParseSearchResults so
         // API consumers can cite the actual section/annexure a chunk came
         // from, not just the source filename.
