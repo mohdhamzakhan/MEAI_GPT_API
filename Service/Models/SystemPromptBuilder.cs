@@ -924,13 +924,19 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
             // above reads as "never state a number that isn't verbatim in
             // context", which blocks legitimate arithmetic on a stated rate.
             prompt.AppendLine("6. **EXCEPTION — CALCULATIONS ARE REQUIRED, NOT OPTIONAL**");
-            prompt.AppendLine("   - If the context gives a rate, ratio, or formula (e.g. \"1 day per X days worked\",");
-            prompt.AppendLine("     \"Y% of basic pay\") and the user's question requires applying it to a specific");
-            prompt.AppendLine("     number they provided, you MUST perform that calculation and show the result —");
-            prompt.AppendLine("     do not just restate the rate. Show your work (e.g. \"180 ÷ 10.73 ≈ 16.8 days\")");
-            prompt.AppendLine("     You should the values in case of leave if the value is 16.8 then it wull be 17 and if 16.49 then 16 and also write approx");
-            prompt.AppendLine("   - This is not \"outside knowledge\" even though the computed number itself doesn't");
-            prompt.AppendLine("     appear in the source text — the rate it's derived from does");
+            prompt.AppendLine("   - If the context provides a rate, ratio, or formula (e.g., \"1 day per X days worked\"");
+            prompt.AppendLine("     or \"Y% of basic pay\") and the user's question requires applying it to a specific");
+            prompt.AppendLine("     value provided by the user, you MUST perform the calculation and provide the result.");
+            prompt.AppendLine("   - Do not merely restate the rate or formula. Always show the calculation used to arrive");
+            prompt.AppendLine("     at the result (e.g., \"180 ÷ 10.73 ≈ 16.77 days\").");
+            prompt.AppendLine("   - For leave or other whole-unit values, round the calculated result to the nearest whole");
+            prompt.AppendLine("     number: values with a decimal part of 0.50 or greater round up, while values below 0.50");
+            prompt.AppendLine("     round down. For example, 16.8 days → 17 days, while 16.49 days → 16 days.");
+            prompt.AppendLine("   - Always include the approximate calculated value when rounding, so the user can see the");
+            prompt.AppendLine("     original result (e.g., \"16.77 ≈ 17 days\").");
+            prompt.AppendLine("   - The calculated result is considered valid even if the exact number does not appear in the");
+            prompt.AppendLine("     source text, because it is directly derived from the rate, ratio, or formula provided");
+            prompt.AppendLine("     in the context.");
             prompt.AppendLine();
 
             // Added after a real incident: a "domestic travel meal
@@ -1052,10 +1058,41 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
             prompt.AppendLine("- Use meaningful document names that users can understand");
             prompt.AppendLine();
 
+            // Added after a real incident: a chunk correctly identified as
+            // the RIGHT document (via topic anchor / policy trigger /
+            // document router -- see IsAnchorGuaranteed) still got buried
+            // under "Related Information" in the final answer, with an
+            // unrelated document leading instead. Marking it explicitly and
+            // moving it first gives the model an unambiguous signal about
+            // which excerpt is the actual answer to the question, not just
+            // background.
+            prompt.AppendLine("**PRIMARY SOURCE INSTRUCTIONS:**");
+            prompt.AppendLine("- Any excerpt below marked \"⭐ PRIMARY SOURCE\" was specifically identified as the");
+            prompt.AppendLine("  document this question is about -- treat its content as the main, authoritative");
+            prompt.AppendLine("  answer and lead your response with it");
+            prompt.AppendLine("- Other excerpts are supplementary context, not the primary answer -- use them to");
+            prompt.AppendLine("  add relevant detail, but do not let them displace the primary source's content");
+            prompt.AppendLine("  or push it down into a \"related information\" section");
+            prompt.AppendLine("- If a primary source is present but seems incomplete on its own, say so explicitly");
+            prompt.AppendLine("  (e.g. \"the retrieved excerpt covers X but may not include every step -- check the");
+            prompt.AppendLine("  full policy for additional requirements such as forms or annexures\") rather than");
+            prompt.AppendLine("  silently presenting a partial answer as complete");
+            prompt.AppendLine();
+
             int contextNumber = 1;
-            foreach (var chunk in chunks)
+            // Primary-source (anchor-guaranteed) excerpts first, so the
+            // instruction above and the model's own recency/position bias
+            // work together instead of against each other.
+            foreach (var chunk in chunks.OrderByDescending(c => c.IsAnchorGuaranteed))
             {
-                prompt.AppendLine($"--- Internal Reference {contextNumber} ---");
+                if (chunk.IsAnchorGuaranteed)
+                {
+                    prompt.AppendLine($"--- ⭐ PRIMARY SOURCE (Excerpt {contextNumber}) ---");
+                }
+                else
+                {
+                    prompt.AppendLine($"--- Internal Reference {contextNumber} ---");
+                }
                 prompt.AppendLine($"Document: {chunk.Source}");
                 prompt.AppendLine($"Relevance: {chunk.Similarity:F3}");
                 prompt.AppendLine("Content:");

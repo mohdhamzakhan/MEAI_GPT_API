@@ -153,7 +153,11 @@ namespace MEAI_GPT_API.Service
         private List<RelevantChunk> SelectWithGuaranteedAnchors(
             List<RelevantChunk> chunks, int topK, Func<RelevantChunk, double> scoreSelector)
         {
-            const int maxGuaranteedSlots = 2;
+            // Kept consistent with DynamicRagService's SelectWithGuaranteedAnchors
+            // maxTotalGuaranteedSlots -- if these diverge, reranking just
+            // re-truncates whatever extra room retrieval granted right back
+            // down again, defeating the point of widening it there.
+            const int maxGuaranteedSlots = 5;
 
             var guaranteed = chunks
                 .Where(c => c.IsAnchorGuaranteed)

@@ -89,7 +89,25 @@ namespace MEAI_GPT_API.Service.Models
                 RegexOptions.Compiled | RegexOptions.IgnoreCase),
             new Regex(@"^(?:APPENDIX|Appendix|ANNEXURE|Annexure)\s+([A-Z\d]+)\s*[:\-]?\s*(.*)$",
                 RegexOptions.Compiled | RegexOptions.IgnoreCase),
-            
+
+            // NEW: Numbered forms (e.g. "Form 8", "FORM No. 5: Declaration") --
+            // same treatment as Annexure/Appendix above.
+            new Regex(@"^(?:FORM|Form)\s+(?:No\.?)?\s*([A-Z\d]+)\s*[:\-]?\s*(.*)$",
+                RegexOptions.Compiled | RegexOptions.IgnoreCase),
+
+            // NEW: Named/unnumbered forms (e.g. "No Dues Form", "Exit Clearance
+            // Form"). These don't have a number to key off of like Annexure/Form
+            // above -- added after a real incident where a Settlement Policy's
+            // "No Dues Form" section wasn't being surfaced at all, likely because
+            // nothing recognized it as a distinct section boundary during chunking,
+            // so it got absorbed into whatever surrounding section as plain body
+            // text instead of becoming its own addressable, well-titled chunk.
+            // Matches a short heading-like line (not full paragraphs) ending in
+            // "Form". Capture group 1 is the whole heading, used as both section
+            // ID and title since there's no separate number to split out.
+            new Regex(@"^([A-Z][A-Za-z\s\-]{2,50}\bForms?)\s*[:\-]?\s*$",
+                RegexOptions.Compiled),
+
             // Generic numbered sections
             new Regex(@"^(\d+(?:\.\d+)*)\s*[:\-\.]?\s*(.+)$",
                 RegexOptions.Compiled),

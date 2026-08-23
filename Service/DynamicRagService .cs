@@ -1,6 +1,5 @@
 ﻿// Services/DynamicRagService.cs
 using DocumentFormat.OpenXml.Drawing;
-using DocumentFormat.OpenXml.Drawing.Diagrams;
 using DocumentFormat.OpenXml.Math;
 using DocumentFormat.OpenXml.Office.SpreadSheetML.Y2023.MsForms;
 using DocumentFormat.OpenXml.Office2013.Drawing.ChartStyle;
@@ -4393,8 +4392,15 @@ namespace MEAI_GPT_API.Services
                 foreach (var anchorText in topicAnchors)
                 {
                     var anchoredQuery = $"{query} {anchorText}";
-                    var anchoredChunks = await SearchChromaDBAsync(anchoredQuery, embeddingModel, 3, plant);
-                    var best = anchoredChunks.Take(2).ToList();
+                    // Widened from 3/Take(2) to 6/Take(4): a single generic
+                    // chunk (e.g. an "effective from [date]" clause) isn't
+                    // enough to actually answer a multi-part question like
+                    // "what formalities must a resigning employee complete"
+                    // -- that needs several sections of the SAME correct
+                    // document (No Dues form, annexures, notice period,
+                    // etc.), not just whichever one chunk scored highest.
+                    var anchoredChunks = await SearchChromaDBAsync(anchoredQuery, embeddingModel, 6, plant);
+                    var best = anchoredChunks.Take(4).ToList();
                     foreach (var c in best) c.RelevanceScore *= 1.15;
                     allChunks.AddRange(best);
                     anchorMatchedChunks.AddRange(best);
@@ -4409,13 +4415,13 @@ namespace MEAI_GPT_API.Services
                 var triggerMatches = _policyTriggerService.MatchTriggers(query);
                 foreach (var (anchorText, sourceFile) in triggerMatches)
                 {
-                    var chunks = await SearchChromaDBAsync(anchorText, embeddingModel, 3, plant);
+                    var chunks = await SearchChromaDBAsync(anchorText, embeddingModel, 6, plant);
 
                     // Same reasoning as the abbreviation-expansion boost above: without a
                     // boost, the original unexpanded query can fill every slot in the
                     // final Take(maxResults), silently dropping the anchor-matched chunk
                     // even when it's clearly the right document.
-                    var best = chunks.Take(2).ToList();
+                    var best = chunks.Take(4).ToList();
                     foreach (var c in best) c.RelevanceScore *= 1.20;
                     allChunks.AddRange(best);
                     anchorMatchedChunks.AddRange(best);
@@ -4433,8 +4439,8 @@ namespace MEAI_GPT_API.Services
                 foreach (var routedTitle in routedTitles)
                 {
                     var anchoredQuery = $"{query} {routedTitle}";
-                    var anchoredChunks = await SearchChromaDBAsync(anchoredQuery, embeddingModel, 3, plant);
-                    var best = anchoredChunks.Take(2).ToList();
+                    var anchoredChunks = await SearchChromaDBAsync(anchoredQuery, embeddingModel, 6, plant);
+                    var best = anchoredChunks.Take(4).ToList();
                     foreach (var c in best) c.RelevanceScore *= 1.15;
                     allChunks.AddRange(best);
                     anchorMatchedChunks.AddRange(best);
@@ -4492,14 +4498,27 @@ namespace MEAI_GPT_API.Services
                 List<RelevantChunk> SelectWithGuaranteedAnchors(List<RelevantChunk> candidatePool)
                 {
                     const double anchorGuaranteeFloor = 0.35; // below this, treat as noise even if an anchor search technically returned it
-                    const int maxGuaranteedAnchorSlots = 2;
+                    const int maxChunksPerGuaranteedDocument = 3; // enough to cover multiple sections of the SAME correct document (e.g. No Dues form, annexures, notice period), not just one generic chunk
+                    const int maxDistinctGuaranteedDocuments = 2; // cap total documents guaranteed, so an unrelated anchor match (e.g. a document router false-positive) can't crowd out normal retrieval either
+                    const int maxTotalGuaranteedSlots = 5;
 
                     var dedupedAnchorTexts = new HashSet<string>(anchorMatchedChunks.Select(c => c.Text));
 
+                    // Grouped by document, not a flat top-N overall: a flat
+                    // cap picks by score across every anchor-matched
+                    // document combined, which in production let a single
+                    // low-information chunk from the RIGHT document (e.g.
+                    // an "effective from [date]" clause) share space with an
+                    // unrelated document that also matched a different
+                    // anchor, instead of surfacing enough of the right
+                    // document's actual content to answer the question.
                     var guaranteed = candidatePool
                       .Where(c => dedupedAnchorTexts.Contains(c.Text) && c.RelevanceScore >= anchorGuaranteeFloor)
-                      .OrderByDescending(c => c.RelevanceScore)
-                      .Take(maxGuaranteedAnchorSlots)
+                      .GroupBy(c => c.Source)
+                      .OrderByDescending(g => g.Max(c => c.RelevanceScore)) // prioritize whichever matched document scored highest overall
+                      .Take(maxDistinctGuaranteedDocuments)
+                      .SelectMany(g => g.OrderByDescending(c => c.RelevanceScore).Take(maxChunksPerGuaranteedDocument))
+                      .Take(maxTotalGuaranteedSlots)
                       .ToList();
 
                     // Tag these so RerankerService.RerankAsync can re-reserve
