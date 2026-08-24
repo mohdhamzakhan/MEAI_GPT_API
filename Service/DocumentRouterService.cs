@@ -108,12 +108,28 @@ namespace MEAI_GPT_API.Service
                     return new List<string>();
                 }
 
-                var indices = Regex.Matches(rawAnswer, @"\d+")
-                    .Select(m => int.Parse(m.Value))
-                    .Where(n => n >= 1 && n <= candidateDocs.Count)
-                    .Distinct()
-                    .Take(2)
-                    .ToList();
+                var allNumbers = Regex.Matches(rawAnswer, @"\d+")
+    .Select(m => int.Parse(m.Value))
+    .ToList();
+
+                // ✅ NEW: if the model ignored the "1-2 numbers only" instruction and
+                // listed many numbers instead (seen in practice: 7+ numbers from
+                // llama3.2:1b on a single query), that's a clear sign of router failure,
+                // not a real answer — trusting the first 2 in that noise picks
+                // essentially arbitrary documents. Fail open (empty list) instead.
+                if (allNumbers.Count > 3)
+                {
+                    _logger.LogWarning(
+                        "Document router returned {Count} numbers (expected 1-2) — treating as failure, raw output: '{Raw}'",
+                        allNumbers.Count, rawAnswer.Trim());
+                    return new List<string>();
+                }
+
+                var indices = allNumbers
+    .Where(n => n >= 1 && n <= candidateDocs.Count)
+    .Distinct()
+    .Take(2)
+    .ToList();
 
                 var titles = indices.Select(i => candidateDocs[i - 1].Title).ToList();
 
