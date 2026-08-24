@@ -4446,6 +4446,129 @@ namespace MEAI_GPT_API.Services
                     anchorMatchedChunks.AddRange(best);
                 }
 
+                // 2d. Cross-reference expansion. Found via a real incident: a
+                // Settlement Policy chunk cited "Annexure-4 of Office Computers &
+                // its usage policy" inline, but that referenced policy was never
+                // retrieved itself -- the answer named it without actually
+                // surfacing its content. This scans the text of chunks already
+                // matched by an anchor (2a-2c above) for mentions of OTHER known
+                // document titles, and if found, runs an anchored search for THAT
+                // document too. Deliberately scoped to only scan already-anchor-
+                // matched chunks, not the full candidate pool -- scanning every
+                // chunk's text against 130+ document titles on every query would
+                // be needlessly expensive, and a chunk that only surfaced via
+                // plain similarity search hasn't earned the same "this is
+                // definitely relevant" confidence an anchor match has.
+                if (anchorMatchedChunks.Any())
+                {
+                    try
+                    {
+                        var knownDocuments = await GetDistinctSourceFilesAsync(embeddingModel.Name);
+                        var globalPlantTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
+              "context",
+              "centralized",
+              "general",
+              "additional_source"
+            };
+                        var candidateTitles = knownDocuments
+                          .Where(d => string.Equals(d.Plant, plant, StringComparison.OrdinalIgnoreCase) || globalPlantTags.Contains(d.Plant))
+                          .Select(d => (d.SourceFile, Title: ExtractDocumentTitleTerms(d.SourceFile)))
+                          .Where(d => !string.IsNullOrWhiteSpace(d.Title) && d.Title.Length >= 8) // avoid short titles matching too broadly (e.g. a 4-char title matching unrelated text)
+                          .DistinctBy(d => d.Title)
+                          .ToList();
+
+                        var alreadyAnchoredSources = new HashSet<string>(anchorMatchedChunks.Select(c => c.Source), StringComparer.OrdinalIgnoreCase);
+                        var crossReferencedTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                        // Normalizes "&" <-> "and", punctuation, and extra
+                        // whitespace before comparing.
+                        static string NormalizeForMatch(string s) =>
+                          Regex.Replace(
+                            s.Replace("&", "and"),
+                            @"[^a-zA-Z0-9\s]", " "
+                          ).ToLowerInvariant().Trim();
+
+                        // Real documents don't name each other identically
+                        // everywhere. Confirmed in production: a document's
+                        // own filename-derived title was "Office computer &
+                        // usage Policy" (singular, no "its"), while another
+                        // policy's text referred to it as "Office computers &
+                        // its usage policy" (plural, with "its") -- an exact
+                        // substring check, even normalized, fails on that
+                        // because the two phrases simply aren't the same
+                        // contiguous string. This instead checks that every
+                        // significant word of the title (stop words and short
+                        // words filtered, trailing 's' stripped for a naive
+                        // plural tolerance) appears SOMEWHERE in the chunk
+                        // text, regardless of order or adjacency.
+                        var stopWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
+              "and",
+              "its",
+              "the",
+              "of",
+              "a",
+              "an",
+              "for",
+              "to",
+              "in",
+              "on",
+              "at",
+              "by"
+            };
+
+                        static string Stem(string w) => w.EndsWith("s") && w.Length > 3 ? w[..^1] : w;
+
+                        bool TitleLooselyMatchesText(string title, string normalizedText)
+                        {
+                            var titleWords = NormalizeForMatch(title)
+                              .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                              .Where(w => w.Length > 2 && !stopWords.Contains(w))
+                              .Select(Stem)
+                              .Distinct()
+                              .ToList();
+
+                            if (titleWords.Count == 0) return false;
+
+                            var textWords = new HashSet<string>(
+                              normalizedText.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(Stem));
+
+                            return titleWords.All(tw => textWords.Contains(tw));
+                        }
+
+                        foreach (var chunk in anchorMatchedChunks)
+                        {
+                            var normalizedChunkText = NormalizeForMatch(chunk.Text);
+                            foreach (var (sourceFile, title) in candidateTitles)
+                            {
+                                if (alreadyAnchoredSources.Contains(sourceFile)) continue; // already retrieved, no need to cross-reference it again
+                                if (TitleLooselyMatchesText(title, normalizedChunkText))
+                                {
+                                    crossReferencedTitles.Add(title);
+                                }
+                            }
+                        }
+
+                        foreach (var crossRefTitle in crossReferencedTitles.Take(2)) // bounded, same reasoning as topic-continuity's Take(2) below
+                        {
+                            var anchoredQuery = $"{query} {crossRefTitle}";
+                            var anchoredChunks = await SearchChromaDBAsync(anchoredQuery, embeddingModel, 6, plant);
+                            var best = anchoredChunks.Take(3).ToList();
+                            foreach (var c in best) c.RelevanceScore *= 1.15;
+                            allChunks.AddRange(best);
+                            anchorMatchedChunks.AddRange(best);
+
+                            _logger.LogInformation("🔗 Cross-reference expansion: '{Title}' mentioned inline in an anchor-matched chunk, retrieving it too", crossRefTitle);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // Fails open, same philosophy as the document router --
+                        // a ChromaDB hiccup here should never block the main
+                        // retrieval path, just skip this supplementary step.
+                        _logger.LogWarning(ex, "Cross-reference expansion failed — continuing without it for this query");
+                    }
+                }
+
                 // 3. Topic-continuity search. A boost applied only AFTER
                 // truncation can't rescue a chunk that never made the
                 // top-maxResults cut in the first place — it can only
@@ -4499,8 +4622,8 @@ namespace MEAI_GPT_API.Services
                 {
                     const double anchorGuaranteeFloor = 0.35; // below this, treat as noise even if an anchor search technically returned it
                     const int maxChunksPerGuaranteedDocument = 3; // enough to cover multiple sections of the SAME correct document (e.g. No Dues form, annexures, notice period), not just one generic chunk
-                    const int maxDistinctGuaranteedDocuments = 2; // cap total documents guaranteed, so an unrelated anchor match (e.g. a document router false-positive) can't crowd out normal retrieval either
-                    const int maxTotalGuaranteedSlots = 5;
+                    const int maxDistinctGuaranteedDocuments = 4; // raised from 2 after a real incident: a resignation question genuinely spans 3+ policies (ISMS, Settlement, Office Computers Usage via cross-reference) -- 2 was cutting off legitimately relevant documents, not just false positives
+                    const int maxTotalGuaranteedSlots = 8; // raised proportionally with maxDistinctGuaranteedDocuments above
 
                     var dedupedAnchorTexts = new HashSet<string>(anchorMatchedChunks.Select(c => c.Text));
 

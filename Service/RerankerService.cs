@@ -157,7 +157,7 @@ namespace MEAI_GPT_API.Service
             // maxTotalGuaranteedSlots -- if these diverge, reranking just
             // re-truncates whatever extra room retrieval granted right back
             // down again, defeating the point of widening it there.
-            const int maxGuaranteedSlots = 5;
+            const int maxGuaranteedSlots = 8;
 
             var guaranteed = chunks
                 .Where(c => c.IsAnchorGuaranteed)
