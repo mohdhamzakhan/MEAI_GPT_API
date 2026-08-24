@@ -351,7 +351,7 @@ namespace MEAI_GPT_API.Services
                 {
                     await Task.Delay(triggerGenDelayMs);
                 }
-                await Task.Delay(triggerGenDelayMs);
+                //await Task.Delay(triggerGenDelayMs);
             }
 
             var tasks = embeddingModels.Select(async model => {
