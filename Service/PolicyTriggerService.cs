@@ -116,18 +116,18 @@ namespace MEAI_GPT_API.Service.Models
         /// policy every time. Never throws: a trigger-generation failure
         /// must never block or fail the actual indexing pipeline.
         /// </summary>
-        public async Task GenerateTriggersForDocumentAsync(string sourceFile, string content, CancellationToken cancellationToken = default)
+        public async Task<bool> GenerateTriggersForDocumentAsync(string sourceFile, string content, CancellationToken cancellationToken = default)
         {
             try
             {
                 if (string.IsNullOrWhiteSpace(content))
-                    return;
+                    return false;
 
                 var hash = ComputeHash(content);
                 if (_contentHashes.TryGetValue(sourceFile, out var existingHash) && existingHash == hash)
                 {
                     _logger.LogDebug($"⏭️ Skipping trigger generation for {sourceFile} — content unchanged");
-                    return;
+                    return false;
                 }
 
                 _logger.LogInformation($"🏷️ Generating query triggers for {sourceFile}");
@@ -166,7 +166,7 @@ namespace MEAI_GPT_API.Service.Models
                 {
                     var err = await response.Content.ReadAsStringAsync();
                     _logger.LogWarning($"⚠️ Trigger generation call failed for {sourceFile}: {response.StatusCode} - {err}");
-                    return;
+                    return false;
                 }
 
                 var raw = await response.Content.ReadAsStringAsync();
@@ -175,7 +175,7 @@ namespace MEAI_GPT_API.Service.Models
                 if (entries.Count == 0)
                 {
                     _logger.LogWarning($"⚠️ No trigger entries parsed for {sourceFile} — leaving previous entries (if any) untouched");
-                    return;
+                    return false;
                 }
 
                 // Deterministic safety net: merge simple triggers derived
@@ -195,10 +195,12 @@ namespace MEAI_GPT_API.Service.Models
 
                 await UpsertEntriesAsync(sourceFile, entries, hash);
                 _logger.LogInformation($"✅ Generated {entries.Count} trigger group(s) for {sourceFile}");
+                return true; // ✅ real call made
             }
             catch (OperationCanceledException)
             {
                 _logger.LogWarning($"⚠️ Trigger generation timed out for {sourceFile}");
+                return true;
             }
             catch (Exception ex)
             {
@@ -208,6 +210,7 @@ namespace MEAI_GPT_API.Service.Models
                 // here must never take down document processing the way
                 // the earlier chunking bug did.
                 _logger.LogError(ex, $"❌ Trigger generation failed for {sourceFile}");
+                return false;
             }
         }
 

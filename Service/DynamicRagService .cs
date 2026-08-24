@@ -337,16 +337,20 @@ namespace MEAI_GPT_API.Services
             var triggerGenDelayMs = _config.TriggerGenerationDelayMs > 0 ? _config.TriggerGenerationDelayMs : 2000;
             foreach (var filePath in policyFiles) // context files don't need triggers
             {
+                bool madeRealCall = false;
                 try
                 {
                     var content = await _documentProcessor.ExtractTextAsync(filePath);
-                    await _policyTriggerService.GenerateTriggersForDocumentAsync(filePath, content);
+                    madeRealCall = await _policyTriggerService.GenerateTriggersForDocumentAsync(filePath, content);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, $"⚠️ Trigger generation skipped for {filePath}");
                 }
-
+                if (madeRealCall)
+                {
+                    await Task.Delay(triggerGenDelayMs);
+                }
                 await Task.Delay(triggerGenDelayMs);
             }
 
