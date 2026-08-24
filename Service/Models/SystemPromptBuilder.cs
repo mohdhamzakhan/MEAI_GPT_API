@@ -1107,9 +1107,12 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
             prompt.AppendLine();
             prompt.AppendLine("**Structure your answer as:**");
             prompt.AppendLine("1. Direct answer to the question");
-            prompt.AppendLine("2. Supporting details from context");
-            prompt.AppendLine("3. Source citations [Source: Document Name]");
-            prompt.AppendLine("4. Related information (if applicable)");
+            prompt.AppendLine("2. Main policy provisions");
+            prompt.AppendLine("3. Relevant sections and subsections");
+            prompt.AppendLine("4. Annexures / Appendices / Forms / Sections / Clauses belonging to the policy");
+            prompt.AppendLine("5. Supporting details from context");
+            prompt.AppendLine("6. Source citations [Source: Document Name]");
+            prompt.AppendLine("7. Related information (only if applicable)");
             prompt.AppendLine();
 
             prompt.AppendLine("**Formatting:**");

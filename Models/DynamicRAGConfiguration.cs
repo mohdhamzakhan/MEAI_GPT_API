@@ -20,7 +20,7 @@
         /// 0 disables throttling (not recommended unless the backend has
         /// no concurrency constraints).
         /// </summary>
-        public int TriggerGenerationDelayMs { get; set; } = 2000;
+        public int TriggerGenerationDelayMs { get; set; } = 5;
         public string PolicyFolder { get; set; } = "./policies";
         public string ContextFolder { get; set; } = "./context";
         public List<string> SupportedExtensions { get; set; } = new();
