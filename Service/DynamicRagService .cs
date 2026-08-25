@@ -1,5 +1,6 @@
 ﻿// Services/DynamicRagService.cs
 using DocumentFormat.OpenXml.Drawing;
+using DocumentFormat.OpenXml.Drawing.Diagrams;
 using DocumentFormat.OpenXml.Math;
 using DocumentFormat.OpenXml.Office.SpreadSheetML.Y2023.MsForms;
 using DocumentFormat.OpenXml.Office2013.Drawing.ChartStyle;
@@ -1010,6 +1011,45 @@ namespace MEAI_GPT_API.Services
                     ClearContext(context);
                 }
 
+                // 🧑‍💼 Grade clarification: if we're waiting on the user to tell us
+                // their grade (Supervisor & above vs. below Supervisor), check whether
+                // this message answers it before doing anything else. A genuine grade
+                // change on topic-changed sessions is intentionally NOT reset by
+                // ClearContext above's topic check -- EmployeeGrade is a fact about the
+                // person, not the conversation topic, so it should persist across topics
+                // within the same session.
+                if (context.AwaitingGradeClarification)
+                {
+                    var resolvedGrade = _policyAnalysis.TryResolveGradeAnswer(question, allowNumberedOptions: true);
+                    if (resolvedGrade != null)
+                    {
+                        _logger.LogInformation($"🧑‍💼 Grade clarified as '{resolvedGrade}' for session {context.SessionId}");
+                        context.EmployeeGrade = resolvedGrade;
+                        context.AwaitingGradeClarification = false;
+                        question = context.PendingClarificationQuestion ?? question;
+                        context.PendingClarificationQuestion = null;
+                    }
+                    else
+                    {
+                        // Didn't recognize an answer -- re-ask rather than silently
+                        // proceeding with a guessed or blended answer.
+                        return CreateSuccessResponse(
+                          "Sorry, I didn't quite catch that. Could you confirm your position so I can give you the correct answer?\n\n1. Supervisor and above\n2. Below Supervisor",
+                          "Clarification Needed", stopwatch.ElapsedMilliseconds, 1.0, dbSession.SessionId);
+                    }
+                }
+                else if (string.IsNullOrEmpty(context.EmployeeGrade))
+                {
+                    // User may have volunteered their grade unprompted in the question
+                    // itself (e.g. "I'm a supervisor, what formalities..."). Only resolves
+                    // for the specific "and above"/"below" phrasing -- see
+                    // TryResolveGradeAnswer -- so a bare "supervisor" mention won't
+                    // silently lock in a guessed tier.
+                    var gradeFromQuestion = _policyAnalysis.TryResolveGradeAnswer(question, allowNumberedOptions: false);
+                    if (gradeFromQuestion != null)
+                        context.EmployeeGrade = gradeFromQuestion;
+                }
+
                 // Section detection before retrieval
                 var sectionQuery = await _policyAnalysis.DetectAndParseSection(question);
                 List<RelevantChunk> relevantChunks = new();
@@ -1038,6 +1078,30 @@ namespace MEAI_GPT_API.Services
                     }
                 }
 
+                // 🧑‍💼 If the retrieved content actually spans both grade tiers and we
+                // still don't know the user's grade, pause here and ask -- rather than
+                // generating an answer that guesses or blends both grades' provisions.
+                // Deliberately checked AFTER retrieval (not on the raw question) because
+                // whether a question is "grade-specific" depends on whether the matched
+                // POLICY differentiates by grade, not on the question's wording.
+                if (string.IsNullOrEmpty(context.EmployeeGrade) && _policyAnalysis.HasGradeSpecificContent(relevantChunks))
+                {
+                    _logger.LogInformation($"🧑‍💼 Grade-specific policy content detected for session {context.SessionId} — asking user to clarify position");
+                    context.AwaitingGradeClarification = true;
+                    context.PendingClarificationQuestion = question;
+                    return CreateSuccessResponse(
+                      "This policy has different provisions depending on your grade. Could you let me know your position?\n\n1. Supervisor and above\n2. Below Supervisor",
+                      "Clarification Needed", stopwatch.ElapsedMilliseconds, 1.0, dbSession.SessionId);
+                }
+
+                // Once known, fold the grade into the question text the model actually
+                // sees (both for retrieval-query context and generation) -- kept as a
+                // separate variable so conversation history/follow-up detection below
+                // still operate on the user's original wording, not this annotated form.
+                var questionForModel = string.IsNullOrEmpty(context.EmployeeGrade) ?
+                  question :
+                  $"{question}\n\n(For context: I am {context.EmployeeGrade}. Only use the policy provisions that apply to this grade; ignore provisions written for the other grade.)";
+
                 // Generate final answer
                 var parentId = context.History.Any() &&
                   dbSession.Metadata.TryGetValue("lastConversationId", out
@@ -1047,7 +1111,7 @@ namespace MEAI_GPT_API.Services
                   (int?)null;
 
                 var answer = await GenerateChatResponseAsync(
-                  question, genModel, context.History, relevantChunks, context, meaiInfo, plant);
+                  questionForModel, genModel, context.History, relevantChunks, context, meaiInfo, plant);
 
                 answer = CleanupContextReferences(answer);
 
@@ -4393,6 +4457,15 @@ namespace MEAI_GPT_API.Services
                 // post-truncation reorder.
                 var topicAnchors = _topicAnchorService.GetMatchingAnchors(query);
                 var anchorMatchedChunks = new List<RelevantChunk>();
+                // Tracked separately per source (Fix for router false positives, e.g.
+                // "Long Association Policy" surfacing on a resignation question): the
+                // deterministic sources (topic anchor, policy trigger) are hand-written
+                // or keyword-matched and high precision. DocumentRouterService below is
+                // an LLM guessing from title text alone and is meaningfully lower
+                // precision, so it needs to earn its guarantee separately, not share the
+                // same unconditional bucket.
+                var deterministicAnchorTexts = new HashSet<string>();
+                var routerOnlyAnchorTexts = new HashSet<string>();
                 foreach (var anchorText in topicAnchors)
                 {
                     var anchoredQuery = $"{query} {anchorText}";
@@ -4408,6 +4481,7 @@ namespace MEAI_GPT_API.Services
                     foreach (var c in best) c.RelevanceScore *= 1.15;
                     allChunks.AddRange(best);
                     anchorMatchedChunks.AddRange(best);
+                    foreach (var c in best) deterministicAnchorTexts.Add(c.Text);
                 }
 
                 // 2b. Trigger-anchor expansion search — same pattern as abbreviation
@@ -4429,6 +4503,7 @@ namespace MEAI_GPT_API.Services
                     foreach (var c in best) c.RelevanceScore *= 1.20;
                     allChunks.AddRange(best);
                     anchorMatchedChunks.AddRange(best);
+                    foreach (var c in best) deterministicAnchorTexts.Add(c.Text);
                 }
 
                 // 2c. Dynamic document router. TopicAnchorService above only
@@ -4448,6 +4523,14 @@ namespace MEAI_GPT_API.Services
                     foreach (var c in best) c.RelevanceScore *= 1.15;
                     allChunks.AddRange(best);
                     anchorMatchedChunks.AddRange(best);
+                    // Only "router-only" if a deterministic source (topic anchor / policy
+                    // trigger) didn't already vouch for this same chunk text -- deterministic
+                    // agreement should still count as the high-precision tier.
+                    foreach (var c in best)
+                    {
+                        if (!deterministicAnchorTexts.Contains(c.Text))
+                            routerOnlyAnchorTexts.Add(c.Text);
+                    }
                 }
 
                 // 2d. Cross-reference expansion. Found via a real incident: a
@@ -4625,11 +4708,22 @@ namespace MEAI_GPT_API.Services
                 List<RelevantChunk> SelectWithGuaranteedAnchors(List<RelevantChunk> candidatePool)
                 {
                     const double anchorGuaranteeFloor = 0.35; // below this, treat as noise even if an anchor search technically returned it
+                                                              // DocumentRouterService is an LLM guessing from title text alone --
+                                                              // meaningfully lower precision than the deterministic keyword/topic
+                                                              // matches (confirmed: it can return a topically-adjacent but wrong
+                                                              // title, e.g. "Long Association Policy" for a resignation question,
+                                                              // as its second pick alongside a correct one). Router-only matches
+                                                              // need a materially higher score before they earn a guaranteed slot,
+                                                              // rather than being treated identically to deterministic matches.
+                    const double routerOnlyGuaranteeFloor = 0.55;
                     const int maxChunksPerGuaranteedDocument = 3; // enough to cover multiple sections of the SAME correct document (e.g. No Dues form, annexures, notice period), not just one generic chunk
                     const int maxDistinctGuaranteedDocuments = 4; // raised from 2 after a real incident: a resignation question genuinely spans 3+ policies (ISMS, Settlement, Office Computers Usage via cross-reference) -- 2 was cutting off legitimately relevant documents, not just false positives
                     const int maxTotalGuaranteedSlots = 8; // raised proportionally with maxDistinctGuaranteedDocuments above
 
                     var dedupedAnchorTexts = new HashSet<string>(anchorMatchedChunks.Select(c => c.Text));
+
+                    double FloorFor(RelevantChunk c) =>
+                      routerOnlyAnchorTexts.Contains(c.Text) ? routerOnlyGuaranteeFloor : anchorGuaranteeFloor;
 
                     // Grouped by document, not a flat top-N overall: a flat
                     // cap picks by score across every anchor-matched
@@ -4640,7 +4734,7 @@ namespace MEAI_GPT_API.Services
                     // anchor, instead of surfacing enough of the right
                     // document's actual content to answer the question.
                     var guaranteed = candidatePool
-                      .Where(c => dedupedAnchorTexts.Contains(c.Text) && c.RelevanceScore >= anchorGuaranteeFloor)
+                      .Where(c => dedupedAnchorTexts.Contains(c.Text) && c.RelevanceScore >= FloorFor(c))
                       .GroupBy(c => c.Source)
                       .OrderByDescending(g => g.Max(c => c.RelevanceScore)) // prioritize whichever matched document scored highest overall
                       .Take(maxDistinctGuaranteedDocuments)
@@ -4653,7 +4747,15 @@ namespace MEAI_GPT_API.Services
                     // the guarantee only holds until reranking runs, then
                     // gets silently discarded by the cross-encoder's
                     // independent judgment (confirmed in production logs).
-                    foreach (var c in guaranteed) c.IsAnchorGuaranteed = true;
+                    // AnchorSource records WHICH tier granted the slot, so
+                    // RerankerService can keep treating the two tiers
+                    // differently rather than flattening the distinction
+                    // right after this method returns.
+                    foreach (var c in guaranteed)
+                    {
+                        c.IsAnchorGuaranteed = true;
+                        c.AnchorSource = routerOnlyAnchorTexts.Contains(c.Text) ? "DocumentRouter" : "Deterministic";
+                    }
 
                     var remainingSlots = maxResults - guaranteed.Count;
                     var guaranteedTexts = new HashSet<string>(guaranteed.Select(c => c.Text));

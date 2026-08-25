@@ -159,8 +159,31 @@ namespace MEAI_GPT_API.Service
             // down again, defeating the point of widening it there.
             const int maxGuaranteedSlots = 8;
 
+            // DocumentRouterService-sourced anchors (AnchorSource ==
+            // "DocumentRouter") are an LLM guess from title text alone --
+            // lower precision than the deterministic topic-anchor/policy-
+            // trigger matches. They shouldn't get the same unconditional
+            // pass through the cross-encoder reranker: if the reranker
+            // (which actually reads the chunk content against the query,
+            // unlike the title-only router) scores one of these low, that's
+            // real signal the router's guess was wrong -- e.g. "Long
+            // Association Policy" scoring low against a resignation
+            // question -- and it should lose its slot instead of being
+            // shielded from that judgment. Deterministic anchors keep the
+            // original unconditional guarantee.
+            const double routerAnchorMinRerankScore = 0.3;
+
+            bool ClearsGuaranteeBar(RelevantChunk c)
+            {
+                if (c.AnchorSource != "DocumentRouter") return true; // deterministic: unconditional, as before
+                // No rerank score available (reranker call failed/skipped) --
+                // fall back to trusting the upstream guarantee rather than
+                // silently dropping it.
+                return !c.RerankScore.HasValue || c.RerankScore.Value >= routerAnchorMinRerankScore;
+            }
+
             var guaranteed = chunks
-                .Where(c => c.IsAnchorGuaranteed)
+                .Where(c => c.IsAnchorGuaranteed && ClearsGuaranteeBar(c))
                 .OrderByDescending(scoreSelector)
                 .Take(Math.Min(maxGuaranteedSlots, topK))
                 .ToList();

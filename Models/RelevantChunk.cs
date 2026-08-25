@@ -37,6 +37,22 @@
         /// </summary>
         public bool IsAnchorGuaranteed { get; set; } = false;
 
+        /// <summary>
+        /// Which mechanism granted IsAnchorGuaranteed: "TopicAnchor" or
+        /// "PolicyTrigger" (deterministic keyword matches, high precision)
+        /// vs "DocumentRouter" (an LLM guessing from title text alone,
+        /// lower precision -- confirmed in production to occasionally
+        /// return a topically-adjacent but wrong title, e.g. "Long
+        /// Association Policy" for a resignation question). Downstream
+        /// code should not treat these two tiers identically: a
+        /// DocumentRouter-sourced guarantee should still have to clear a
+        /// higher bar (score floor, reranker agreement) than a
+        /// deterministic one. Null when IsAnchorGuaranteed is false, or
+        /// when multiple sources agreed (deterministic wins in that case --
+        /// see SelectWithGuaranteedAnchors in DynamicRagService).
+        /// </summary>
+        public string? AnchorSource { get; set; }
+
         // ✅ NEW: populated from ChromaDB metadata in ParseSearchResults so
         // API consumers can cite the actual section/annexure a chunk came
         // from, not just the source filename.

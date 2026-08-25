@@ -318,6 +318,95 @@ namespace MEAI_GPT_API.Service.Models
 
             return topics;
         }
+        // ─────────────────────────────────────────────────────────────────
+        // Grade/position clarification (Supervisor & above vs. below
+        // Supervisor / Direct vs. Indirect category).
+        //
+        // Several MEAI policies (e.g. the Settlement Policy's Annexure-I
+        // "Indirect Category, Jr. Supervisor & above" vs Annexure-II
+        // "Direct Category, below Jr. Supervisor") define materially
+        // different provisions per employee grade. Answering with only one
+        // grade's provisions (or silently blending both) risks giving a
+        // Direct-category employee the wrong entitlement/process. Instead
+        // of guessing, DynamicRagService uses these two methods to detect
+        // when retrieved chunks span both grades and pause to ask the user
+        // which one applies, before generating the actual answer.
+        // ─────────────────────────────────────────────────────────────────
+
+        private static readonly (string Label, string[] Patterns)[] GradeTiers = new[]
+        {
+            ("Supervisor and above", new[] {
+                @"jr\.?\s*supervisor\s*(&|and)\s*above",
+                @"supervisor\s*(&|and)\s*above",
+                @"indirect\s*category",
+            }),
+            ("Below Supervisor", new[] {
+                @"below\s*jr\.?\s*supervisor",
+                @"below\s*supervisor",
+                @"direct\s*category",
+            }),
+        };
+
+        /// <summary>
+        /// True when the retrieved chunks contain provisions for BOTH grade
+        /// tiers (e.g. a chunk mentioning "Jr. Supervisor & above" AND
+        /// another mentioning "below Jr. Supervisor"/"Direct category") --
+        /// i.e. the answer genuinely depends on which grade the user is,
+        /// not just background noise from an unrelated chunk.
+        /// </summary>
+        public bool HasGradeSpecificContent(List<RelevantChunk> chunks)
+        {
+            if (chunks == null || !chunks.Any()) return false;
+
+            var combinedText = string.Join(" ", chunks.Select(c => c.Text)).ToLowerInvariant();
+
+            bool tierAPresent = GradeTiers[0].Patterns.Any(p => Regex.IsMatch(combinedText, p, RegexOptions.IgnoreCase));
+            bool tierBPresent = GradeTiers[1].Patterns.Any(p => Regex.IsMatch(combinedText, p, RegexOptions.IgnoreCase));
+
+            return tierAPresent && tierBPresent;
+        }
+
+        /// <summary>
+        /// Attempts to read an employee grade out of free text. Returns null
+        /// if no grade is recognizable, so the caller knows to keep asking
+        /// (or move on) rather than guessing.
+        /// </summary>
+        /// <param name="text">The user's message.</param>
+        /// <param name="allowNumberedOptions">
+        /// Only pass true when this text is a direct reply to the "1.
+        /// Supervisor and above / 2. Below Supervisor" clarification
+        /// question we actually asked. When false (e.g. scanning a fresh,
+        /// unprompted question for a volunteered grade), a bare "1" or "2"
+        /// is NOT treated as a grade answer -- otherwise any question that
+        /// happens to start with a digit (or a user just typing "1" with no
+        /// clarification pending) would silently lock in a guessed grade
+        /// and then get answered using that digit as if it were the actual
+        /// question.
+        /// </param>
+        public string? TryResolveGradeAnswer(string text, bool allowNumberedOptions = false)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return null;
+            var trimmed = text.Trim();
+
+            if (allowNumberedOptions)
+            {
+                if (Regex.IsMatch(trimmed, @"^\s*1\b")) return GradeTiers[0].Label;
+                if (Regex.IsMatch(trimmed, @"^\s*2\b")) return GradeTiers[1].Label;
+            }
+
+            var lower = trimmed.ToLowerInvariant();
+            foreach (var tier in GradeTiers)
+            {
+                if (tier.Patterns.Any(p => Regex.IsMatch(lower, p, RegexOptions.IgnoreCase)))
+                    return tier.Label;
+            }
+
+            // Plain "supervisor" (without "below"/"and above") on its own is
+            // ambiguous on purpose -- do NOT guess a tier from it. Only the
+            // more specific patterns above should resolve a grade.
+            return null;
+        }
+
         public bool CheckPolicyCoverage(List<RelevantChunk> chunks, string question)
         {
             if (!chunks.Any())

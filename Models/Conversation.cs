@@ -46,6 +46,20 @@ namespace MEAI_GPT_API.Models
             public string Plant { get; set; } = "Centralized";
             public DateTime CreatedAt { get; set; } = DateTime.Now;
             public string LastTopicAnchor { get; set; } = ""; // 🆕 track root of current topic
+
+            // 🆕 Supervisor-and-above vs. below-Supervisor clarification flow.
+            // Set when a policy answer genuinely depends on the user's grade
+            // and we've asked them to specify it instead of guessing or
+            // blending both grades' provisions together.
+            public bool AwaitingGradeClarification { get; set; } = false;
+            public string? PendingClarificationQuestion { get; set; }
+            /// <summary>
+            /// Once known for this session, applied to every subsequent
+            /// question so the user isn't re-asked every turn. "Supervisor
+            /// and above" or "Below Supervisor" (see PolicyAnalysisService.
+            /// TryResolveGradeAnswer) -- null until resolved.
+            /// </summary>
+            public string? EmployeeGrade { get; set; }
         }
 
         public class ConversationTurn

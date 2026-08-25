@@ -1105,21 +1105,41 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
 
             prompt.AppendLine("📋 RESPONSE FORMAT:");
             prompt.AppendLine();
-            prompt.AppendLine("**Structure your answer as:**");
-            prompt.AppendLine("1. Direct answer to the question");
-            prompt.AppendLine("2. Main policy provisions");
-            prompt.AppendLine("3. Relevant sections and subsections");
-            prompt.AppendLine("4. Annexures / Appendices / Forms / Sections / Clauses belonging to the policy");
-            prompt.AppendLine("5. Supporting details from context");
-            prompt.AppendLine("6. Source citations [Source: Document Name]");
-            prompt.AppendLine("7. Related information (only if applicable)");
+            // Formatting folded directly into each structure item (as literal
+            // ## / ** syntax) rather than kept as a separate abstract bullet
+            // list further down. Confirmed in practice: the model reliably
+            // follows this numbered structure (it was even using the item
+            // text verbatim as its own section labels), but was dropping a
+            // separate "Formatting:" list placed after it -- by that point
+            // in a long system prompt, an abstract rule with no example is a
+            // much weaker signal than a rule embedded directly in the thing
+            // it's already committed to producing.
+            prompt.AppendLine("**Structure your answer using these exact markdown headings, in order:**");
+            prompt.AppendLine("1. `## Direct Answer` — the direct answer to the question");
+            prompt.AppendLine("2. `## Main Policy Provisions` — bold the policy name and section numbers");
+            prompt.AppendLine("3. `## Relevant Sections and Subsections`");
+            prompt.AppendLine("4. `## Annexures / Forms` — belonging to the policy");
+            prompt.AppendLine("5. `## Supporting Details`");
+            prompt.AppendLine("6. `## Sources` — [Source: Document Name]");
+            prompt.AppendLine("7. `## Related Information` (only if applicable)");
+            prompt.AppendLine();
+            prompt.AppendLine("**Within every section: use `##` for the heading itself, `-` for list items,");
+            prompt.AppendLine("and wrap policy names, section/annexure numbers, and other key terms in `**bold**`.");
+            prompt.AppendLine("This applies to EVERY section above, not just the first one.**");
             prompt.AppendLine();
 
-            prompt.AppendLine("**Formatting:**");
-            prompt.AppendLine("- Use clear headings (##)");
-            prompt.AppendLine("- Use bullet points for lists");
-            prompt.AppendLine("- Bold important terms");
-            prompt.AppendLine("- Always cite sources");
+            prompt.AppendLine("**WORKED EXAMPLE (match this exact style, not this exact content):**");
+            prompt.AppendLine(@"
+## Direct Answer
+A resigned employee must complete a **Full & Final Settlement** as per the **Settlement Policy**.
+
+## Main Policy Provisions
+- **Settlement Policy** (Section **3.1**): effective from [date]
+- Employee must submit the **No Dues Certificate** on the last working day
+
+## Sources
+[Source: Settlement Policy.docx]
+");
             prompt.AppendLine();
 
             prompt.AppendLine("═══════════════════════════════════════════════════════════════");
