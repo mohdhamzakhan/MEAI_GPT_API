@@ -14,6 +14,7 @@ namespace MEAI_GPT_API.Data
 
         public DbSet<ConversationEntry> ConversationEntries { get; set; }
         public DbSet<ConversationSession> ConversationSessions { get; set; }
+        public DbSet<GroundingFailure> GroundingFailures { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -71,6 +72,31 @@ namespace MEAI_GPT_API.Data
 
                 entity.Property(e => e.CorrectedAnswer)
                       .HasColumnType("TEXT");
+            });
+
+            // GroundingFailure configuration
+            modelBuilder.Entity<GroundingFailure>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+
+                entity.HasIndex(e => e.CreatedAt)
+                      .HasDatabaseName("IX_GroundingFailure_CreatedAt");
+
+                entity.HasIndex(e => e.Plant)
+                      .HasDatabaseName("IX_GroundingFailure_Plant");
+
+                entity.HasIndex(e => e.ResolvedByCorrection)
+                      .HasDatabaseName("IX_GroundingFailure_Resolved");
+
+                entity.Property(e => e.Question)
+                      .HasColumnType("TEXT");
+
+                entity.Property(e => e.GroundingReason)
+                      .HasColumnType("TEXT");
+
+                entity.Property(e => e.RetrievedSourcesJson)
+                      .HasColumnType("TEXT")
+                      .HasDefaultValue("[]");
             });
 
             // ConversationSession configuration

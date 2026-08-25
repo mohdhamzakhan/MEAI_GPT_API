@@ -107,6 +107,7 @@ namespace MEAI_GPT_API.Services
         private readonly SelfVerifier _selfVerifier;
         private readonly AgentDecisionLogger _agentLogger;
         private readonly PolicyTriggerService _policyTriggerService;
+        private readonly LearnedTriggerService _learnedTriggerService;
 
         private readonly QueryIntentAnalyzer _queryIntentAnalyzer;
         public DynamicRagService(
@@ -145,7 +146,8 @@ namespace MEAI_GPT_API.Services
           ConversationHistoryService historyService,
           AppreciatedAnswerStore appreciatedAnswerStore,
           AnnexureLinkService annexureLinkService,
-          PolicyTriggerService policyTriggerService)
+          PolicyTriggerService policyTriggerService,
+          LearnedTriggerService learnedTriggerService)
         {
             _modelManager = modelManager;
             _collectionManager = collectionManager;
@@ -192,6 +194,7 @@ namespace MEAI_GPT_API.Services
 
             RegisterAgentTools();
             _policyTriggerService = policyTriggerService;
+            _learnedTriggerService = learnedTriggerService;
         }
 
         //For Agentic AI
@@ -2884,7 +2887,81 @@ namespace MEAI_GPT_API.Services
             {
                 await LoadCorrectionCacheAsync();
             }
+
+            // ============================
+            // LEARN: promote this correction into a permanent retrieval anchor
+            // ============================
+            // Everything above only helps if the EXACT same question is asked
+            // again (correction-cache replay). This step is what actually
+            // teaches retrieval: infer which document the corrected answer
+            // actually came from, and bind the original question to it
+            // permanently via LearnedTriggerService — so paraphrases and
+            // future occurrences get routed correctly even without an exact
+            // text/embedding match on the old (wrong) answer.
+            try
+            {
+                var correctSourceFile = await InferCorrectSourceDocumentAsync(correctedAnswer, model);
+
+                if (!string.IsNullOrWhiteSpace(correctSourceFile))
+                {
+                    await _learnedTriggerService.PromoteAsync(question, correctSourceFile);
+
+                    // Close the loop with failure tracking: any prior refusal
+                    // for this same question is now resolved, so the admin
+                    // failure view doesn't keep showing it as an open gap.
+                    var resolvedCount = await _conversationStorage.ResolveGroundingFailuresForQuestionAsync(question);
+                    if (resolvedCount > 0)
+                    {
+                        _logger.LogInformation(
+                          "✅ Resolved {Count} prior grounding failure(s) for this question via correction",
+                          resolvedCount);
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning(
+                      "Could not infer a source document for correction on '{Question}' — learned trigger not created. " +
+                      "Retrieval-level learning is skipped for this correction; correction-cache replay still applies.",
+                      question);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Never let the learning step break the correction save itself —
+                // the DB save and cache update above already succeeded.
+                _logger.LogError(ex, "Failed to promote correction to learned trigger for '{Question}'", question);
+            }
         }
+
+        // Best-effort inference of which document a corrected answer actually
+        // came from, since the correction UI doesn't (yet) ask the human to
+        // pick a source explicitly. Embeds the corrected TEXT itself (not the
+        // original question) and searches ChromaDB — the corrected answer is
+        // presumably close to the real source document's actual wording,
+        // which is a stronger signal than re-running the same search that
+        // produced the wrong retrieval in the first place.
+        private async Task<string?> InferCorrectSourceDocumentAsync(string correctedAnswer, string modelName)
+        {
+            if (string.IsNullOrWhiteSpace(correctedAnswer))
+                return null;
+
+            var embeddingModel = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
+            if (embeddingModel == null)
+                return null;
+
+            // Reuses SearchGeneral's plant-agnostic path is not available here,
+            // so search without a plant filter isn't an option — corrections
+            // are inherently plant-scoped via the session, but at this call
+            // site we don't have that context threaded through. Searching
+            // "Centralized" first, falling back to a broader search, keeps
+            // this from requiring a larger refactor of ApplyCorrectionAsync's
+            // signature just for this best-effort inference step.
+            var candidates = await SearchChromaDBAsync(correctedAnswer, embeddingModel, 3, "Centralized");
+            var best = candidates.OrderByDescending(c => c.Similarity).FirstOrDefault();
+
+            return best?.Similarity >= 0.5 ? best.Source : null;
+        }
+
         // UPDATE CheckCorrectionsAsync to work with both MEAI and non-MEAI queries
         private async Task<CorrectionEntry?> CheckCorrectionsAsync(string question)
         {
@@ -4510,6 +4587,32 @@ namespace MEAI_GPT_API.Services
                     foreach (var c in best) c.RelevanceScore *= 1.20;
                     allChunks.AddRange(best);
                     anchorMatchedChunks.AddRange(best);
+                    foreach (var c in best) deterministicAnchorTexts.Add(c.Text);
+                }
+
+                // 2b-ii. Learned-correction trigger expansion — same pattern as 2b
+                // above, but sourced from LearnedTriggerService: human-confirmed
+                // corrections, not LLM-generated trigger phrases. Boosted higher
+                // (1.30 vs 1.20) than the auto-generated trigger match, since a
+                // human explicitly confirmed this exact question was answered
+                // wrong before and confirmed the right document — this is the
+                // strongest signal available, stronger than raw similarity,
+                // stronger than the auto-generated trigger map, and stronger than
+                // the document router's LLM guess (which has been observed to
+                // fail outright on some queries).
+                var learnedMatches = _learnedTriggerService.MatchTriggers(query);
+                foreach (var (anchorText, sourceFile) in learnedMatches)
+                {
+                    var chunks = await SearchChromaDBAsync(anchorText, embeddingModel, 6, plant);
+                    var best = chunks.Take(4).ToList();
+                    foreach (var c in best) c.RelevanceScore *= 1.30;
+                    allChunks.AddRange(best);
+                    anchorMatchedChunks.AddRange(best);
+                    // ✅ Registered as deterministic, same tier as topic anchors and
+                    // policy triggers (in fact stronger — human-confirmed, not
+                    // keyword/LLM-matched) — so if DocumentRouterService's guess
+                    // disagrees with a learned correction on the same chunk, the
+                    // router doesn't get to claim it as a "router-only" pick.
                     foreach (var c in best) deterministicAnchorTexts.Add(c.Text);
                 }
 
@@ -8018,6 +8121,28 @@ namespace MEAI_GPT_API.Services
                 finalAnswer = $"I want to make sure I give you accurate information, but I'm not confident " +
                 $"the answer I generated is fully grounded in {plant}'s policy documents. " +
                 $"Please contact your supervisor or HR department for clarification on this matter.";
+
+                // ============================
+                // TRACK: log this refusal for pattern analysis
+                // ============================
+                // Fire-and-forget — logging a failure must never delay or break
+                // the actual refusal already being streamed to the user. This is
+                // the data source for the admin failure-review endpoint, and for
+                // ResolveGroundingFailuresForQuestionAsync to auto-close once a
+                // human correction comes in for the same question later.
+                var groundingReason = verification.Metadata.TryGetValue("grounding_reason", out
+                    var gr2) ?
+                  gr2?.ToString() ?? "" : "";
+
+                _ = _conversationStorage.LogGroundingFailureAsync(new GroundingFailure
+                {
+                    Question = question,
+                    Plant = plant,
+                    RetrievedSourcesJson = JsonSerializer.Serialize(finalChunks.Select(c => c.Source).Distinct()),
+                    GroundingReason = groundingReason,
+                    Confidence = verification.OverallConfidence,
+                    GenerationModel = genModel.Name ?? ""
+                });
             }
 
             // ============================

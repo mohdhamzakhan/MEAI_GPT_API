@@ -7,14 +7,17 @@ namespace MEAI_GPT_API.Service.Interface
     {
         Task SaveConversationAsync(ConversationEntry entry);
         Task<ConversationEntry?> GetConversationAsync(int id);
-        Task<List<ConversationEntry>> GetConversationAsync(string filter, int limit=1000);
+        Task<List<ConversationEntry>> GetConversationAsync(string filter, int limit = 1000);
 
         Task<List<ConversationEntry>> GetSessionConversationsAsync(string sessionId, int limit = 50);
         Task<ConversationSession> GetOrCreateSessionAsync(string sessionId, string? userId = null, string? plant = null);
         Task UpdateSessionAsync(ConversationSession session);
         Task MarkAsAppreciatedAsync(int conversationId);
         Task SaveCorrectionAsync(int conversationId, string correctedAnswer);
-        Task<List<ConversationSearchResult>> SearchSimilarConversationsAsync(List<float> queryEmbedding,string plant, double threshold = 0.7, int limit = 10);
+        Task LogGroundingFailureAsync(GroundingFailure failure);
+        Task<int> ResolveGroundingFailuresForQuestionAsync(string question);
+        Task<List<GroundingFailure>> GetGroundingFailuresAsync(bool includeResolved = false, int limit = 200);
+        Task<List<ConversationSearchResult>> SearchSimilarConversationsAsync(List<float> queryEmbedding, string plant, double threshold = 0.7, int limit = 10);
         Task<List<ConversationEntry>> GetAppreciatedAnswersAsync(string? topicTag = null, int limit = 100);
         Task<ConversationStats> GetConversationStatsAsync();
         Task CleanupOldSessionsAsync(TimeSpan maxAge);

@@ -1002,6 +1002,44 @@ namespace MEAI_GPT_API.Controller
             return Ok();
         }
 
+        // Read-only review surface for the failure-tracking piece of the
+        // self-improvement pipeline: recurring grounding failures (verified
+        // refusals, not raw exceptions) grouped so a human can spot patterns
+        // -- e.g. the same wrong document winning retrieval repeatedly for a
+        // given topic -- and go fix the underlying corpus/routing gap, or
+        // submit a correction that gets auto-promoted into a learned trigger.
+        [HttpGet("admin/grounding-failures")]
+        public async Task<IActionResult> GetGroundingFailures(
+            [FromQuery] bool includeResolved = false,
+            [FromQuery] int limit = 200)
+        {
+            var failures = await _conversationStorage.GetGroundingFailuresAsync(includeResolved, limit);
+
+            var grouped = failures
+                .GroupBy(f => f.Question.Trim().ToLowerInvariant())
+                .Select(g => new
+                {
+                    question = g.First().Question,
+                    occurrences = g.Count(),
+                    plants = g.Select(f => f.Plant).Distinct(),
+                    lastSeenAt = g.Max(f => f.CreatedAt),
+                    averageConfidence = g.Average(f => f.Confidence),
+                    mostRecentReason = g.OrderByDescending(f => f.CreatedAt).First().GroundingReason,
+                    resolved = g.All(f => f.ResolvedByCorrection)
+                })
+                .OrderByDescending(x => x.occurrences)
+                .ThenByDescending(x => x.lastSeenAt)
+                .ToList();
+
+            return Ok(new
+            {
+                totalFailures = failures.Count,
+                distinctQuestions = grouped.Count,
+                recurring = grouped.Where(g => g.occurrences > 1).ToList(),
+                all = grouped
+            });
+        }
+
         [HttpGet("rag-status")]
         public async Task<IActionResult> GetRagStatus()
         {

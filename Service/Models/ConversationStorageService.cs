@@ -182,6 +182,56 @@ namespace MEAI_GPT_API.Services
             }
         }
 
+        public async Task LogGroundingFailureAsync(GroundingFailure failure)
+        {
+            using var _context = await _contextFactory.CreateDbContextAsync();
+            try
+            {
+                _context.GroundingFailures.Add(failure);
+                await _context.SaveChangesAsync();
+                _logger.LogInformation("📉 Logged grounding failure for question: {Question}", failure.Question);
+            }
+            catch (Exception ex)
+            {
+                // Failure-logging must never break the actual response path —
+                // the refusal has already been decided and streamed by the
+                // time this is called (see fire-and-forget call site).
+                _logger.LogError(ex, "Failed to log grounding failure for question: {Question}", failure.Question);
+            }
+        }
+
+        public async Task<int> ResolveGroundingFailuresForQuestionAsync(string question)
+        {
+            using var _context = await _contextFactory.CreateDbContextAsync();
+            var normalized = question.Trim();
+
+            var openFailures = await _context.GroundingFailures
+                .Where(f => !f.ResolvedByCorrection && f.Question == normalized)
+                .ToListAsync();
+
+            if (!openFailures.Any())
+                return 0;
+
+            foreach (var f in openFailures) f.ResolvedByCorrection = true;
+            await _context.SaveChangesAsync();
+
+            return openFailures.Count;
+        }
+
+        public async Task<List<GroundingFailure>> GetGroundingFailuresAsync(bool includeResolved = false, int limit = 200)
+        {
+            using var _context = await _contextFactory.CreateDbContextAsync();
+            var query = _context.GroundingFailures.AsQueryable();
+
+            if (!includeResolved)
+                query = query.Where(f => !f.ResolvedByCorrection);
+
+            return await query
+                .OrderByDescending(f => f.CreatedAt)
+                .Take(limit)
+                .ToListAsync();
+        }
+
         public async Task<List<ConversationSearchResult>> SearchSimilarConversationsAsync(
             List<float> queryEmbedding,
             string plant,
