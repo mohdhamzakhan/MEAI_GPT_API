@@ -205,9 +205,16 @@ builder.Services.AddSingleton<SelfVerifier>();
 //For Agentic AI
 builder.Services.AddScoped<PolicySearchTool>();
 builder.Services.AddScoped<RerankTool>();
+builder.Services.AddScoped<LearnedTriggerService>(sp =>
+{
+    var logger = sp.GetRequiredService<ILogger<LearnedTriggerService>>();
+    var configuration = sp.GetRequiredService<IConfiguration>();
 
-builder.Services.AddScoped<LearnedTriggerService>();
+    var filePath = configuration["LearnedTriggers:FilePath"]
+                   ?? Path.Combine("Data", "learned-triggers.json");
 
+    return new LearnedTriggerService(logger, filePath);
+});
 
 
 
