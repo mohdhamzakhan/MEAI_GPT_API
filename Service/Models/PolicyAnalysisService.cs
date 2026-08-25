@@ -407,6 +407,141 @@ namespace MEAI_GPT_API.Service.Models
             return null;
         }
 
+        // ─────────────────────────────────────────────────────────────────
+        // SELF-RECOGNITION STRUCTURE (generic, topic-independent)
+        //
+        // Earlier version of this used one hand-authored ScenarioDefinition
+        // per topic (Death, Illness, Childbirth...) with its own patterns
+        // and section titles. That doesn't scale to 131 policies -- it'd
+        // mean authoring a new entry every time the same self-vs-family
+        // confusion shows up under a different policy topic.
+        //
+        // Generalized instead: the underlying question is never really
+        // "which policy topic is this" -- it's always the same two generic
+        // questions, independent of topic:
+        //   1. Does the QUESTION refer to the employee themselves, or to a
+        //      named family member? (DetectQuerySubjectScope)
+        //   2. Does a given CHUNK's content refer to the employee
+        //      themselves, or to a named family member? (ClassifyChunkSubjectScope)
+        // A chunk is only dropped when both are confidently known AND they
+        // disagree -- e.g. Bereavement Leave content (family-scoped) showing
+        // up for "what if I die" (self-scoped). No per-topic authoring
+        // needed; this applies uniformly across all 131 policies.
+        // ─────────────────────────────────────────────────────────────────
+
+        public enum SubjectScope { Self, FamilyMember }
+
+        // Generic family-member vocabulary -- not tied to any one policy
+        // topic. Add a term here once and it applies everywhere (death,
+        // illness, marriage, education assistance, travel, etc.), rather
+        // than once per scenario.
+        private static readonly string[] FamilyMemberNouns = new[]
+        {
+            "father", "mother", "dad", "mom", "wife", "husband", "spouse",
+            "son", "daughter", "child", "children", "kids", "parent", "parents",
+            "brother", "sister", "sibling", "siblings", "in-law", "in law",
+            "dependent", "dependents", "family member", "family members",
+            "next of kin", "relative", "relatives", "guardian",
+        };
+
+        private static string FamilyNounPattern(string noun) => Regex.Escape(noun).Replace(@"\ ", @"\s+");
+
+        /// <summary>
+        /// Does this free text (a question, or a chunk's content) refer to
+        /// the employee themselves, or to a named family member? Purely
+        /// generic/lexical -- works the same regardless of WHAT event or
+        /// policy topic is being discussed.
+        /// </summary>
+        /// <param name="text">Question text or chunk text/section title.</param>
+        /// <param name="isQuery">
+        /// True when classifying the user's own question (uses first-person
+        /// phrasing like "if I..."); false when classifying policy chunk
+        /// content (uses third-person phrasing like "the employee...").
+        /// </param>
+        public SubjectScope? DetectSubjectScope(string text, bool isQuery)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return null;
+            var lower = text.ToLowerInvariant();
+
+            // A named family member, possessively tied to the employee
+            // ("my father", "the employee's spouse", "his wife") is a
+            // strong, topic-independent signal this is about that family
+            // member's event, not the employee's own -- checked first since
+            // it's more specific than a bare first-person pronoun.
+            bool familyMemberNamed = FamilyMemberNouns.Any(n =>
+                Regex.IsMatch(lower, $@"\b(my|his|her|their|the\s+employee'?s?)\s+{FamilyNounPattern(n)}\b"));
+            if (familyMemberNamed) return SubjectScope.FamilyMember;
+
+            // Standalone words already common to bereavement/family-event
+            // provisions regardless of exact phrasing.
+            if (Regex.IsMatch(lower, @"\bbereavement\b|\blast\s+rites\b"))
+                return SubjectScope.FamilyMember;
+
+            if (isQuery)
+            {
+                // First-person phrasing referring to something happening TO
+                // the speaker, without a family member named alongside it.
+                if (Regex.IsMatch(lower, @"\bif\s+i\b|\bwhen\s+i\b|\bafter\s+i\b|\bmy\s+own\b|\bi\s+(die|resign|retire|pass\s+away|am\s+hospitalized|get\s+married)\b|\bmyself\b|\bmy\s+death\b"))
+                    return SubjectScope.Self;
+            }
+            else
+            {
+                // Third-person phrasing describing the employee's own event
+                // in policy language.
+                if (Regex.IsMatch(lower, @"\bemployee'?s\s+own\b|\bdeath\s+in\s+service\b|\bthe\s+employee\s+(dies|resigns|retires)\b|\bdeceased\s+employee\b|\bemployee\s+himself\b|\bemployee\s+herself\b"))
+                    return SubjectScope.Self;
+            }
+
+            return null; // no confident signal either way -- leave untouched
+        }
+
+        /// <summary>
+        /// Classifies a retrieved chunk's subject scope from its section
+        /// title and content (third-person policy language).
+        /// </summary>
+        public SubjectScope? ClassifyChunkSubjectScope(RelevantChunk chunk)
+        {
+            var combined = $"{chunk.SectionTitle} {chunk.Text}";
+            return DetectSubjectScope(combined, isQuery: false);
+        }
+
+        /// <summary>
+        /// Removes chunks whose content is confidently classified as the
+        /// OTHER subject scope than the question's (self vs. family member)
+        /// -- e.g. Bereavement Leave content surfacing on "what if I die".
+        /// Generic across every policy topic; no per-scenario configuration.
+        /// A chunk is only ever dropped when BOTH sides are confidently
+        /// classified and they disagree -- anything ambiguous is left in,
+        /// since over-filtering loses real answers while under-filtering
+        /// just leaves one extra (ideally prompt-caught) chunk in context.
+        /// </summary>
+        public List<RelevantChunk> FilterScenarioMismatchedChunks(List<RelevantChunk> chunks, string question)
+        {
+            if (chunks == null || !chunks.Any()) return chunks ?? new();
+
+            var queryScope = DetectSubjectScope(question, isQuery: true);
+            if (queryScope == null) return chunks; // question doesn't clearly say whose event it is -- don't touch anything
+
+            var kept = new List<RelevantChunk>();
+            foreach (var c in chunks)
+            {
+                var chunkScope = ClassifyChunkSubjectScope(c);
+                bool mismatched = chunkScope != null && chunkScope != queryScope;
+                if (mismatched)
+                {
+                    _logger.LogInformation(
+                        "🪦 Dropping chunk with section '{Title}' from {Source} — classified as {ChunkScope}, but question is about {QueryScope}",
+                        c.SectionTitle, c.Source, chunkScope, queryScope);
+                }
+                else
+                {
+                    kept.Add(c);
+                }
+            }
+
+            return kept;
+        }
+
         public bool CheckPolicyCoverage(List<RelevantChunk> chunks, string question)
         {
             if (!chunks.Any())

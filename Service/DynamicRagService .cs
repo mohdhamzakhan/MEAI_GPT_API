@@ -1,6 +1,5 @@
 ﻿// Services/DynamicRagService.cs
 using DocumentFormat.OpenXml.Drawing;
-using DocumentFormat.OpenXml.Drawing.Diagrams;
 using DocumentFormat.OpenXml.Math;
 using DocumentFormat.OpenXml.Office.SpreadSheetML.Y2023.MsForms;
 using DocumentFormat.OpenXml.Office2013.Drawing.ChartStyle;
@@ -1077,6 +1076,14 @@ namespace MEAI_GPT_API.Services
                           topK: 5);
                     }
                 }
+
+                // 🪦 Drop chunks that describe the OTHER death scenario than the one
+                // asked about (employee's own death vs. a family member's death) before
+                // anything downstream sees them. Done here, not as a prompt instruction,
+                // so a mismatched chunk (e.g. Bereavement Leave surfacing on "what if I
+                // die") is structurally unable to reach the model, rather than relying on
+                // the model to notice and exclude it on its own.
+                relevantChunks = _policyAnalysis.FilterScenarioMismatchedChunks(relevantChunks, question);
 
                 // 🧑‍💼 If the retrieved content actually spans both grade tiers and we
                 // still don't know the user's grade, pause here and ask -- rather than

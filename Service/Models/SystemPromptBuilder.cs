@@ -964,6 +964,22 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
             prompt.AppendLine("   - Only include the other policy if the user explicitly asks to compare them");
             prompt.AppendLine();
 
+            prompt.AppendLine("8. **CHECK WHO A PROVISION APPLIES TO AND UNDER WHAT EVENT — NOT JUST THE TOPIC**");
+            prompt.AppendLine("   - A chunk can share the user's keywords (e.g. \"death\", \"family\") while actually");
+            prompt.AppendLine("     describing a DIFFERENT triggering event or a DIFFERENT person than the user");
+            prompt.AppendLine("     asked about. Before including any provision, check who it applies to (the");
+            prompt.AppendLine("     employee themselves, or a family member) and under what event (their own");
+            prompt.AppendLine("     death, a family member's death, their own resignation, a family member's");
+            prompt.AppendLine("     illness, etc.), and confirm it actually MATCHES the user's stated scenario");
+            prompt.AppendLine("   - Concrete example of the mistake to avoid: asked \"what if I die, what does my");
+            prompt.AppendLine("     family get\", do NOT include Bereavement Leave as if it were a benefit paid");
+            prompt.AppendLine("     out on the employee's own death — Bereavement Leave is leave granted TO the");
+            prompt.AppendLine("     (living) employee to attend to a FAMILY MEMBER'S death and last rites. It is");
+            prompt.AppendLine("     the wrong direction for that question and must be left out entirely");
+            prompt.AppendLine("   - If a retrieved chunk's applicable scenario doesn't match the user's, leave it");
+            prompt.AppendLine("     out of the answer rather than reworking it to sound like it fits");
+            prompt.AppendLine();
+
             prompt.AppendLine("═══════════════════════════════════════════════════════════════");
             prompt.AppendLine();
 
