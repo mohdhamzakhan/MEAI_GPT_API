@@ -1,5 +1,6 @@
 ﻿// Services/DynamicRagService.cs
 using DocumentFormat.OpenXml.Drawing;
+using DocumentFormat.OpenXml.Drawing.Diagrams;
 using DocumentFormat.OpenXml.Math;
 using DocumentFormat.OpenXml.Office.SpreadSheetML.Y2023.MsForms;
 using DocumentFormat.OpenXml.Office2013.Drawing.ChartStyle;
@@ -877,7 +878,7 @@ namespace MEAI_GPT_API.Services
           string plant,
           string? generationModel = null,
           string? embeddingModel = null,
-          int maxResults = 10,
+          int maxResults = 20,
           bool meaiInfo = true,
           string? sessionId = null,
           string? userId = null,
@@ -4888,7 +4889,23 @@ namespace MEAI_GPT_API.Services
 
                 List<RelevantChunk> uniqueChunks;
 
-                if (lastTurnSources != null && lastTurnSources.Any())
+                // ✅ CHANGED: strict scoping now requires the question to actually
+                // READ like a narrow continuation ("tell me more about...", "what
+                // about...", "also..."), not just the presence of any prior turn in
+                // the session. Previously this fired on every single follow-up
+                // question regardless of scope, which meant a genuinely broad
+                // question later in the same session ("what are all my travel-
+                // related benefits") got wrongly locked to just the one document
+                // the previous turn happened to use — capping the whole answer to
+                // 1-2 policies when it should have drawn from several. A broad
+                // question now falls through to SelectWithGuaranteedAnchors, which
+                // still gives the anchor document priority via its guaranteed-slot
+                // boost, but doesn't exclude every other relevant policy outright.
+                var isNarrowContinuation = lastTurnSources != null && lastTurnSources.Any() &&
+                  context?.History != null && context.History.Any() &&
+                  _conversationAnalysis.IsQuestionPatternContinuation(query, context);
+
+                if (isNarrowContinuation)
                 {
                     // ✅ STRICT anchor scoping: for a genuine follow-up, stay fully scoped
                     // to the document(s) that answered the previous turn. Only fall back
@@ -7775,7 +7792,7 @@ namespace MEAI_GPT_API.Services
           string plant,
           string? generationModel = null,
           string? embeddingModel = null,
-          int maxResults = 10,
+          int maxResults = 20,
           bool meaiInfo = true,
           string? sessionId = null,
           bool useReRanking = true,
