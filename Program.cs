@@ -206,6 +206,8 @@ builder.Services.AddSingleton<SelfVerifier>();
 builder.Services.AddScoped<PolicySearchTool>();
 builder.Services.AddScoped<RerankTool>();
 
+builder.Services.AddScoped<LearnedTriggerService>();
+
 
 
 
