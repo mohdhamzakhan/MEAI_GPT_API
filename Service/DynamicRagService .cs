@@ -234,7 +234,7 @@ namespace MEAI_GPT_API.Services
         private void LogMetric(string metric)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_metricsFile)!);
-            File.AppendAllText(_metricsFile, $ "{DateTime.Now:O} | {metric}{Environment.NewLine}");
+            File.AppendAllText(_metricsFile, $"{DateTime.Now:O} | {metric}{Environment.NewLine}");
         }
         private void EnsureAbbreviationContext()
         {
@@ -264,12 +264,12 @@ namespace MEAI_GPT_API.Services
             {
                 var plantOrgPath = Path.Combine(
                   _chromaOptions.ContextFolder,
-                  $ "organization-{plant.ToLower()}.txt"
+                  $"organization-{plant.ToLower()}.txt"
                 );
 
                 if (!File.Exists(plantOrgPath))
                 {
-                    var plantOrgContent = $ @ "MEAI {plant} Plant - Organization Details
+                    var plantOrgContent = $@ "MEAI {plant} Plant - Organization Details
         
           These are the fixed organizational details
           for {
@@ -349,7 +349,7 @@ namespace MEAI_GPT_API.Services
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, $ "⚠️ Trigger generation skipped for {filePath}");
+                    _logger.LogWarning(ex, $"⚠️ Trigger generation skipped for {filePath}");
                 }
                 if (madeRealCall)
                 {
@@ -380,7 +380,7 @@ namespace MEAI_GPT_API.Services
                         // Log it and keep going; one bad document should never
                         // take down the whole corpus.
                         _logger.LogError(ex,
-                          $ "❌ Skipping file after unhandled error (plant: {plant}, model: {model.Name}): {filePath}");
+                          $"❌ Skipping file after unhandled error (plant: {plant}, model: {model.Name}): {filePath}");
                     }
                 }
 
@@ -467,8 +467,8 @@ namespace MEAI_GPT_API.Services
 
                 policyFiles.AddRange(sourceFiles);
                 _logger.LogInformation(
-          $ "📁 Found {sourceFiles.Count()} files in '{source.Folder}'" +
-                  (isRestricted ? $ " (restricted to: {string.Join(", ", source.RestrictedToPlants!)})" : " (all plants)"));
+          $"📁 Found {sourceFiles.Count()} files in '{source.Folder}'" +
+                  (isRestricted ? $" (restricted to: {string.Join(", ", source.RestrictedToPlants!)})" : " (all plants)"));
             }
 
             _logger.LogInformation($"📋 Total files for {plant}: {policyFiles.Count}");
@@ -507,7 +507,7 @@ namespace MEAI_GPT_API.Services
                 };
 
                 var response = await _chromaClient.PostAsJsonAsync(
-          $ "/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/get",
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/get",
                   queryData);
 
                 if (response.IsSuccessStatusCode)
@@ -534,7 +534,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, $ "Failed to check existing embeddings for {filePath}");
+                _logger.LogWarning(ex, $"Failed to check existing embeddings for {filePath}");
                 return false; // Assume doesn't exist if check fails
             }
         }
@@ -618,7 +618,7 @@ namespace MEAI_GPT_API.Services
             try
             {
                 var fileInfo = new FileInfo(filePath);
-                var cacheKey = $ "{filePath}:{model.Name}";
+                var cacheKey = $"{filePath}:{model.Name}";
 
                 // ✅ ENHANCED: Check both cache AND database for existing embeddings
                 if (processedFilesCache.TryGetValue(cacheKey, out
@@ -686,7 +686,7 @@ namespace MEAI_GPT_API.Services
                 {
                     processedFilesCache[cacheKey] = fileInfo.LastWriteTime;
                     _logger.LogInformation(
-            $ "✅ Successfully processed & CACHED {successCount}/{chunks.Count} chunks from {fileInfo.Name}");
+            $"✅ Successfully processed & CACHED {successCount}/{chunks.Count} chunks from {fileInfo.Name}");
                 }
                 else
                 {
@@ -696,7 +696,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "❌ Failed to process file {filePath}");
+                _logger.LogError(ex, $"❌ Failed to process file {filePath}");
                 processedFilesCache.TryRemove($"{filePath}:{model.Name}", out _);
                 throw;
             }
@@ -725,8 +725,8 @@ namespace MEAI_GPT_API.Services
             if (corruptionRatio > 0.01) // More than 1% corruption
             {
                 _logger.LogError(
-          $ "❌ File appears corrupted: {fileName} " +
-                  $ "({replacementCharCount} replacement characters, {corruptionRatio:P1})");
+          $"❌ File appears corrupted: {fileName} " +
+                  $"({replacementCharCount} replacement characters, {corruptionRatio:P1})");
                 return false;
             }
 
@@ -735,8 +735,8 @@ namespace MEAI_GPT_API.Services
             if (alphanumericRatio < 0.65) // Increased from 0.5
             {
                 _logger.LogWarning(
-          $ "❌ Low quality text: {fileName} " +
-                  $ "(only {alphanumericRatio:P0} alphanumeric characters)");
+          $"❌ Low quality text: {fileName} " +
+                  $"(only {alphanumericRatio:P0} alphanumeric characters)");
                 return false;
             }
 
@@ -754,7 +754,7 @@ namespace MEAI_GPT_API.Services
             if (meaningfulWords < 50)
             {
                 _logger.LogWarning(
-          $ "❌ Too few meaningful words ({meaningfulWords}): {fileName}");
+          $"❌ Too few meaningful words ({meaningfulWords}): {fileName}");
                 return false;
             }
 
@@ -767,8 +767,8 @@ namespace MEAI_GPT_API.Services
                 if (uniqueRatio < 0.05) // Less than 30% unique words
                 {
                     _logger.LogWarning(
-            $ "❌ Excessive repetition detected: {fileName} " +
-                      $ "(only {uniqueWords}/{words.Length} unique words, {uniqueRatio:P0})");
+            $"❌ Excessive repetition detected: {fileName} " +
+                      $"(only {uniqueWords}/{words.Length} unique words, {uniqueRatio:P0})");
                     return false;
                 }
             }
@@ -805,7 +805,7 @@ namespace MEAI_GPT_API.Services
                 };
 
                 var response = await _chromaClient.PostAsJsonAsync(
-          $ "/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/delete",
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/delete",
                   deleteRequest);
 
                 if (response.IsSuccessStatusCode)
@@ -820,7 +820,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, $ "Failed to delete old embeddings for {filePath} - continuing anyway");
+                _logger.LogWarning(ex, $"Failed to delete old embeddings for {filePath} - continuing anyway");
                 // Don't throw - allow reprocessing to continue even if deletion fails
             }
         }
@@ -1111,7 +1111,7 @@ namespace MEAI_GPT_API.Services
                 // still operate on the user's original wording, not this annotated form.
                 var questionForModel = string.IsNullOrEmpty(context.EmployeeGrade) ?
                   question :
-                  $ "{question}\n\n(For context: I am {context.EmployeeGrade}. Only use the policy provisions that apply to this grade; ignore provisions written for the other grade.)";
+                  $"{question}\n\n(For context: I am {context.EmployeeGrade}. Only use the policy provisions that apply to this grade; ignore provisions written for the other grade.)";
 
                 // Generate final answer
                 var parentId = context.History.Any() &&
@@ -1531,7 +1531,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to mark conversation as appreciated: {question}");
+                _logger.LogError(ex, $"Failed to mark conversation as appreciated: {question}");
             }
             finally
             {
@@ -1555,7 +1555,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to save correction: {question}");
+                _logger.LogError(ex, $"Failed to save correction: {question}");
             }
         }
         // 🆕 New method to get conversation statistics
@@ -1677,7 +1677,7 @@ namespace MEAI_GPT_API.Services
             if (ismeai && !hasSufficientCoverage)
             {
                 _logger.LogWarning($"⚠️ Insufficient policy coverage for {plant}, returning fallback message");
-                return $ "I don't have sufficient policy information to answer this question for {plant}. Please contact your supervisor or HR department for clarification on this matter.";
+                return $"I don't have sufficient policy information to answer this question for {plant}. Please contact your supervisor or HR department for clarification on this matter.";
             }
 
             // OPTIMIZED: Simplified system prompt
@@ -1932,21 +1932,21 @@ namespace MEAI_GPT_API.Services
         private string GetFallbackMessage(bool ismeai, string plant)
         {
             return ismeai ?
-            $ "I apologize, but I'm having trouble generating a response right now. Please contact your supervisor or HR department for assistance regarding {plant} policies." :
+            $"I apologize, but I'm having trouble generating a response right now. Please contact your supervisor or HR department for assistance regarding {plant} policies." :
         "I apologize, but I'm having trouble generating a response right now. Please try again.";
         }
 
         private string GetTimeoutMessage(bool ismeai, string plant)
         {
             return ismeai ?
-            $ "The response generation timed out. Please contact your supervisor or HR department for assistance regarding {plant} policies." :
+            $"The response generation timed out. Please contact your supervisor or HR department for assistance regarding {plant} policies." :
         "The response generation timed out. Please try a simpler question.";
         }
 
         private string GetErrorMessage(bool ismeai, string plant)
         {
             return ismeai ?
-            $ "I apologize, but I'm having trouble generating a response right now. Please contact your supervisor or HR department for assistance regarding {plant} policies." :
+            $"I apologize, but I'm having trouble generating a response right now. Please contact your supervisor or HR department for assistance regarding {plant} policies." :
         "I apologize, but I'm having trouble generating a response right now. Please try again.";
         }
         // API endpoint to get available models
@@ -1994,7 +1994,7 @@ namespace MEAI_GPT_API.Services
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, $ "Failed to get count for collection {collectionId}");
+                        _logger.LogWarning(ex, $"Failed to get count for collection {collectionId}");
                     }
                 }
 
@@ -2012,7 +2012,7 @@ namespace MEAI_GPT_API.Services
             try
             {
                 var response = await _chromaClient.GetAsync(
-          $ "/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/count");
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/count");
 
                 if (response.IsSuccessStatusCode)
                 {
@@ -2026,7 +2026,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Error getting count for collection {collectionId}");
+                _logger.LogError(ex, $"Error getting count for collection {collectionId}");
                 return 0;
             }
         }
@@ -2036,7 +2036,7 @@ namespace MEAI_GPT_API.Services
             var textHash = text.GetHashCode().ToString("X");
             var timeStamp = lastModified.Ticks.ToString();
             var modelHash = modelName.GetHashCode().ToString("X");
-            return $ "{fileName}_{textHash}_{timeStamp}_{modelHash}";
+            return $"{fileName}_{textHash}_{timeStamp}_{modelHash}";
         }
 
         private void InitializeSessionCleanup()
@@ -2434,7 +2434,7 @@ namespace MEAI_GPT_API.Services
                 };
 
                 var response = await _chromaClient.PostAsJsonAsync(
-          $ "/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/add",
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/add",
                   addData);
 
                 if (!response.IsSuccessStatusCode)
@@ -2453,7 +2453,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "❌ Failed to add to ChromaDB collection: {collectionId}");
+                _logger.LogError(ex, $"❌ Failed to add to ChromaDB collection: {collectionId}");
                 return false;
             }
         }
@@ -2882,7 +2882,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to apply correction: {question}");
+                _logger.LogError(ex, $"Failed to apply correction: {question}");
             }
             finally
             {
@@ -2901,7 +2901,19 @@ namespace MEAI_GPT_API.Services
             // text/embedding match on the old (wrong) answer.
             try
             {
-                var correctSourceFile = await InferCorrectSourceDocumentAsync(correctedAnswer, model);
+                // ✅ FIX: previously hardcoded to search only "Centralized",
+                // meaning any plant-specific correction (Sanand/Manesar policy
+                // documents — the majority of real corrections seen in
+                // practice) would silently fail to find its source document,
+                // since SearchChromaDBAsync penalizes non-matching-plant
+                // chunks (-0.25) even though it doesn't fully exclude them.
+                // Looking up the session's actual plant makes this reliable
+                // for the common case, with "Centralized" as a fallback only
+                // when the session/plant genuinely can't be resolved.
+                var session = await _conversationStorage.GetOrCreateSessionAsync(sessionId);
+                var searchPlant = !string.IsNullOrWhiteSpace(session?.UserPlant) ? session.UserPlant : "Centralized";
+
+                var correctSourceFile = await InferCorrectSourceDocumentAsync(correctedAnswer, model, searchPlant);
 
                 if (!string.IsNullOrWhiteSpace(correctSourceFile))
                 {
@@ -2941,7 +2953,7 @@ namespace MEAI_GPT_API.Services
         // presumably close to the real source document's actual wording,
         // which is a stronger signal than re-running the same search that
         // produced the wrong retrieval in the first place.
-        private async Task<string?> InferCorrectSourceDocumentAsync(string correctedAnswer, string modelName)
+        private async Task<string?> InferCorrectSourceDocumentAsync(string correctedAnswer, string modelName, string plant)
         {
             if (string.IsNullOrWhiteSpace(correctedAnswer))
                 return null;
@@ -2950,14 +2962,7 @@ namespace MEAI_GPT_API.Services
             if (embeddingModel == null)
                 return null;
 
-            // Reuses SearchGeneral's plant-agnostic path is not available here,
-            // so search without a plant filter isn't an option — corrections
-            // are inherently plant-scoped via the session, but at this call
-            // site we don't have that context threaded through. Searching
-            // "Centralized" first, falling back to a broader search, keeps
-            // this from requiring a larger refactor of ApplyCorrectionAsync's
-            // signature just for this best-effort inference step.
-            var candidates = await SearchChromaDBAsync(correctedAnswer, embeddingModel, 3, "Centralized");
+            var candidates = await SearchChromaDBAsync(correctedAnswer, embeddingModel, 3, plant);
             var best = candidates.OrderByDescending(c => c.Similarity).FirstOrDefault();
 
             return best?.Similarity >= 0.5 ? best.Source : null;
@@ -3183,7 +3188,7 @@ namespace MEAI_GPT_API.Services
 
                         if (embedding.Count != model.EmbeddingDimension)
                         {
-                            var error = $ "Dimension mismatch: got {embedding.Count}, expected {model.EmbeddingDimension}";
+                            var error = $"Dimension mismatch: got {embedding.Count}, expected {model.EmbeddingDimension}";
                             _logger.LogError($"❌ {error}");
                             failedChunks.Add((chunk.ChunkId, error));
                             continue;
@@ -3194,7 +3199,7 @@ namespace MEAI_GPT_API.Services
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, $ "❌ Failed to generate embedding for chunk {i + 1}: {chunk.ChunkId}");
+                        _logger.LogError(ex, $"❌ Failed to generate embedding for chunk {i + 1}: {chunk.ChunkId}");
                         failedChunks.Add((chunk.ChunkId, ex.Message));
                     }
 
@@ -3207,7 +3212,7 @@ namespace MEAI_GPT_API.Services
 
                 // Log summary
                 _logger.LogInformation(
-          $ "📊 Embedding generation complete: {successfulChunks.Count} succeeded, {failedChunks.Count} failed");
+          $"📊 Embedding generation complete: {successfulChunks.Count} succeeded, {failedChunks.Count} failed");
 
                 if (failedChunks.Any())
                 {
@@ -3249,7 +3254,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "❌ Failed to process chunk batch for model {model.Name}");
+                _logger.LogError(ex, $"❌ Failed to process chunk batch for model {model.Name}");
                 return 0;
             }
         }
@@ -3278,8 +3283,8 @@ namespace MEAI_GPT_API.Services
                     }
 
                     _logger.LogWarning(
-            $ "⚠️ Invalid embedding on attempt {attempt}/{maxRetries}: " +
-                      $ "got {embedding?.Count ?? 0} dimensions, expected {model.EmbeddingDimension}");
+            $"⚠️ Invalid embedding on attempt {attempt}/{maxRetries}: " +
+                      $"got {embedding?.Count ?? 0} dimensions, expected {model.EmbeddingDimension}");
                 }
                 catch (Exception ex)
                 {
@@ -3296,7 +3301,7 @@ namespace MEAI_GPT_API.Services
                 }
             }
 
-            _logger.LogError(lastException, $ "❌ All {maxRetries} attempts failed to generate embedding");
+            _logger.LogError(lastException, $"❌ All {maxRetries} attempts failed to generate embedding");
             return null;
         }
 
@@ -3399,7 +3404,7 @@ namespace MEAI_GPT_API.Services
                     };
 
                     var response = await _chromaClient.PostAsJsonAsync(
-            $ "/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/get",
+            $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/get",
                       request);
 
                     if (response.IsSuccessStatusCode)
@@ -3480,7 +3485,7 @@ namespace MEAI_GPT_API.Services
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, $ "Failed to warm up model: {model.Name}");
+                        _logger.LogWarning(ex, $"Failed to warm up model: {model.Name}");
                     }
                 });
 
@@ -3930,7 +3935,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Enhanced search failed for: {query}");
+                _logger.LogError(ex, $"Enhanced search failed for: {query}");
                 return new List<RelevantChunk>();
             }
         }
@@ -3942,7 +3947,7 @@ namespace MEAI_GPT_API.Services
                 var queryKeywords = _entityExtraction.ExtractTopicsFromQuery(query.ToLowerInvariant());
 
                 // Learn associations
-                var key = $ "{documentType}_{sectionNumber}";
+                var key = $"{documentType}_{sectionNumber}";
                 if (!_learnedAssociations.ContainsKey(key))
                 {
                     _learnedAssociations[key] = new List<string>();
@@ -4033,7 +4038,7 @@ namespace MEAI_GPT_API.Services
                 };
 
                 var response = await _chromaClient.PostAsJsonAsync(
-          $ "/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
                   queryData);
 
                 if (response.IsSuccessStatusCode)
@@ -4105,7 +4110,7 @@ namespace MEAI_GPT_API.Services
             if (string.IsNullOrWhiteSpace(sectionNumber)) return false;
             var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num => {
                 var escaped = Regex.Escape(num);
-                return new Regex($ @ "\b(?:section|clause|part)\.?\s*{escaped}(?:\.\d+)*\b" + $ @ "|(?:^|\n)\s*{escaped}\.(?:\d+\.?)*\s", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+                return new Regex($@ "\b(?:section|clause|part)\.?\s*{escaped}(?:\.\d+)*\b" + $@ "|(?:^|\n)\s*{escaped}\.(?:\d+\.?)*\s", RegexOptions.IgnoreCase | RegexOptions.Compiled);
             });
             return pattern.IsMatch(lowerText);
         }
@@ -4130,13 +4135,13 @@ namespace MEAI_GPT_API.Services
                 // of always hardcoding "Annexure" — Annexure keeps its exact
                 // original wording for backward compatibility.
                 combinedQuery = string.Equals(sectionQuery.ReferenceType, "Annexure", StringComparison.OrdinalIgnoreCase) ?
-                $ "Annexure {sectionQuery.SectionNumber} form approval technical baseline" :
-          $ "{sectionQuery.ReferenceType} {sectionQuery.SectionNumber}";
+                $"Annexure {sectionQuery.SectionNumber} form approval technical baseline" :
+          $"{sectionQuery.ReferenceType} {sectionQuery.SectionNumber}";
             }
             else
             {
                 // Create a single comprehensive search query instead of multiple
-                combinedQuery = $ "Section {sectionQuery.SectionNumber} {sectionQuery.DocumentType} " +
+                combinedQuery = $"Section {sectionQuery.SectionNumber} {sectionQuery.DocumentType} " +
                   string.Join(" ", _policyAnalysis.GetDynamicSectionTopics(sectionQuery.SectionNumber, sectionQuery.DocumentType));
             }
 
@@ -4329,10 +4334,10 @@ namespace MEAI_GPT_API.Services
         {
             var escaped = Regex.Escape(annexureNumber);
             var patterns = new[] {
-        $ @ "annexure\s*{escaped}\b",
-          $ @ "annexure[\s\-]+{escaped}\b",
-          $ @ "annex\s*{escaped}\b",
-          $ @ "annexure\s*no\.?\s*{escaped}\b"
+        $@ "annexure\s*{escaped}\b",
+          $@ "annexure[\s\-]+{escaped}\b",
+          $@ "annex\s*{escaped}\b",
+          $@ "annexure\s*no\.?\s*{escaped}\b"
       };
             return patterns.Any(p => Regex.IsMatch(lowerText, p));
         }
@@ -4613,7 +4618,7 @@ namespace MEAI_GPT_API.Services
                 var routerOnlyAnchorTexts = new HashSet<string>();
                 foreach (var anchorText in topicAnchors)
                 {
-                    var anchoredQuery = $ "{query} {anchorText}";
+                    var anchoredQuery = $"{query} {anchorText}";
                     // Widened from 3/Take(2) to 6/Take(4): a single generic
                     // chunk (e.g. an "effective from [date]" clause) isn't
                     // enough to actually answer a multi-part question like
@@ -4688,7 +4693,7 @@ namespace MEAI_GPT_API.Services
                 var routedTitles = await _documentRouterService.RouteAsync(query, plant, embeddingModel.Name);
                 foreach (var routedTitle in routedTitles)
                 {
-                    var anchoredQuery = $ "{query} {routedTitle}";
+                    var anchoredQuery = $"{query} {routedTitle}";
                     var anchoredChunks = await SearchChromaDBAsync(anchoredQuery, embeddingModel, 6, plant);
                     var best = anchoredChunks.Take(4).ToList();
                     foreach (var c in best) c.RelevanceScore *= 1.15;
@@ -4808,7 +4813,7 @@ namespace MEAI_GPT_API.Services
 
                         foreach (var crossRefTitle in crossReferencedTitles.Take(2)) // bounded, same reasoning as topic-continuity's Take(2) below
                         {
-                            var anchoredQuery = $ "{query} {crossRefTitle}";
+                            var anchoredQuery = $"{query} {crossRefTitle}";
                             var anchoredChunks = await SearchChromaDBAsync(anchoredQuery, embeddingModel, 6, plant);
                             var best = anchoredChunks.Take(3).ToList();
                             foreach (var c in best) c.RelevanceScore *= 1.15;
@@ -4845,7 +4850,7 @@ namespace MEAI_GPT_API.Services
                         var titleTerms = ExtractDocumentTitleTerms(source);
                         if (string.IsNullOrWhiteSpace(titleTerms)) continue;
 
-                        var anchoredQuery = $ "{query} {titleTerms}";
+                        var anchoredQuery = $"{query} {titleTerms}";
                         var anchoredChunks = await SearchChromaDBAsync(anchoredQuery, embeddingModel, 3, plant);
                         allChunks.AddRange(anchoredChunks.Take(2));
                     }
@@ -5097,7 +5102,7 @@ namespace MEAI_GPT_API.Services
                 var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
                 var response = await _chromaClient.PostAsJsonAsync(
-          $ "/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
                   searchPayload,
                   cts.Token);
 
@@ -5257,7 +5262,7 @@ namespace MEAI_GPT_API.Services
                 using
                 var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                 var response = await _chromaClient.PostAsJsonAsync(
-          $ "/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
                   searchData, cts.Token);
 
                 if (!response.IsSuccessStatusCode)
@@ -5274,7 +5279,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "❌ PerformChromaSearch failed for query: {query}");
+                _logger.LogError(ex, $"❌ PerformChromaSearch failed for query: {query}");
                 return new List<RelevantChunk>();
             }
         }
@@ -5354,7 +5359,7 @@ namespace MEAI_GPT_API.Services
                 };
 
                 var response = await _chromaClient.PostAsJsonAsync(
-          $ "/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
                   searchData);
 
                 if (response.IsSuccessStatusCode)
@@ -5372,7 +5377,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "❌ General search failed: {ex.Message}");
+                _logger.LogError(ex, $"❌ General search failed: {ex.Message}");
                 return new List<RelevantChunk>();
             }
         }
@@ -5678,7 +5683,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to check for changed files in plant: {plant}");
+                _logger.LogError(ex, $"Failed to check for changed files in plant: {plant}");
             }
         }
 
@@ -5712,7 +5717,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to reinitialize plant: {plant}");
+                _logger.LogError(ex, $"Failed to reinitialize plant: {plant}");
                 throw;
             }
         }
@@ -5778,7 +5783,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to reprocess file: {filePath}");
+                _logger.LogError(ex, $"Failed to reprocess file: {filePath}");
                 throw;
             }
         }
@@ -5808,7 +5813,7 @@ namespace MEAI_GPT_API.Services
 
             // ✅ Cache key now includes isQuery — "search_query: X" and "search_document: X"
             // are different inputs to the model and must not share a cache entry.
-            var cacheKey = $ "{model.Name}:{isQuery}:{text.GetHashCode():X}";
+            var cacheKey = $"{model.Name}:{isQuery}:{text.GetHashCode():X}";
 
             // Check cache first
             if (_optimizedEmbeddingCache.TryGetValue(cacheKey, out
@@ -5926,7 +5931,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "❌ Embedding failed for model: {model.Name}");
+                _logger.LogError(ex, $"❌ Embedding failed for model: {model.Name}");
                 return new List<float>();
             }
             finally
@@ -7743,7 +7748,7 @@ namespace MEAI_GPT_API.Services
             if (Regex.IsMatch(lowerQuestion, @ "^is\s+(he|she)\s+"))
             {
                 var result = Regex.Replace(question, @ "^(is\s+)(he|she)(\s+)",
-                  $ "$1{subject}$3", RegexOptions.IgnoreCase);
+                  $"$1{subject}$3", RegexOptions.IgnoreCase);
                 return result;
             }
 
@@ -7751,7 +7756,7 @@ namespace MEAI_GPT_API.Services
             if (Regex.IsMatch(lowerQuestion, @ "^does\s+(he|she)\s+"))
             {
                 var result = Regex.Replace(question, @ "^(does\s+)(he|she)(\s+)",
-                  $ "$1{subject}$3", RegexOptions.IgnoreCase);
+                  $"$1{subject}$3", RegexOptions.IgnoreCase);
                 return result;
             }
 
@@ -7759,7 +7764,7 @@ namespace MEAI_GPT_API.Services
             if (Regex.IsMatch(lowerQuestion, @ "what\s+does\s+(he|she)\s+"))
             {
                 var result = Regex.Replace(question, @ "(what\s+does\s+)(he|she)(\s+)",
-                  $ "$1{subject}$3", RegexOptions.IgnoreCase);
+                  $"$1{subject}$3", RegexOptions.IgnoreCase);
                 return result;
             }
 
@@ -7767,7 +7772,7 @@ namespace MEAI_GPT_API.Services
             if (Regex.IsMatch(lowerQuestion, @ "where\s+is\s+(he|she)"))
             {
                 var result = Regex.Replace(question, @ "(where\s+is\s+)(he|she)",
-                  $ "$1{subject}", RegexOptions.IgnoreCase);
+                  $"$1{subject}", RegexOptions.IgnoreCase);
                 return result;
             }
 
@@ -7780,8 +7785,8 @@ namespace MEAI_GPT_API.Services
                 [@ "\bshe\b"] = subject,
                 [@ "\bhim\b"] = subject,
                 [@ "\bher\b"] = subject,
-                [@ "\bhis\b"] = $ "{subject}'s",
-                [@ "\bhers\b"] = $ "{subject}'s",
+                [@ "\bhis\b"] = $"{subject}'s",
+                [@ "\bhers\b"] = $"{subject}'s",
             };
 
             foreach (var replacement in replacements)
@@ -8191,9 +8196,9 @@ namespace MEAI_GPT_API.Services
                   "replacing with refusal instead of streaming a likely-hallucinated response.",
                   verification.OverallConfidence);
 
-                finalAnswer = $ "I want to make sure I give you accurate information, but I'm not confident " +
-                $ "the answer I generated is fully grounded in {plant}'s policy documents. " +
-                $ "Please contact your supervisor or HR department for clarification on this matter.";
+                finalAnswer = $"I want to make sure I give you accurate information, but I'm not confident " +
+                $"the answer I generated is fully grounded in {plant}'s policy documents. " +
+                $"Please contact your supervisor or HR department for clarification on this matter.";
 
                 // ============================
                 // TRACK: log this refusal for pattern analysis
@@ -8601,7 +8606,7 @@ namespace MEAI_GPT_API.Services
                 return new ValidationResult
                 {
                     Success = false,
-                    ErrorMessage = $ "Initialization failed: {ex.Message}"
+                    ErrorMessage = $"Initialization failed: {ex.Message}"
                 };
             }
         }
@@ -8684,7 +8689,7 @@ namespace MEAI_GPT_API.Services
                 _agentLogger.LogDecision(new AgentDecision
                 {
                     Phase = "Planning",
-                    DecisionMade = $ "Created {plan.Steps.Count}-step plan",
+                    DecisionMade = $"Created {plan.Steps.Count}-step plan",
                     Reasoning = string.Join(" → ", plan.Steps.Select(s => s.Name)),
                     Confidence = 1.0
                 });
@@ -8860,7 +8865,7 @@ namespace MEAI_GPT_API.Services
                 _agentLogger.LogDecision(new AgentDecision
                 {
                     Phase = "Retrieval",
-                    DecisionMade = $ "Retrieved {result.Chunks.Count} chunks",
+                    DecisionMade = $"Retrieved {result.Chunks.Count} chunks",
                     Confidence = result.Chunks.Any() ? result.Chunks.Average(c => c.Similarity) : 0.0
                 });
 
@@ -8904,7 +8909,7 @@ namespace MEAI_GPT_API.Services
                 {
                     Phase = "Verification",
                     DecisionMade = verification.NeedsReprocessing ? "RETRY_NEEDED" : "APPROVED",
-                    Reasoning = $ "Confidence: {verification.OverallConfidence:P0}, Complete: {verification.IsComplete}",
+                    Reasoning = $"Confidence: {verification.OverallConfidence:P0}, Complete: {verification.IsComplete}",
                     Confidence = verification.OverallConfidence
                 });
 
@@ -9081,7 +9086,7 @@ namespace MEAI_GPT_API.Services
                 {
                     Phase = "Complete",
                     DecisionMade = "SUCCESS",
-                    Reasoning = $ "Total duration: {durationMs}ms, Confidence: {confidence:P0}",
+                    Reasoning = $"Total duration: {durationMs}ms, Confidence: {confidence:P0}",
                     Confidence = confidence
                 });
             }
@@ -9494,7 +9499,7 @@ namespace MEAI_GPT_API.Services
                       plant, relevantChunks.Count);
 
                     yield
-                    return $ "I don't have sufficient policy information to answer this question for {plant}. Please contact your supervisor or HR department for clarification on this matter.";
+                    return $"I don't have sufficient policy information to answer this question for {plant}. Please contact your supervisor or HR department for clarification on this matter.";
                     yield
                     break;
                 }
@@ -9879,7 +9884,7 @@ namespace MEAI_GPT_API.Services
                     return new StreamSetupResult
                     {
                         Success = false,
-                        ErrorMessage = $ "HTTP {response.StatusCode}"
+                        ErrorMessage = $"HTTP {response.StatusCode}"
                     };
                 }
 
@@ -10115,7 +10120,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to refresh conversation history for session {sessionId}");
+                _logger.LogError(ex, $"Failed to refresh conversation history for session {sessionId}");
                 // Don't throw - continue with existing history
             }
         }
@@ -10168,7 +10173,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to load conversation history for session {sessionId}");
+                _logger.LogError(ex, $"Failed to load conversation history for session {sessionId}");
                 // Don't throw - continue with empty history
             }
         }
@@ -10248,7 +10253,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to load conversation history for session {sessionId}");
+                _logger.LogError(ex, $"Failed to load conversation history for session {sessionId}");
                 // Don't throw - continue with empty history
             }
         }
@@ -11170,7 +11175,7 @@ namespace MEAI_GPT_API.Services
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, $ "Failed to check collection for model: {model.Name}");
+                        _logger.LogError(ex, $"Failed to check collection for model: {model.Name}");
                     }
                 }
 
@@ -11211,7 +11216,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to clear cache for file: {filePath}");
+                _logger.LogError(ex, $"Failed to clear cache for file: {filePath}");
                 throw;
             }
         }
@@ -11248,7 +11253,7 @@ namespace MEAI_GPT_API.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $ "Failed to process single file: {filePath}");
+                _logger.LogError(ex, $"Failed to process single file: {filePath}");
                 throw;
             }
         }
@@ -11290,7 +11295,7 @@ namespace MEAI_GPT_API.Services
                 if (model == null)
                 {
                     result.Success = false;
-                    result.Error = $ "Model '{modelName}' not found";
+                    result.Error = $"Model '{modelName}' not found";
                     return result;
                 }
 
@@ -11313,7 +11318,7 @@ namespace MEAI_GPT_API.Services
                     if (embedding == null || embedding.Count == 0)
                     {
                         result.Success = false;
-                        result.Error = $ "Failed to generate embedding for text: '{text.Substring(0, Math.Min(50, text.Length))}'";
+                        result.Error = $"Failed to generate embedding for text: '{text.Substring(0, Math.Min(50, text.Length))}'";
                         return result;
                     }
 
@@ -11322,7 +11327,7 @@ namespace MEAI_GPT_API.Services
 
                 result.Success = true;
                 result.ActualDimensions = embeddings;
-                result.Message = $ "Successfully generated {embeddings.Count} embeddings with dimensions: {string.Join(", ", embeddings)}";
+                result.Message = $"Successfully generated {embeddings.Count} embeddings with dimensions: {string.Join(", ", embeddings)}";
 
                 _logger.LogInformation($"✅ Embedding model test passed: {modelName}");
             }
@@ -11330,7 +11335,7 @@ namespace MEAI_GPT_API.Services
             {
                 result.Success = false;
                 result.Error = ex.Message;
-                _logger.LogError(ex, $ "Embedding model test failed: {modelName}");
+                _logger.LogError(ex, $"Embedding model test failed: {modelName}");
             }
 
             return result;
@@ -11352,9 +11357,9 @@ namespace MEAI_GPT_API.Services
             var collectionId = _collectionManager.GetCollectionId(model);
 
             var url =
-              $ "/api/v2/tenants/default_tenant" +
-            $ "/databases/default_database" +
-            $ "/collections/{Uri.EscapeDataString(collectionId)}/get";
+              $"/api/v2/tenants/default_tenant" +
+            $"/databases/default_database" +
+            $"/collections/{Uri.EscapeDataString(collectionId)}/get";
 
             var requestBody = new
             {
@@ -11395,7 +11400,7 @@ namespace MEAI_GPT_API.Services
                       responseContent);
 
                     throw new HttpRequestException(
-            $ "ChromaDB request failed. StatusCode={response.StatusCode}, Response={responseContent}");
+            $"ChromaDB request failed. StatusCode={response.StatusCode}, Response={responseContent}");
                 }
 
                 var result = JsonSerializer.Deserialize<ChromaGetResponse>(
@@ -11443,9 +11448,9 @@ namespace MEAI_GPT_API.Services
             var collectionId = _collectionManager.GetCollectionId(model);
 
             var url =
-              $ "/api/v2/tenants/default_tenant" +
-            $ "/databases/default_database" +
-            $ "/collections/{Uri.EscapeDataString(collectionId)}/get";
+              $"/api/v2/tenants/default_tenant" +
+            $"/databases/default_database" +
+            $"/collections/{Uri.EscapeDataString(collectionId)}/get";
 
             var requestBody = new
             {
@@ -11473,7 +11478,7 @@ namespace MEAI_GPT_API.Services
                       responseContent);
 
                     throw new HttpRequestException(
-            $ "ChromaDB request failed. StatusCode={response.StatusCode}, Response={responseContent}");
+            $"ChromaDB request failed. StatusCode={response.StatusCode}, Response={responseContent}");
                 }
 
                 var result = JsonSerializer.Deserialize<ChromaGetResponse>(
