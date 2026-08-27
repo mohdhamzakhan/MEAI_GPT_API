@@ -241,7 +241,7 @@ namespace MEAI_GPT_API.Services
             var abbreviationsPath = Path.Combine(_chromaOptions.ContextFolder, "abbreviations.txt");
             if (!File.Exists(abbreviationsPath))
             {
-                var abbreviationContent = @ "HR Policy Abbreviations:
+                var abbreviationContent = @"HR Policy Abbreviations:
               CL = Casual Leave
         SL = Sick Leave
         COFF = Compensatory Off
@@ -269,7 +269,7 @@ namespace MEAI_GPT_API.Services
 
                 if (!File.Exists(plantOrgPath))
                 {
-                    var plantOrgContent = $@ "MEAI {plant} Plant - Organization Details
+                    var plantOrgContent = $@"MEAI {plant} Plant - Organization Details
         
           These are the fixed organizational details
           for {
@@ -749,7 +749,7 @@ namespace MEAI_GPT_API.Services
       }, StringSplitOptions.RemoveEmptyEntries);
             var meaningfulWords = words.Count(w =>
               w.Length >= 3 &&
-              Regex.IsMatch(w, @ "^[a-zA-Z]+$"));
+              Regex.IsMatch(w, @"^[a-zA-Z]+$"));
 
             if (meaningfulWords < 50)
             {
@@ -856,7 +856,7 @@ namespace MEAI_GPT_API.Services
         private string CleanupContextReferences(string response)
         {
             // Replace [Context 1], [Context 2], etc. with just the source document
-            var pattern = @ "\[Context \d+\]:\s*([^\]]+\.docx)";
+            var pattern = @"\[Context \d+\]:\s*([^\]]+\.docx)";
             var cleaned = System.Text.RegularExpressions.Regex.Replace(
               response,
               pattern,
@@ -866,7 +866,7 @@ namespace MEAI_GPT_API.Services
             // Remove standalone [Context X] references
             cleaned = System.Text.RegularExpressions.Regex.Replace(
               cleaned,
-              @ "\[Context \d+\]",
+              @"\[Context \d+\]",
               ""
             );
 
@@ -1918,12 +1918,12 @@ namespace MEAI_GPT_API.Services
 
             // Remove HTML/XML tags
             var cleaned = System.Text.RegularExpressions.Regex.Replace(
-              response, @ "<[^>]*>", "",
+              response, @"<[^>]*>", "",
               System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
             // Clean excessive whitespace
-            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @ "\n\s*\n\s*\n", "\n\n");
-            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @ " {2,}", " ");
+            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"\n\s*\n\s*\n", "\n\n");
+            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @" {2,}", " ");
 
             return cleaned.Trim();
         }
@@ -2616,7 +2616,7 @@ namespace MEAI_GPT_API.Services
             messages.Add(new
             {
                 role = "system",
-                content = @ "You are a helpful AI assistant.
+                content = @"You are a helpful AI assistant.
       
         CRITICAL: For simple factual questions(Who / What / When / Where / Which),
                 answer in ONE SENTENCE only.
@@ -2721,7 +2721,7 @@ namespace MEAI_GPT_API.Services
             messages.Add(new
             {
                 role = "system",
-                content = @ "You are a helpful and knowledgeable AI assistant.
+                content = @"You are a helpful and knowledgeable AI assistant.
 
         🎯 INSTRUCTIONS:
           1.Provide accurate,
@@ -3102,7 +3102,7 @@ namespace MEAI_GPT_API.Services
             // chunk that happens to mention an address in passing, as part of
             // real policy content, isn't wrongly dropped.
             var hasAddressSignal = Regex.IsMatch(trimmed,
-              @ "\b(Plot\s*Number|Industrial\s*Estate|Pin\s*-?\s*\d{6}|-\s*\d{6}\b)",
+              @"\b(Plot\s*Number|Industrial\s*Estate|Pin\s*-?\s*\d{6}|-\s*\d{6}\b)",
               RegexOptions.IgnoreCase);
             var hasCompanyNameOnly = trimmed.Contains("Mitsubishi Electric Automotive India", StringComparison.OrdinalIgnoreCase);
 
@@ -3117,7 +3117,7 @@ namespace MEAI_GPT_API.Services
             // are already captured in section_title metadata; indexing them
             // again as a bare, near-empty standalone chunk adds noise without
             // adding retrievable information.
-            var isBareHeadingPattern = Regex.IsMatch(trimmed, @ "^[\d\.\s]{0,6}[A-Z\s&/]{3,40}$") && wordCount < 6;
+            var isBareHeadingPattern = Regex.IsMatch(trimmed, @"^[\d\.\s]{0,6}[A-Z\s&/]{3,40}$") && wordCount < 6;
             if (isBareHeadingPattern)
             {
                 _logger.LogDebug($"⏭️ Skipping bare heading-only chunk: {trimmed}");
@@ -3709,7 +3709,7 @@ namespace MEAI_GPT_API.Services
 
                 if (!string.IsNullOrEmpty(annexureRefsMeta))
                 {
-                    var queryAnnexNumbers = Regex.Matches(originalQuery, @ "annex(?:ure)?\s*(?:no\.?)?\s*(\d+)", RegexOptions.IgnoreCase)
+                    var queryAnnexNumbers = Regex.Matches(originalQuery, @"annex(?:ure)?\s*(?:no\.?)?\s*(\d+)", RegexOptions.IgnoreCase)
                       .Select(m => m.Groups[1].Value);
                     var chunkAnnexNumbers = annexureRefsMeta.Split(',', StringSplitOptions.RemoveEmptyEntries);
 
@@ -4110,7 +4110,7 @@ namespace MEAI_GPT_API.Services
             if (string.IsNullOrWhiteSpace(sectionNumber)) return false;
             var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num => {
                 var escaped = Regex.Escape(num);
-                return new Regex($@ "\b(?:section|clause|part)\.?\s*{escaped}(?:\.\d+)*\b" + $@ "|(?:^|\n)\s*{escaped}\.(?:\d+\.?)*\s", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+                return new Regex($@"\b(?:section|clause|part)\.?\s*{escaped}(?:\.\d+)*\b" + $@"|(?:^|\n)\s*{escaped}\.(?:\d+\.?)*\s", RegexOptions.IgnoreCase | RegexOptions.Compiled);
             });
             return pattern.IsMatch(lowerText);
         }
@@ -4334,10 +4334,10 @@ namespace MEAI_GPT_API.Services
         {
             var escaped = Regex.Escape(annexureNumber);
             var patterns = new[] {
-        $@ "annexure\s*{escaped}\b",
-          $@ "annexure[\s\-]+{escaped}\b",
-          $@ "annex\s*{escaped}\b",
-          $@ "annexure\s*no\.?\s*{escaped}\b"
+        $@"annexure\s*{escaped}\b",
+          $@"annexure[\s\-]+{escaped}\b",
+          $@"annex\s*{escaped}\b",
+          $@"annexure\s*no\.?\s*{escaped}\b"
       };
             return patterns.Any(p => Regex.IsMatch(lowerText, p));
         }
@@ -4459,7 +4459,7 @@ namespace MEAI_GPT_API.Services
                 // Fallback if ReferenceTypes hasn't been configured yet —
                 // keeps Annexure extraction working out of the box without
                 // requiring an appsettings.json change.
-                var annexureNumbers = Regex.Matches(text, @ "annex(?:ure)?\s*(?:no\.?)?\s*(\d+)", RegexOptions.IgnoreCase)
+                var annexureNumbers = Regex.Matches(text, @"annex(?:ure)?\s*(?:no\.?)?\s*(\d+)", RegexOptions.IgnoreCase)
                   .Select(m => m.Groups[1].Value)
                   .Distinct()
                   .ToList();
@@ -4546,7 +4546,7 @@ namespace MEAI_GPT_API.Services
         }
         private string ExtractSectionNumber(string sectionId)
         {
-            var match = Regex.Match(sectionId, @ "(\d+(?:\.\d+)*)");
+            var match = Regex.Match(sectionId, @"(\d+(?:\.\d+)*)");
             return match.Success ? match.Groups[1].Value : "";
         }
         private async Task<List<RelevantChunk>> GetRelevantChunksWithExpansionAsync(string query, ModelConfiguration embeddingModel, int maxResults, bool meaiInfo, ConversationContext context, bool useReRanking, ModelConfiguration generationModel, string plant)
@@ -4748,7 +4748,7 @@ namespace MEAI_GPT_API.Services
                         static string NormalizeForMatch(string s) =>
                           Regex.Replace(
                             s.Replace("&", "and"),
-                            @ "[^a-zA-Z0-9\s]", " "
+                            @"[^a-zA-Z0-9\s]", " "
                           ).ToLowerInvariant().Trim();
 
                         // Real documents don't name each other identically
@@ -5981,29 +5981,29 @@ namespace MEAI_GPT_API.Services
             // ✅ 1. Remove ALL special token patterns (exhaustive list)
             var specialTokenPatterns = new[] {
         // LLaMA/Mistral tokens
-        @ "<\|im_start\|>", @ "<\|im_end\|>", @ "<\|im_sep\|>",
-          @ "<\|endoftext\|>", @ "<\|startoftext\|>",
+        @"<\|im_start\|>", @"<\|im_end\|>", @"<\|im_sep\|>",
+          @"<\|endoftext\|>", @"<\|startoftext\|>",
 
           // Instruction format tokens
-          @ "\[INST\]", @ "\[/INST\]",
-          @ "<<SYS>>", @ "<</SYS>>",
+          @"\[INST\]", @"\[/INST\]",
+          @"<<SYS>>", @"<</SYS>>",
 
           // Generic model tokens
-          @ "<s>", @ "</s>",
-          @ "<\|user\|>", @ "<\|assistant\|>", @ "<\|system\|>",
-          @ "<assistant>", @ "</assistant>",
-          @ "<user>", @ "</user>",
-          @ "<system>", @ "</system>",
+          @"<s>", @"</s>",
+          @"<\|user\|>", @"<\|assistant\|>", @"<\|system\|>",
+          @"<assistant>", @"</assistant>",
+          @"<user>", @"</user>",
+          @"<system>", @"</system>",
 
           // Chat-ML tokens
-          @ "<\|begin_of_text\|>", @ "<\|end_of_text\|>",
-          @ "<\|start_header_id\|>", @ "<\|end_header_id\|>",
+          @"<\|begin_of_text\|>", @"<\|end_of_text\|>",
+          @"<\|start_header_id\|>", @"<\|end_header_id\|>",
 
           // Other potential tokens
-          @ "<\|pad\|>", @ "<\|eos\|>", @ "<\|bos\|>",
+          @"<\|pad\|>", @"<\|eos\|>", @"<\|bos\|>",
 
           // Remove any remaining angle bracket tokens
-          @ "<\|[^>]+\|>"
+          @"<\|[^>]+\|>"
       };
 
             foreach (var pattern in specialTokenPatterns)
@@ -6012,7 +6012,7 @@ namespace MEAI_GPT_API.Services
             }
 
             // ✅ 2. Remove markdown code blocks (can contain tokens)
-            cleaned = Regex.Replace(cleaned, @ "```[\w]*\n?", "", RegexOptions.Multiline);
+            cleaned = Regex.Replace(cleaned, @"```[\w]*\n?", "", RegexOptions.Multiline);
             cleaned = cleaned.Replace("```", "");
 
             // ✅ 3. Remove common instruction prefixes that might trigger token detection
@@ -6033,15 +6033,15 @@ namespace MEAI_GPT_API.Services
             }
 
             // ✅ 4. Normalize whitespace
-            cleaned = Regex.Replace(cleaned, @ "\s+", " ");
-            cleaned = Regex.Replace(cleaned, @ "\n\s*\n", "\n");
+            cleaned = Regex.Replace(cleaned, @"\s+", " ");
+            cleaned = Regex.Replace(cleaned, @"\n\s*\n", "\n");
 
             // ✅ 5. Remove control characters (except newline and tab)
-            cleaned = Regex.Replace(cleaned, @ "[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]", "");
+            cleaned = Regex.Replace(cleaned, @"[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]", "");
 
             // ✅ 6. Remove any remaining suspicious patterns
             // Remove HTML-like tags that might be interpreted as tokens
-            cleaned = Regex.Replace(cleaned, @ "</?[a-zA-Z][^>]*>", " ");
+            cleaned = Regex.Replace(cleaned, @"</?[a-zA-Z][^>]*>", " ");
 
             // ✅ 7. Final cleanup
             cleaned = cleaned.Trim();
@@ -6085,7 +6085,7 @@ namespace MEAI_GPT_API.Services
             var cleaned = result.ToString();
 
             // Remove excessive whitespace
-            cleaned = Regex.Replace(cleaned, @ "\s+", " ");
+            cleaned = Regex.Replace(cleaned, @"\s+", " ");
 
             return cleaned.Trim();
         }
@@ -6618,16 +6618,16 @@ namespace MEAI_GPT_API.Services
                 // Pattern 1: "X is a [profession]" - MOST RELIABLE
                 var patterns = new[] {
           // "Elon Musk is a business magnate"
-          @ "^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+is\s+a(?:n)?\s+",
+          @"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+is\s+a(?:n)?\s+",
 
             // "Elon Musk is the CEO"
-            @ "^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+is\s+the\s+",
+            @"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+is\s+the\s+",
 
             // "Elon Musk, born in..."
-            @ "^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}),",
+            @"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}),",
 
             // At start: "Elon Musk has/was/became..."
-            @ "^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+(?:has|was|were|became|founded|created|invented)",
+            @"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+(?:has|was|were|became|founded|created|invented)",
         };
 
                 foreach (var pattern in patterns)
@@ -6647,7 +6647,7 @@ namespace MEAI_GPT_API.Services
                 }
 
                 // Fallback: Find first proper name (2+ capitalized words)
-                var nameMatch = Regex.Match(cleanAnswer, @ "\b([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b");
+                var nameMatch = Regex.Match(cleanAnswer, @"\b([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b");
                 if (nameMatch.Success)
                 {
                     var potentialName = nameMatch.Groups[1].Value.Trim();
@@ -7602,14 +7602,14 @@ namespace MEAI_GPT_API.Services
 
             // Common name patterns
             var namePatterns = new[] {
-        @ "^[A-Z][a-z]+\s+[A-Z][a-z]+$", // First Last
-          @ "^[A-Z][a-z]+\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // First Middle Last
-          @ "^[A-Z][a-z]+\s+[A-Z]\.\s+[A-Z][a-z]+$", // First M. Last
-          @ "^[A-Z]\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // F. Middle Last
-          @ "^Dr\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // Dr. First Last
-          @ "^Mr\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // Mr. First Last
-          @ "^Mrs\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // Mrs. First Last
-          @ "^Ms\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // Ms. First Last
+        @"^[A-Z][a-z]+\s+[A-Z][a-z]+$", // First Last
+          @"^[A-Z][a-z]+\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // First Middle Last
+          @"^[A-Z][a-z]+\s+[A-Z]\.\s+[A-Z][a-z]+$", // First M. Last
+          @"^[A-Z]\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // F. Middle Last
+          @"^Dr\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // Dr. First Last
+          @"^Mr\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // Mr. First Last
+          @"^Mrs\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // Mrs. First Last
+          @"^Ms\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+$", // Ms. First Last
       };
 
             return namePatterns.Any(pattern => Regex.IsMatch(text, pattern));
@@ -7723,9 +7723,9 @@ namespace MEAI_GPT_API.Services
 
             // Check for pronouns at word boundaries
             var pronounPatterns = new[] {
-        @ "\bhe\b", @ "\bshe\b", @ "\bhim\b", @ "\bher\b",
-          @ "\bhis\b", @ "\bhers\b", @ "\bthey\b", @ "\bthem\b",
-          @ "\btheir\b", @ "\btheirs\b"
+        @"\bhe\b", @"\bshe\b", @"\bhim\b", @"\bher\b",
+          @"\bhis\b", @"\bhers\b", @"\bthey\b", @"\bthem\b",
+          @"\btheir\b", @"\btheirs\b"
       };
 
             foreach (var pattern in pronounPatterns)
@@ -7745,33 +7745,33 @@ namespace MEAI_GPT_API.Services
             var lowerQuestion = question.ToLower();
 
             // Pattern 1: "is he/she X" → "is [Subject] X"
-            if (Regex.IsMatch(lowerQuestion, @ "^is\s+(he|she)\s+"))
+            if (Regex.IsMatch(lowerQuestion, @"^is\s+(he|she)\s+"))
             {
-                var result = Regex.Replace(question, @ "^(is\s+)(he|she)(\s+)",
+                var result = Regex.Replace(question, @"^(is\s+)(he|she)(\s+)",
                   $"$1{subject}$3", RegexOptions.IgnoreCase);
                 return result;
             }
 
             // Pattern 2: "does he/she X" → "does [Subject] X"
-            if (Regex.IsMatch(lowerQuestion, @ "^does\s+(he|she)\s+"))
+            if (Regex.IsMatch(lowerQuestion, @"^does\s+(he|she)\s+"))
             {
-                var result = Regex.Replace(question, @ "^(does\s+)(he|she)(\s+)",
+                var result = Regex.Replace(question, @"^(does\s+)(he|she)(\s+)",
                   $"$1{subject}$3", RegexOptions.IgnoreCase);
                 return result;
             }
 
             // Pattern 3: "what does he/she do" → "what does [Subject] do"
-            if (Regex.IsMatch(lowerQuestion, @ "what\s+does\s+(he|she)\s+"))
+            if (Regex.IsMatch(lowerQuestion, @"what\s+does\s+(he|she)\s+"))
             {
-                var result = Regex.Replace(question, @ "(what\s+does\s+)(he|she)(\s+)",
+                var result = Regex.Replace(question, @"(what\s+does\s+)(he|she)(\s+)",
                   $"$1{subject}$3", RegexOptions.IgnoreCase);
                 return result;
             }
 
             // Pattern 4: "where is he/she" → "where is [Subject]"
-            if (Regex.IsMatch(lowerQuestion, @ "where\s+is\s+(he|she)"))
+            if (Regex.IsMatch(lowerQuestion, @"where\s+is\s+(he|she)"))
             {
-                var result = Regex.Replace(question, @ "(where\s+is\s+)(he|she)",
+                var result = Regex.Replace(question, @"(where\s+is\s+)(he|she)",
                   $"$1{subject}", RegexOptions.IgnoreCase);
                 return result;
             }
@@ -7781,12 +7781,12 @@ namespace MEAI_GPT_API.Services
             var replacements = new Dictionary<string,
               string>
             {
-                [@ "\bhe\b"] = subject,
-                [@ "\bshe\b"] = subject,
-                [@ "\bhim\b"] = subject,
-                [@ "\bher\b"] = subject,
-                [@ "\bhis\b"] = $"{subject}'s",
-                [@ "\bhers\b"] = $"{subject}'s",
+                [@"\bhe\b"] = subject,
+                [@"\bshe\b"] = subject,
+                [@"\bhim\b"] = subject,
+                [@"\bher\b"] = subject,
+                [@"\bhis\b"] = $"{subject}'s",
+                [@"\bhers\b"] = $"{subject}'s",
             };
 
             foreach (var replacement in replacements)
