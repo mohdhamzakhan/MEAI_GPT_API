@@ -205,7 +205,14 @@ builder.Services.AddSingleton<SelfVerifier>();
 //For Agentic AI
 builder.Services.AddScoped<PolicySearchTool>();
 builder.Services.AddScoped<RerankTool>();
-builder.Services.AddScoped<LearnedTriggerService>(sp =>
+// ✅ Must be Singleton, not Scoped: LearnedTriggerService's internal
+// SemaphoreSlim _fileLock only provides real thread-safety for concurrent
+// writes to learned-triggers.json if there's ONE shared instance/lock across
+// requests. As Scoped, each request got its own separate instance, its own
+// separate lock (protecting nothing), and reloaded the file from disk on
+// every single RAG query (MatchTriggers is called on every retrieval, not
+// just corrections) instead of serving from a shared in-memory copy.
+builder.Services.AddSingleton<LearnedTriggerService>(sp =>
 {
     var logger = sp.GetRequiredService<ILogger<LearnedTriggerService>>();
     var configuration = sp.GetRequiredService<IConfiguration>();

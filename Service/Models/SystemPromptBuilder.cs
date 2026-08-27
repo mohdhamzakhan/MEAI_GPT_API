@@ -278,67 +278,14 @@ Would you like detailed information about any specific policy?
             sb.AppendLine("- If some parts are missing, clearly state what is not available");
             sb.AppendLine();
 
-            // Same guardrail added to BuildContextAwareSystemPrompt after a
-            // real hallucination incident — this query type routes here now
-            // (see the broadened IsPolicyDetailQuery keyword list), so the
-            // explicit warning needs to live here too, not just in the
-            // fallback prompt.
-            sb.AppendLine("- DO NOT ADD OUTSIDE REAL-WORLD KNOWLEDGE, EVEN IF IT SOUNDS RELEVANT:");
-            sb.AppendLine("  This is a company-internal policy document, not a guide to the topic in general.");
-            sb.AppendLine("  Do NOT mention government ministries, regulatory bodies, external agencies,");
-            sb.AppendLine("  passport/visa offices, customs authorities, or similar institutions UNLESS they");
-            sb.AppendLine("  are explicitly named in the context. Do NOT state specific limits, amounts, or");
-            sb.AppendLine("  thresholds unless that exact figure appears in the context. It is better to give");
-            sb.AppendLine("  a shorter, incomplete answer than to add plausible-sounding details from general");
-            sb.AppendLine("  knowledge.");
-            sb.AppendLine();
-
-            // Carve-out added after a real incident: the rule above ("don't
-            // state a figure unless it's literally in the context") was
-            // being read by the model as forbidding it from doing basic
-            // arithmetic on a rate that WAS in the context — e.g. context
-            // says "one day of leave per 10.73 days worked", user asks
-            // "how many days do I get for 180 days worked", and the model
-            // just re-stated the rate instead of computing 180/10.73,
-            // because the computed number itself doesn't appear verbatim
-            // anywhere in the source text. That's a different case from
-            // fabricating a fact — it's applying a grounded formula.
-            sb.AppendLine("- EXCEPTION — CALCULATIONS ARE REQUIRED, NOT OPTIONAL:");
-            sb.AppendLine("  If the context gives a rate, ratio, or formula (e.g. \"1 day per X days worked\",");
-            sb.AppendLine("  \"Y% of basic pay\") and the user's question requires applying it to a specific");
-            sb.AppendLine("  number they provided, you MUST perform that calculation and show the result —");
-            sb.AppendLine("  do not just restate the rate. Show your work (e.g. \"180 ÷ 10.73 ≈ 16.8 days\").");
-            sb.AppendLine("  This is not \"outside knowledge\" even though the computed number itself doesn't");
-            sb.AppendLine("  appear in the source text — the rate it's derived from does.");
-            sb.AppendLine();
-
-            // Added after a real incident: the context can legitimately
-            // contain chunks from MORE THAN ONE policy document that cover
-            // similar-sounding topics -- e.g. a question about "domestic
-            // travel...meal allowance" retrieved both the Domestic Travel
-            // Scheme AND the Foreign Travel Policy (both have meal-allowance
-            // sections). The model correctly cited both, but presented the
-            // Foreign Travel Policy's USD rates under an ambiguous section
-            // header right next to the correct domestic INR rates, with
-            // nothing telling the reader which one actually applies to
-            // them. Every individual citation was accurate; the answer was
-            // still misleading. The fix is not "trust fewer chunks" (that
-            // reduces recall) but "notice when retrieved chunks belong to
-            // different, non-overlapping policies and pick the one the
-            // question is actually about."
-            sb.AppendLine("- IF CONTEXT CONTAINS MULTIPLE DIFFERENT POLICIES ON A SIMILAR TOPIC:");
-            sb.AppendLine("  Retrieval sometimes returns chunks from more than one policy document that");
-            sb.AppendLine("  cover a similar-sounding topic (e.g. both a Domestic Travel policy and a Foreign");
-            sb.AppendLine("  Travel policy have meal-allowance sections). Before writing your answer, identify");
-            sb.AppendLine("  which SPECIFIC policy the question is actually asking about (look for explicit");
-            sb.AppendLine("  words like \"domestic\"/\"foreign\", \"within India\"/\"abroad\", or a currency the");
-            sb.AppendLine("  user mentions) and answer using ONLY that policy's content.");
-            sb.AppendLine("  Do NOT include content, figures, or citations from a different, non-matching");
-            sb.AppendLine("  policy just because it was retrieved — even with an accurate citation, mixing in");
-            sb.AppendLine("  an irrelevant policy's numbers (e.g. a different currency, or a different travel");
-            sb.AppendLine("  type) can mislead the reader into applying the wrong figures to their situation.");
-            sb.AppendLine("  Only include the other policy if the user explicitly asks to compare them.");
-            sb.AppendLine();
+            // ✅ CHANGED: previously an independently-maintained, dash-bulleted
+            // version of these same rules that had already drifted from the
+            // BuildContextAwareSystemPrompt copy — missing rule 8 (checking
+            // whether a provision applies to the employee or a named family
+            // member) entirely. Now sourced from the same shared
+            // BuildGroundingRulesBlock() as every other builder, so this
+            // path gets every current and future grounding fix automatically.
+            sb.Append(BuildGroundingRulesBlock());
 
             sb.AppendLine("═══════════════════════════════════════════════════════════════");
             sb.AppendLine();
@@ -862,17 +809,20 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
 
             return sb.ToString();
         }
-        public string BuildContextAwareSystemPrompt(string plant, List<RelevantChunk> chunks, string query)
+        // ✅ NEW: single source of truth for the core grounding/anti-fabrication
+        // rules (1-8), extracted verbatim from BuildContextAwareSystemPrompt —
+        // confirmed to be the more complete of two independently-maintained
+        // copies (BuildPolicyDetailSystemPrompt's own version was missing
+        // rule 8, the family-member-vs-employee scoping check, entirely).
+        // Called from every builder that needs grounding guarantees, so a
+        // future fix (like each of the incident-driven rules below) only
+        // needs to be written once and automatically applies everywhere,
+        // instead of requiring a manual, easy-to-miss copy into each builder
+        // — which is exactly how rule 8 ended up missing from one path.
+        private string BuildGroundingRulesBlock()
         {
             var prompt = new StringBuilder();
 
-            prompt.AppendLine($"You are MEAI Policy Assistant for {plant}.");
-            prompt.AppendLine();
-            prompt.AppendLine("═══════════════════════════════════════════════════════════════");
-            prompt.AppendLine();
-
-            prompt.AppendLine("🎯 CRITICAL INSTRUCTIONS:");
-            prompt.AppendLine();
             prompt.AppendLine("1. **BASE ANSWER ON PROVIDED CONTEXT ONLY**");
             prompt.AppendLine("   - The context below contains actual policy excerpts");
             prompt.AppendLine("   - Use this information to answer the question");
@@ -918,11 +868,9 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
             prompt.AppendLine("     details from general knowledge");
             prompt.AppendLine();
 
-            // Same calculation carve-out as BuildPolicyDetailSystemPrompt —
-            // this prompt is the fallback path, which is exactly where the
-            // EL-days query landed, and it hit the same problem: the rule
-            // above reads as "never state a number that isn't verbatim in
-            // context", which blocks legitimate arithmetic on a stated rate.
+            // Same calculation carve-out as before — reads as "never state a
+            // number that isn't verbatim in context", which would otherwise
+            // block legitimate arithmetic on a stated rate.
             prompt.AppendLine("6. **EXCEPTION — CALCULATIONS ARE REQUIRED, NOT OPTIONAL**");
             prompt.AppendLine("   - If the context provides a rate, ratio, or formula (e.g., \"1 day per X days worked\"");
             prompt.AppendLine("     or \"Y% of basic pay\") and the user's question requires applying it to a specific");
@@ -981,6 +929,22 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
             prompt.AppendLine("     leaving it out over guessing — an incomplete answer is safer than misapplying a");
             prompt.AppendLine("     benefit to the wrong person");
             prompt.AppendLine();
+
+            return prompt.ToString();
+        }
+
+        public string BuildContextAwareSystemPrompt(string plant, List<RelevantChunk> chunks, string query)
+        {
+            var prompt = new StringBuilder();
+
+            prompt.AppendLine($"You are MEAI Policy Assistant for {plant}.");
+            prompt.AppendLine();
+            prompt.AppendLine("═══════════════════════════════════════════════════════════════");
+            prompt.AppendLine();
+
+            prompt.AppendLine("🎯 CRITICAL INSTRUCTIONS:");
+            prompt.AppendLine();
+            prompt.Append(BuildGroundingRulesBlock());
 
             prompt.AppendLine("═══════════════════════════════════════════════════════════════");
             prompt.AppendLine();
