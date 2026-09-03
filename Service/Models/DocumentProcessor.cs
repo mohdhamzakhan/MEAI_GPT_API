@@ -4,7 +4,6 @@ using DocumentFormat.OpenXml.Spreadsheet;
 using DocumentFormat.OpenXml.Wordprocessing;
 using NPOI.HWPF;
 using NPOI.HWPF.Extractor;
-using NPOI.SS.Formula.Functions;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Text;
@@ -13,8 +12,11 @@ using System.Xml.Linq;
 using Tesseract;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Util;
+using Comment = DocumentFormat.OpenXml.Spreadsheet.Comment;
 using Drawing = DocumentFormat.OpenXml.Drawing;
 using DrawingSpreadsheet = DocumentFormat.OpenXml.Drawing.Spreadsheet;
+using Hyperlink = DocumentFormat.OpenXml.Spreadsheet.Hyperlink;
+using NumberingFormat = DocumentFormat.OpenXml.Spreadsheet.NumberingFormat;
 using Wp = DocumentFormat.OpenXml.Drawing.Wordprocessing;
 
 public class DocumentProcessor : IDocumentProcessor, IDisposable
@@ -637,37 +639,16 @@ public class DocumentProcessor : IDocumentProcessor, IDisposable
             }
 
             // ✅ NEW: connection shapes (cxnSp) are the actual connector
-            // LINES/arrows between boxes — distinct from Shape (sp) elements.
-            // These rarely carry text, but when a diagram labels a decision
-            // branch directly on the line itself (e.g. "Yes"/"No" on the arrow
-            // leaving a Decision diamond) rather than in a separate nearby text
-            // box, that label lives here and was previously never extracted at
-            // all — silently dropping a piece of the flow's actual logic.
-            foreach (var connector in drawingsPart.WorksheetDrawing.Descendants<DrawingSpreadsheet.ConnectionShape>())
-            {
-                var text = string.Join(" ", connector.TextBody?
-                    .Descendants<Drawing.Text>()
-                    .Select(t => t.Text) ?? Enumerable.Empty<string>()).Trim();
-
-                if (string.IsNullOrWhiteSpace(text)) continue;
-
-                long row = 0, col = 0;
-                var anchor = connector.Parent;
-                if (anchor is DrawingSpreadsheet.TwoCellAnchor twoCell)
-                {
-                    row = long.TryParse(twoCell.FromMarker?.RowId?.Text, out var r) ? r : 0;
-                    col = long.TryParse(twoCell.FromMarker?.ColumnId?.Text, out var c) ? c : 0;
-                }
-
-                results.Add(new ExtractedShape
-                {
-                    Text = text,
-                    GeometryPreset = "connectorLine",
-                    IsLikelyConnector = false, // a labeled arrow, not an off-page connector
-                    Row = row,
-                    Column = col
-                });
-            }
+            // ⚠️ REMOVED: a previous version of this method attempted to read
+            // connector labels via `connector.TextBody`. That doesn't exist --
+            // per the OOXML DrawingML schema, cxnSp (ConnectionShape, i.e. a
+            // connector line/arrow) has NO txBody element at all; only sp
+            // (Shape) elements can carry text. A line that visually appears to
+            // have a label on it is, in the underlying XML, actually a
+            // separate overlapping Shape/text-box positioned near the line --
+            // which the Shape-extraction loop above already picks up on its
+            // own. There is no valid API to make "text on a connector" work,
+            // so this block was removed rather than patched.
         }
 
         // --- Legacy VML shapes fallback ---
@@ -795,9 +776,9 @@ public class DocumentProcessor : IDocumentProcessor, IDisposable
         // cell would be lost.
         var comments = new Dictionary<string, string>();
         var commentsPart = worksheetPart.WorksheetCommentsPart;
-        if (commentsPart?.CommentList != null)
+        if (commentsPart?.Comments?.CommentList != null)
         {
-            foreach (var comment in commentsPart.CommentList.Elements<Comment>())
+            foreach (var comment in commentsPart.Comments.CommentList.Elements<Comment>())
             {
                 var cellRef = comment.Reference?.Value;
                 var text = comment.CommentText?.InnerText?.Trim();
