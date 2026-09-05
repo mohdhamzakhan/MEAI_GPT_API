@@ -1,20 +1,26 @@
 ﻿[
-    {
-        "UserId": "hamza.khan",
-        "Grade": "Deputy Manager",
-        "EmployeeCategory": "Indirect",
-        "DirectSubtype": null
-    },
-    {
-        "UserId": "example.directworker",
-        "Grade": null,
-        "EmployeeCategory": "Direct",
-        "DirectSubtype": "Direct Worker"
-    },
-    {
-        "UserId": "example.adminstaff",
-        "Grade": null,
-        "EmployeeCategory": "Direct",
-        "DirectSubtype": "Administrative Staff"
-    }
+  {
+    "UserId": "hamza.khan",
+    "Grade": "Deputy Manager",
+    "EmployeeCategory": "Indirect",
+    "DirectSubtype": null
+  },
+  {
+    "UserId": "sushant",
+    "Grade": "Sr. General Manager cum MEO ",
+    "EmployeeCategory": "Indirect",
+    "DirectSubtype": null
+  },
+  {
+    "UserId": "example.directworker",
+    "Grade": null,
+    "EmployeeCategory": "Direct",
+    "DirectSubtype": "Direct Worker"
+  },
+  {
+    "UserId": "example.adminstaff",
+    "Grade": null,
+    "EmployeeCategory": "Direct",
+    "DirectSubtype": "Administrative Staff"
+  }
 ]

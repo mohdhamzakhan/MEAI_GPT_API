@@ -205,7 +205,7 @@ namespace MEAI_GPT_API.Services
             _learnedTriggerService = learnedTriggerService;
 
             _gradeHierarchy = gradeHierarchy;
-            _gradeEligibilityService = gradeEligibilityService; 
+            _gradeEligibilityService = gradeEligibilityService;
             _employeeDirectory = employeeDirectory;
         }
 
@@ -4140,100 +4140,111 @@ namespace MEAI_GPT_API.Services
             });
             return pattern.IsMatch(lowerText);
         }
-        private async Task<List<RelevantChunk>> SearchForSpecificSection(
-    SectionQuery sectionQuery,
-    ModelConfiguration embeddingModel,
-    int maxResults,
-    string plant,
-    string collectionId,
-    EmployeeRecord? requester = null) // Added requester parameter
+        private async Task<List<RelevantChunk>> SearchForSpecificSection(SectionQuery sectionQuery, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId, EmployeeRecord? requester = null)
+
         {
+
             string combinedQuery;
 
+
+
             if (sectionQuery.IsAnnexure)
+
             {
+
+                // ✅ FIX: this used to hardcode "Section {N} ..." and expand it
+
+                // with GetDynamicSectionTopics(), which is tuned for ISO-style
+
+                // numbered sections (scope/definitions/etc), not annexures. That
+
+                // built an embedding query semantically about "Section 2" topics
+
+                // when the user asked for "Annexure 2" — the correct chunk never
+
+                // made it into the candidate pool for IsExactAnnexureMatch to
+
+                // evaluate. Keep the query short and literal instead; precision
+
+                // here comes from the exact-match filter below, not from the
+
+                // embedding search being smart about annexure semantics.
+
+                //
+
+                // ✅ NEW: generalized to use the query's actual ReferenceType
+
+                // (Clause, Form, etc. from DynamicRAG:ReferenceTypes) instead
+
+                // of always hardcoding "Annexure" — Annexure keeps its exact
+
+                // original wording for backward compatibility.
+
                 combinedQuery = string.Equals(sectionQuery.ReferenceType, "Annexure", StringComparison.OrdinalIgnoreCase) ?
+
                 $"Annexure {sectionQuery.SectionNumber} form approval technical baseline" :
-                $"{sectionQuery.ReferenceType} {sectionQuery.SectionNumber}";
+
+          $"{sectionQuery.ReferenceType} {sectionQuery.SectionNumber}";
+
             }
+
             else
+
             {
+
+                // Create a single comprehensive search query instead of multiple
+
                 combinedQuery = $"Section {sectionQuery.SectionNumber} {sectionQuery.DocumentType} " +
-                    string.Join(" ", _policyAnalysis.GetDynamicSectionTopics(sectionQuery.SectionNumber, sectionQuery.DocumentType));
+
+                  string.Join(" ", _policyAnalysis.GetDynamicSectionTopics(sectionQuery.SectionNumber, sectionQuery.DocumentType));
+
             }
+
+
+
+            // ✅ Annexure mentions are often a single line buried inside a large,
+
+            // topically-unrelated chunk (e.g. a numbered list item covering
+
+            // several unrelated procedures). We rely on exact-text filtering
+
+            // afterward, not on the initial embedding ranking being precise, so
+
+            // cast a much wider net for annexure lookups than for normal
+
+            // section queries, where embedding similarity is a fairly reliable
+
+            // signal on its own.
 
             var candidatePoolSize = sectionQuery.IsAnnexure ?
-                Math.Max(maxResults * 6, 40) :
-                maxResults * 2;
 
-            // --- Access Control & Plant Filtering Logic ---
-            var normalizedPlant = plant.ToLowerInvariant();
-            var plantClause = new Dictionary<string, object>
-    {
-        {
-            "$or",
-            new List<Dictionary<string, object>>
-            {
-                new() { { "plant", normalizedPlant } },
-                new() { { "plant", "centralized" } },
-                new() { { "plant", "context" } },
-                new() { { "plant", "general" } },
-                new() { { "plant", "additional_source" } }
-            }
-        }
-    };
+              Math.Max(maxResults * 6, 40) :
 
-            var clauses = new List<Dictionary<string, object>> { plantClause };
+              maxResults * 2;
 
-            if (requester?.Grade != null)
-            {
-                var rank = _gradeHierarchy.RankOf(requester.Grade) ?? null;
-                if (rank.HasValue)
-                {
-                    clauses.Add(new Dictionary<string, object> {
-                { "$and", new List<Dictionary<string, object>> {
-                    new() { { "grade_min_rank", new Dictionary<string, object> { { "$lte", rank.Value } } } },
-                    new() { { "grade_max_rank", new Dictionary<string, object> { { "$gte", rank.Value } } } },
-                }}
-            });
-                }
-            }
 
-            if (requester?.EmployeeCategory != null)
-            {
-                clauses.Add(new Dictionary<string, object> {
-            { "$or", new List<Dictionary<string, object>> {
-                new() { { "employee_category", requester.EmployeeCategory.ToLowerInvariant() } },
-                new() { { "employee_category", "all" } },
-            }}
-        });
-            }
 
-            if (requester?.DirectSubtype != null)
-            {
-                clauses.Add(new Dictionary<string, object> {
-            { "$or", new List<Dictionary<string, object>> {
-                new() { { "direct_subtype", requester.DirectSubtype.ToLowerInvariant() } },
-                new() { { "direct_subtype", "all" } },
-            }}
-        });
-            }
+            // Single search instead of multiple
 
-            var whereFilter = clauses.Count > 1
-                ? new Dictionary<string, object> { { "$and", clauses } }
-                : clauses[0];
-            // ----------------------------------------------
+            var results = await PerformChromaSearch(combinedQuery, embeddingModel, candidatePoolSize, plant, collectionId, requester);
 
-            // Pass the built whereFilter to PerformChromaSearch instead of just 'plant'
-            var results = await PerformChromaSearch(combinedQuery, embeddingModel, candidatePoolSize, whereFilter, collectionId);
+
 
             // Filter results after retrieval
+
             return results
-                .Where(r => IsSectionContentDynamic(r.Text, r.Source, sectionQuery))
-                .OrderByDescending(r => CalculateDynamicSectionRelevance(r, sectionQuery))
-                .Take(maxResults)
-                .ToList();
+
+              .Where(r => IsSectionContentDynamic(r.Text, r.Source, sectionQuery))
+
+              .OrderByDescending(r => CalculateDynamicSectionRelevance(r, sectionQuery))
+
+              .Take(maxResults)
+
+              .ToList();
+
         }
+
+
         private double CalculateDynamicSectionRelevance(RelevantChunk chunk, SectionQuery sectionQuery)
         {
             double relevance = chunk.Similarity;
@@ -5261,98 +5272,245 @@ namespace MEAI_GPT_API.Services
             }
         }
 
-        private async Task<List<RelevantChunk>> PerformChromaSearch(string query, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId)
+        private async Task<List<RelevantChunk>> PerformChromaSearch(
+            string query,
+            ModelConfiguration embeddingModel,
+            int maxResults,
+            string plant,
+            string collectionId,
+            EmployeeRecord? requester = null)
         {
             try
             {
                 var queryEmbedding = await GetQueryEmbeddingAsync(query, embeddingModel);
+
                 if (queryEmbedding.Count == 0)
                 {
-                    _logger.LogError($"❌ Failed to generate embedding for query: {query}");
+                    _logger.LogError(
+                        "❌ Failed to generate embedding for query: {Query}",
+                        query);
+
                     return new List<RelevantChunk>();
                 }
 
                 var normalizedPlant = plant.ToLowerInvariant();
-                var whereFilter = new Dictionary<string,
-                  object> {
-            {
-              "$or",
-              new List < Dictionary < string,
-              object >> {
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    normalizedPlant
-                  }
-                },
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    "centralized"
-                  }
-                },
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    "context"
-                  }
-                },
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    "general"
-                  }
-                },
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    "additional_source"
-                  }
-                }
-              }
-            }
-          };
 
+                // ---------------------------------------------------------
+                // PLANT FILTER
+                // ---------------------------------------------------------
+                var plantClause = new Dictionary<string, object>
+        {
+            {
+                "$or",
+                new List<Dictionary<string, object>>
+                {
+                    new() { { "plant", normalizedPlant } },
+                    new() { { "plant", "centralized" } },
+                    new() { { "plant", "context" } },
+                    new() { { "plant", "general" } },
+                    new() { { "plant", "additional_source" } }
+                }
+            }
+        };
+
+                // ---------------------------------------------------------
+                // BUILD FILTER CLAUSES
+                // ---------------------------------------------------------
+                var clauses = new List<Dictionary<string, object>>
+        {
+            plantClause
+        };
+
+                // ---------------------------------------------------------
+                // GRADE FILTER
+                // ---------------------------------------------------------
+                if (!string.IsNullOrWhiteSpace(requester?.Grade))
+                {
+                    var rank = _gradeHierarchy.RankOf(requester.Grade);
+
+                    if (rank.HasValue)
+                    {
+                        clauses.Add(
+                            new Dictionary<string, object>
+                            {
+                        {
+                            "$and",
+                            new List<Dictionary<string, object>>
+                            {
+                                new()
+                                {
+                                    {
+                                        "grade_min_rank",
+                                        new Dictionary<string, object>
+                                        {
+                                            { "$lte", rank.Value }
+                                        }
+                                    }
+                                },
+                                new()
+                                {
+                                    {
+                                        "grade_max_rank",
+                                        new Dictionary<string, object>
+                                        {
+                                            { "$gte", rank.Value }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                            });
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "⚠️ Could not determine grade rank for requester grade: {Grade}",
+                            requester.Grade);
+                    }
+                }
+
+                // ---------------------------------------------------------
+                // EMPLOYEE CATEGORY FILTER
+                // ---------------------------------------------------------
+                if (!string.IsNullOrWhiteSpace(requester?.EmployeeCategory))
+                {
+                    var employeeCategory =
+                        requester.EmployeeCategory.ToLowerInvariant();
+
+                    clauses.Add(
+                        new Dictionary<string, object>
+                        {
+                    {
+                        "$or",
+                        new List<Dictionary<string, object>>
+                        {
+                            new()
+                            {
+                                {
+                                    "employee_category",
+                                    employeeCategory
+                                }
+                            },
+                            new()
+                            {
+                                {
+                                    "employee_category",
+                                    "all"
+                                }
+                            }
+                        }
+                    }
+                        });
+                }
+
+                // ---------------------------------------------------------
+                // DIRECT SUBTYPE FILTER
+                // ---------------------------------------------------------
+                if (!string.IsNullOrWhiteSpace(requester?.DirectSubtype))
+                {
+                    var directSubtype =
+                        requester.DirectSubtype.ToLowerInvariant();
+
+                    clauses.Add(
+                        new Dictionary<string, object>
+                        {
+                    {
+                        "$or",
+                        new List<Dictionary<string, object>>
+                        {
+                            new()
+                            {
+                                {
+                                    "direct_subtype",
+                                    directSubtype
+                                }
+                            },
+                            new()
+                            {
+                                {
+                                    "direct_subtype",
+                                    "all"
+                                }
+                            }
+                        }
+                    }
+                        });
+                }
+
+                // ---------------------------------------------------------
+                // FINAL CHROMA WHERE FILTER
+                // ---------------------------------------------------------
+                var whereFilter = clauses.Count > 1
+                    ? new Dictionary<string, object>
+                    {
+                { "$and", clauses }
+                    }
+                    : clauses[0];
+
+                // ---------------------------------------------------------
+                // SEARCH REQUEST
+                // ---------------------------------------------------------
                 var searchData = new
                 {
-                    query_embeddings = new List<List<float>> {
-              queryEmbedding
+                    query_embeddings = new List<List<float>>
+            {
+                queryEmbedding
             },
+
                     n_results = maxResults,
-                    include = new[] {
-              "documents",
-              "metadatas",
-              "distances"
+
+                    include = new[]
+                    {
+                "documents",
+                "metadatas",
+                "distances"
             },
+
                     where = whereFilter
                 };
 
-                using
-                var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                using var cts =
+                    new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
                 var response = await _chromaClient.PostAsJsonAsync(
-          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
-                  searchData, cts.Token);
+                    $"/api/v2/tenants/{_chromaOptions.Tenant}" +
+                    $"/databases/{_chromaOptions.Database}" +
+                    $"/collections/{collectionId}/query",
+                    searchData,
+                    cts.Token);
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    var errorContent = await response.Content.ReadAsStringAsync();
-                    _logger.LogError($"❌ ChromaDB search failed: {response.StatusCode} - {errorContent}");
+                    var errorContent =
+                        await response.Content.ReadAsStringAsync();
+
+                    _logger.LogError(
+                        "❌ ChromaDB search failed: {StatusCode} - {Error}",
+                        response.StatusCode,
+                        errorContent);
+
                     return new List<RelevantChunk>();
                 }
 
-                var responseContent = await response.Content.ReadAsStringAsync();
-                using
-                var doc = JsonDocument.Parse(responseContent);
-                return ParseSearchResults(doc.RootElement, maxResults, plant, query);
+                var responseContent =
+                    await response.Content.ReadAsStringAsync();
+
+                using var doc =
+                    JsonDocument.Parse(responseContent);
+
+                return ParseSearchResults(
+                    doc.RootElement,
+                    maxResults,
+                    plant,
+                    query);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"❌ PerformChromaSearch failed for query: {query}");
+                _logger.LogError(
+                    ex,
+                    "❌ PerformChromaSearch failed for query: {Query}",
+                    query);
+
                 return new List<RelevantChunk>();
             }
         }
@@ -8097,7 +8255,7 @@ namespace MEAI_GPT_API.Services
             };
 
             var retrievalResult = await ExecuteRetrievalAsync(
-              question, embModel, maxResults, plant, agentContext, useReRanking, plan,requester);
+              question, embModel, maxResults, plant, agentContext, useReRanking, plan, requester);
 
             var finalChunks = retrievalResult.Chunks;
 
@@ -8846,7 +9004,7 @@ namespace MEAI_GPT_API.Services
 
                     var collectionId = await _collectionManager.GetOrCreateCollectionAsync(embModel);
                     chunks = await SearchForSpecificSection(
-                      sectionQuery, embModel, maxResults, plant, collectionId,requester);
+                      sectionQuery, embModel, maxResults, plant, collectionId, requester);
                 }
                 else
                 {
