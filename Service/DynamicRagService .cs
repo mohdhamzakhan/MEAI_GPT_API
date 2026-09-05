@@ -899,7 +899,9 @@ namespace MEAI_GPT_API.Services
             // Validate input
             if (string.IsNullOrWhiteSpace(question))
                 throw new ArgumentException("Question cannot be empty");
-
+            EmployeeRecord? requester = !string.IsNullOrWhiteSpace(userId)
+                        ? await _employeeDirectory.GetEmployeeInfoAsync(userId)
+                        : null;
             try
             {
                 // Select models (use defaults for MEAI queries)
@@ -4138,57 +4140,99 @@ namespace MEAI_GPT_API.Services
             });
             return pattern.IsMatch(lowerText);
         }
-        private async Task<List<RelevantChunk>> SearchForSpecificSection(SectionQuery sectionQuery, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId)
+        private async Task<List<RelevantChunk>> SearchForSpecificSection(
+    SectionQuery sectionQuery,
+    ModelConfiguration embeddingModel,
+    int maxResults,
+    string plant,
+    string collectionId,
+    EmployeeRecord? requester = null) // Added requester parameter
         {
             string combinedQuery;
 
             if (sectionQuery.IsAnnexure)
             {
-                // ✅ FIX: this used to hardcode "Section {N} ..." and expand it
-                // with GetDynamicSectionTopics(), which is tuned for ISO-style
-                // numbered sections (scope/definitions/etc), not annexures. That
-                // built an embedding query semantically about "Section 2" topics
-                // when the user asked for "Annexure 2" — the correct chunk never
-                // made it into the candidate pool for IsExactAnnexureMatch to
-                // evaluate. Keep the query short and literal instead; precision
-                // here comes from the exact-match filter below, not from the
-                // embedding search being smart about annexure semantics.
-                //
-                // ✅ NEW: generalized to use the query's actual ReferenceType
-                // (Clause, Form, etc. from DynamicRAG:ReferenceTypes) instead
-                // of always hardcoding "Annexure" — Annexure keeps its exact
-                // original wording for backward compatibility.
                 combinedQuery = string.Equals(sectionQuery.ReferenceType, "Annexure", StringComparison.OrdinalIgnoreCase) ?
                 $"Annexure {sectionQuery.SectionNumber} form approval technical baseline" :
-          $"{sectionQuery.ReferenceType} {sectionQuery.SectionNumber}";
+                $"{sectionQuery.ReferenceType} {sectionQuery.SectionNumber}";
             }
             else
             {
-                // Create a single comprehensive search query instead of multiple
                 combinedQuery = $"Section {sectionQuery.SectionNumber} {sectionQuery.DocumentType} " +
-                  string.Join(" ", _policyAnalysis.GetDynamicSectionTopics(sectionQuery.SectionNumber, sectionQuery.DocumentType));
+                    string.Join(" ", _policyAnalysis.GetDynamicSectionTopics(sectionQuery.SectionNumber, sectionQuery.DocumentType));
             }
 
-            // ✅ Annexure mentions are often a single line buried inside a large,
-            // topically-unrelated chunk (e.g. a numbered list item covering
-            // several unrelated procedures). We rely on exact-text filtering
-            // afterward, not on the initial embedding ranking being precise, so
-            // cast a much wider net for annexure lookups than for normal
-            // section queries, where embedding similarity is a fairly reliable
-            // signal on its own.
             var candidatePoolSize = sectionQuery.IsAnnexure ?
-              Math.Max(maxResults * 6, 40) :
-              maxResults * 2;
+                Math.Max(maxResults * 6, 40) :
+                maxResults * 2;
 
-            // Single search instead of multiple
-            var results = await PerformChromaSearch(combinedQuery, embeddingModel, candidatePoolSize, plant, collectionId);
+            // --- Access Control & Plant Filtering Logic ---
+            var normalizedPlant = plant.ToLowerInvariant();
+            var plantClause = new Dictionary<string, object>
+    {
+        {
+            "$or",
+            new List<Dictionary<string, object>>
+            {
+                new() { { "plant", normalizedPlant } },
+                new() { { "plant", "centralized" } },
+                new() { { "plant", "context" } },
+                new() { { "plant", "general" } },
+                new() { { "plant", "additional_source" } }
+            }
+        }
+    };
+
+            var clauses = new List<Dictionary<string, object>> { plantClause };
+
+            if (requester?.Grade != null)
+            {
+                var rank = _gradeHierarchy.RankOf(requester.Grade) ?? null;
+                if (rank.HasValue)
+                {
+                    clauses.Add(new Dictionary<string, object> {
+                { "$and", new List<Dictionary<string, object>> {
+                    new() { { "grade_min_rank", new Dictionary<string, object> { { "$lte", rank.Value } } } },
+                    new() { { "grade_max_rank", new Dictionary<string, object> { { "$gte", rank.Value } } } },
+                }}
+            });
+                }
+            }
+
+            if (requester?.EmployeeCategory != null)
+            {
+                clauses.Add(new Dictionary<string, object> {
+            { "$or", new List<Dictionary<string, object>> {
+                new() { { "employee_category", requester.EmployeeCategory.ToLowerInvariant() } },
+                new() { { "employee_category", "all" } },
+            }}
+        });
+            }
+
+            if (requester?.DirectSubtype != null)
+            {
+                clauses.Add(new Dictionary<string, object> {
+            { "$or", new List<Dictionary<string, object>> {
+                new() { { "direct_subtype", requester.DirectSubtype.ToLowerInvariant() } },
+                new() { { "direct_subtype", "all" } },
+            }}
+        });
+            }
+
+            var whereFilter = clauses.Count > 1
+                ? new Dictionary<string, object> { { "$and", clauses } }
+                : clauses[0];
+            // ----------------------------------------------
+
+            // Pass the built whereFilter to PerformChromaSearch instead of just 'plant'
+            var results = await PerformChromaSearch(combinedQuery, embeddingModel, candidatePoolSize, whereFilter, collectionId);
 
             // Filter results after retrieval
             return results
-              .Where(r => IsSectionContentDynamic(r.Text, r.Source, sectionQuery))
-              .OrderByDescending(r => CalculateDynamicSectionRelevance(r, sectionQuery))
-              .Take(maxResults)
-              .ToList();
+                .Where(r => IsSectionContentDynamic(r.Text, r.Source, sectionQuery))
+                .OrderByDescending(r => CalculateDynamicSectionRelevance(r, sectionQuery))
+                .Take(maxResults)
+                .ToList();
         }
         private double CalculateDynamicSectionRelevance(RelevantChunk chunk, SectionQuery sectionQuery)
         {
@@ -5312,7 +5356,14 @@ namespace MEAI_GPT_API.Services
                 return new List<RelevantChunk>();
             }
         }
-        private async Task<List<RelevantChunk>> SearchGeneral(string query, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId, string originalQuery)
+        private async Task<List<RelevantChunk>> SearchGeneral(
+            string query,
+            ModelConfiguration embeddingModel,
+            int maxResults,
+            string plant,
+            string collectionId,
+            string originalQuery,
+            EmployeeRecord? requester = null)
         {
             try
             {
@@ -5327,75 +5378,83 @@ namespace MEAI_GPT_API.Services
 
                 var normalizedPlant = plant.ToLowerInvariant();
 
-                // Broader search criteria for general queries
-                var whereFilter = new Dictionary<string,
-                  object> {
+                // 1. Build the existing plant clause
+                var plantClause = new Dictionary<string, object>
+        {
             {
-              "$or",
-              new List < Dictionary < string,
-              object >> {
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    normalizedPlant
-                  }
-                },
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    "centralized"
-                  }
-                },
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    "context"
-                  }
-                },
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    "general"
-                  }
-                },
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    "additional_source"
-                  }
+                "$or",
+                new List<Dictionary<string, object>>
+                {
+                    new() { { "plant", normalizedPlant } },
+                    new() { { "plant", "centralized" } },
+                    new() { { "plant", "context" } },
+                    new() { { "plant", "general" } },
+                    new() { { "plant", "additional_source" } }
                 }
-              }
             }
-          };
+        };
+
+                // 2. Initialize the dynamic clauses list
+                var clauses = new List<Dictionary<string, object>> { plantClause };
+
+                // 3. Append requester-based access control clauses if provided
+                if (requester?.Grade != null)
+                {
+                    var rank = _gradeHierarchy.RankOf(requester.Grade) ?? null;
+                    // If Grade is a job title rather than a band name, resolve it first:
+                    // rank = _gradeHierarchy.RankOf(_gradeHierarchy.ResolveTitleForMinBound(requester.Grade) ?? "");
+                    if (rank.HasValue)
+                    {
+                        clauses.Add(new Dictionary<string, object> {
+                    { "$and", new List<Dictionary<string, object>> {
+                        new() { { "grade_min_rank", new Dictionary<string, object> { { "$lte", rank.Value } } } },
+                        new() { { "grade_max_rank", new Dictionary<string, object> { { "$gte", rank.Value } } } }
+                    }}
+                });
+                    }
+                }
+
+                if (requester?.EmployeeCategory != null)
+                {
+                    clauses.Add(new Dictionary<string, object> {
+                { "$or", new List<Dictionary<string, object>> {
+                    new() { { "employee_category", requester.EmployeeCategory.ToLowerInvariant() } },
+                    new() { { "employee_category", "all" } }
+                }}
+            });
+                }
+
+                if (requester?.DirectSubtype != null)
+                {
+                    clauses.Add(new Dictionary<string, object> {
+                { "$or", new List<Dictionary<string, object>> {
+                    new() { { "direct_subtype", requester.DirectSubtype.ToLowerInvariant() } },
+                    new() { { "direct_subtype", "all" } }
+                }}
+            });
+                }
+
+                // 4. Combine into final where filter using $and if multiple clauses exist
+                var whereFilter = clauses.Count > 1
+                    ? new Dictionary<string, object> { { "$and", clauses } }
+                    : clauses[0];
 
                 var searchData = new
                 {
-                    query_embeddings = new List<List<float>> {
-              queryEmbedding
-            },
+                    query_embeddings = new List<List<float>> { queryEmbedding },
                     n_results = Math.Min(maxResults * 2, 50), // Get more results for general search
-                    include = new[] {
-              "documents",
-              "metadatas",
-              "distances"
-            },
+                    include = new[] { "documents", "metadatas", "distances" },
                     where = whereFilter
                 };
 
                 var response = await _chromaClient.PostAsJsonAsync(
-          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
-                  searchData);
+                    $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+                    searchData);
 
                 if (response.IsSuccessStatusCode)
                 {
                     var responseContent = await response.Content.ReadAsStringAsync();
-                    using
-                    var doc = JsonDocument.Parse(responseContent);
+                    using var doc = JsonDocument.Parse(responseContent);
                     var results = ParseSearchResults(doc.RootElement, maxResults, plant, originalQuery);
 
                     _logger.LogInformation($"🔍 General search found {results.Count} results");
@@ -7892,6 +7951,9 @@ namespace MEAI_GPT_API.Services
         {
             var stopwatch = Stopwatch.StartNew();
 
+            EmployeeRecord? requester = !string.IsNullOrWhiteSpace(userId)
+                ? await _employeeDirectory.GetEmployeeInfoAsync(userId)
+                : null;
             // ============================
             // PRE-FLIGHT VALIDATION
             // ============================
@@ -8035,7 +8097,7 @@ namespace MEAI_GPT_API.Services
             };
 
             var retrievalResult = await ExecuteRetrievalAsync(
-              question, embModel, maxResults, plant, agentContext, useReRanking, plan);
+              question, embModel, maxResults, plant, agentContext, useReRanking, plan,requester);
 
             var finalChunks = retrievalResult.Chunks;
 
@@ -8761,7 +8823,8 @@ namespace MEAI_GPT_API.Services
           string plant,
           AgentContext context,
           bool useReRanking,
-          ExecutionPlan plan)
+          ExecutionPlan plan,
+          EmployeeRecord? requester = null)
         {
             var result = new RetrievalResult
             {
@@ -8783,7 +8846,7 @@ namespace MEAI_GPT_API.Services
 
                     var collectionId = await _collectionManager.GetOrCreateCollectionAsync(embModel);
                     chunks = await SearchForSpecificSection(
-                      sectionQuery, embModel, maxResults, plant, collectionId);
+                      sectionQuery, embModel, maxResults, plant, collectionId,requester);
                 }
                 else
                 {
