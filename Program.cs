@@ -223,7 +223,19 @@ builder.Services.AddSingleton<LearnedTriggerService>(sp =>
     return new LearnedTriggerService(logger, filePath);
 });
 
+builder.Services.AddSingleton<GradeHierarchyService>();
 
+builder.Services.AddSingleton<GradeEligibilityService>(provider =>
+{
+    var ollamaClient = provider.GetRequiredService<OllamaHttpClient>();
+    var hierarchy = provider.GetRequiredService<GradeHierarchyService>();
+    var logger = provider.GetRequiredService<ILogger<GradeEligibilityService>>();
+    var cachePath = builder.Configuration["GradeEligibility:CacheFilePath"] ?? "./context/grade-eligibility-cache.json";
+    var generationModel = builder.Configuration["DynamicRAG:DefaultGenerationModel"] ?? "llama3.1:8b";
+    return new GradeEligibilityService(ollamaClient, hierarchy, logger, cachePath, generationModel);
+});
+
+builder.Services.AddSingleton<IEmployeeDirectoryService, JsonFileEmployeeDirectoryService>();
 
 builder.Services.AddSingleton<OllamaQueueService>();
 

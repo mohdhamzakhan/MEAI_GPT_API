@@ -1,0 +1,20 @@
+﻿[
+    {
+        "UserId": "hamza.khan",
+        "Grade": "Deputy Manager",
+        "EmployeeCategory": "Indirect",
+        "DirectSubtype": null
+    },
+    {
+        "UserId": "example.directworker",
+        "Grade": null,
+        "EmployeeCategory": "Direct",
+        "DirectSubtype": "Direct Worker"
+    },
+    {
+        "UserId": "example.adminstaff",
+        "Grade": null,
+        "EmployeeCategory": "Direct",
+        "DirectSubtype": "Administrative Staff"
+    }
+]

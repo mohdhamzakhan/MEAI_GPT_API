@@ -16,6 +16,7 @@
 
 
   <ItemGroup>
+    <Content Remove="context\Employee directory.sample.json" />
     <Content Remove="context\Topic_Anchors.json" />
   </ItemGroup>
 
@@ -63,6 +64,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="context\Employee directory.sample.json" />
     <None Include="D:\Code\MEAIGPT\MEAI_GPT_API\.editorconfig" />
   </ItemGroup>
 

@@ -1,0 +1,128 @@
+{
+  "GradeHierarchy": {
+    "Bands": [
+      "ManagementStaff",
+      "LowerManagement",
+      "JuniorManagement",
+      "OperationalManagement",
+      "MiddleManagement",
+      "SeniorManagement",
+      "TopManagement"
+    ],
+    "TitleToBand": {
+      "ManagementStaff": [
+        "Jr. Engineer/ Jr. Executive",
+        "Jr.Eng/Jr.Exec",
+        "Engineer/ Executive",
+        "Exec/Eng",
+        "Senior Executive/Senior Engineer",
+        "Sr.Exe/Sr.Eng",
+        "Asst. Manager",
+        "Assistant Manager",
+        "Dy.Manager",
+        "Deputy Manager",
+        "Manager"
+      ],
+      "LowerManagement": [
+        "Asst Manager",
+        "Assistant Manager",
+        "Dy. Manager",
+        "Deputy Manager",
+        "Manager",
+        "Sr. Manager",
+        "Senior Manager"
+      ],
+      "JuniorManagement": [
+        "Executive Manager",
+        "Operation Manager",
+        "Executive Senior Manager",
+        "Operational Senior Manager"
+      ],
+      "OperationalManagement": [
+        "Executive Sr. Manager",
+        "Executive Senior Manager",
+        "Operation Sr. Manager",
+        "Operational Senior Manager"
+      ],
+      "MiddleManagement": [
+        "Functional Head cum Senior Manager",
+        "FH cum Sr.Mgr",
+        "Functional Head cum Assistant General Manager",
+        "FH cum AGM",
+        "Functional Head cum Deputy General Manager",
+        "FH cum DGM",
+        "Functional Head cum General Manager",
+        "FH cum GM"
+      ],
+      "SeniorManagement": [
+        "Sr.GM/MEO",
+        "Senior General Manager",
+        "Managing Executive Officers",
+        "AVP/MEO",
+        "Assistant Vice President",
+        "CBO",
+        "Chief Business Officer",
+        "CPO",
+        "Chief People Officer",
+        "Chief Procurement Officer",
+        "CSO",
+        "Chief Shop-floor Officer",
+        "CMO",
+        "Chief Marketing Officer",
+        "COO",
+        "Chief Operating Officer",
+        "CQO",
+        "Chief Quality Officer",
+        "CTO",
+        "Chief Technical Officer",
+        "CIO",
+        "Chief Information Officer"
+      ],
+      "TopManagement": [
+        "CEO",
+        "Chief Executive Officer",
+        "COO",
+        "Chief Operating Officer",
+        "ED",
+        "Executive Director",
+        "VP",
+        "Vice President",
+        "Sr.VP",
+        "Sr. Vice President",
+        "EVP",
+        "Executive Vice President"
+      ]
+    },
+    "AmbiguousTitles": {
+      "_comment": "Titles appearing in more than one band. Resolution rule: 'X and above' clauses resolve to the LOWER band, 'X and below' clauses resolve to the HIGHER band. Confirm this default is correct, or override a specific title's resolution here if not.",
+      "Assistant Manager": {
+        "PreferForMinBound": "ManagementStaff",
+        "PreferForMaxBound": "LowerManagement"
+      },
+      "Deputy Manager": {
+        "PreferForMinBound": "ManagementStaff",
+        "PreferForMaxBound": "LowerManagement"
+      },
+      "Manager": {
+        "PreferForMinBound": "ManagementStaff",
+        "PreferForMaxBound": "LowerManagement"
+      },
+      "Executive Senior Manager": {
+        "PreferForMinBound": "JuniorManagement",
+        "PreferForMaxBound": "OperationalManagement"
+      },
+      "Operational Senior Manager": {
+        "PreferForMinBound": "JuniorManagement",
+        "PreferForMaxBound": "OperationalManagement"
+      },
+      "COO": {
+        "PreferForMinBound": "SeniorManagement",
+        "PreferForMaxBound": "TopManagement"
+      },
+      "Chief Operating Officer": {
+        "PreferForMinBound": "SeniorManagement",
+        "PreferForMaxBound": "TopManagement"
+      }
+    }
+  }
+}
