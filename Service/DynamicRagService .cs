@@ -3245,13 +3245,16 @@ namespace MEAI_GPT_API.Services
                 var documents = successfulChunks.Select(c => c.Text).ToList();
                 var ids = successfulChunks.Select(c => c.ChunkId).ToList();
                 var embeddings = successfulChunks.Select(c => c.Embedding).ToList();
-                var eligibility = await _gradeEligibilityService.GetOrExtractAsync(c.SourceFile, c.Text);
-                var metadatas = successfulChunks.Select(c =>
-                  CreateChunkMetadata(c.SourceFile, lastModified, model.Name, c.Text, plant, c.SectionId, c.Title,
-                            minGradeBand: eligibility.MinGradeBand,
-                            maxGradeBand: eligibility.MaxGradeBand,
-                            employeeCategory: eligibility.EmployeeCategory,
-                            directSubtype: eligibility.DirectSubtype)).ToList();
+                var metadatas = new List<Dictionary<string, object>>();
+                foreach (var c in successfulChunks)
+                {
+                    var eligibility = await _gradeEligibilityService.GetOrExtractAsync(c.SourceFile, c.Text);
+                    metadatas.Add(CreateChunkMetadata(c.SourceFile, lastModified, model.Name, c.Text, plant, c.SectionId, c.Title,
+                        minGradeBand: eligibility.MinGradeBand,
+                        maxGradeBand: eligibility.MaxGradeBand,
+                        employeeCategory: eligibility.EmployeeCategory,
+                        directSubtype: eligibility.DirectSubtype));
+                }
 
                 _logger.LogInformation($"💾 Saving {successfulChunks.Count} chunks to ChromaDB collection: {collectionId}");
 
