@@ -60,6 +60,27 @@ namespace MEAI_GPT_API.Models
             /// TryResolveGradeAnswer) -- null until resolved.
             /// </summary>
             public string? EmployeeGrade { get; set; }
+
+            // 🆕 General-purpose clarification flow, not restricted to grade.
+            // Triggered when the self-verification pipeline can't ground an
+            // answer confidently even after retrying with a stronger model —
+            // instead of always falling back to "contact HR", the system
+            // gets one shot at asking the user a specific question that
+            // might resolve the ambiguity (which policy, which plant,
+            // which benefit type, etc.), then re-answers using their reply.
+            public bool AwaitingGeneralClarification { get; set; } = false;
+            public string? PendingGeneralClarificationQuestion { get; set; }
+            /// <summary>The original question being clarified, so the next
+            /// turn's answer can be recombined with it rather than treated
+            /// as a standalone question.</summary>
+            public string? PendingGeneralClarificationOriginalQuestion { get; set; }
+            /// <summary>
+            /// Caps how many clarification rounds a single original question
+            /// can go through before falling back to the flat refusal
+            /// regardless — prevents an unresolvable ambiguity from turning
+            /// into an endless back-and-forth.
+            /// </summary>
+            public int ClarificationAttemptCount { get; set; } = 0;
         }
 
         public class ConversationTurn

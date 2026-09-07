@@ -115,6 +115,15 @@ namespace MEAI_GPT_API.Services
         private readonly GradeHierarchyService _gradeHierarchy;
         private readonly GradeEligibilityService _gradeEligibilityService;
         private readonly IEmployeeDirectoryService _employeeDirectory;
+
+        // Resolved once per request in ProcessQueryAsync/ProcessQueryStreamAsync
+        // and read by PerformChromaSearch/SearchGeneral when building the
+        // eligibility where-clause. Safe as instance state (not a parameter
+        // threaded through 15+ call sites) ONLY because DynamicRagService is
+        // registered AddScoped in Program.cs — one instance per HTTP request,
+        // so this can never leak between concurrent requests. If that
+        // registration ever changes to Singleton, this must be revisited.
+        private EmployeeRecord? _currentRequester;
         public DynamicRagService(
           IModelManager modelManager,
           DynamicCollectionManager collectionManager,
@@ -263,8 +272,8 @@ namespace MEAI_GPT_API.Services
 
         These abbreviations are standard across all MEAI HR policies and should be interpreted consistently.
               ";
-
-                File.WriteAllText(abbreviationsPath, abbreviationContent);
+      
+        File.WriteAllText(abbreviationsPath, abbreviationContent);
                 _logger.LogInformation("Created abbreviations context file");
             }
         }
@@ -283,11 +292,13 @@ namespace MEAI_GPT_API.Services
                     var plantOrgContent = $@"MEAI {plant} Plant - Organization Details
         
           These are the fixed organizational details
-          for {plant}
+          for {
+                            plant
+          }
                     plant.
                   ";
-
-                    File.WriteAllText(plantOrgPath, plantOrgContent);
+        
+          File.WriteAllText(plantOrgPath, plantOrgContent);
                     _logger.LogInformation($"Created organization context file for {plant}");
                 }
             }
@@ -350,25 +361,45 @@ namespace MEAI_GPT_API.Services
             var triggerGenDelayMs = _config.TriggerGenerationDelayMs > 0 ? _config.TriggerGenerationDelayMs : 2000;
             foreach (var filePath in policyFiles) // context files don't need triggers
             {
-                bool madeRealCall = false;
+                bool madeTriggerCall = false;
                 try
                 {
                     var content = await _documentProcessor.ExtractTextAsync(filePath);
-                    madeRealCall = await _policyTriggerService.GenerateTriggersForDocumentAsync(filePath, content);
+                    madeTriggerCall = await _policyTriggerService.GenerateTriggersForDocumentAsync(filePath, content);
+
+                    // ✅ NEW: same pre-pass now also warms the grade-eligibility
+                    // cache, one call per chunk. Chunking here is repeated work
+                    // (ProcessFileForModelAsync chunks the same file again per
+                    // model below) but it's cheap — no LLM/embedding calls — and
+                    // means the per-model pass below hits the cache instead of
+                    // calling the LLM again. Throttled the same way as trigger
+                    // generation: only delay after a call that actually hit the
+                    // LLM, not on cache hits or pre-filter skips. Delayed inline
+                    // per-chunk here (not via the shared madeTriggerCall flag
+                    // below) since a file can have many chunks each needing
+                    // their own throttle, not just one delay for the whole file.
+                    var chunksForEligibility = _textChunking.ChunkText(content, filePath);
+                    foreach (var chunk in chunksForEligibility)
+                    {
+                        var (_, madeEligibilityCall) = await _gradeEligibilityService.GetOrExtractAsync(filePath, chunk.Text);
+                        if (madeEligibilityCall)
+                        {
+                            await Task.Delay(triggerGenDelayMs);
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, $"⚠️ Trigger generation skipped for {filePath}");
                 }
-                if (madeRealCall)
+                if (madeTriggerCall)
                 {
                     await Task.Delay(triggerGenDelayMs);
                 }
                 //await Task.Delay(triggerGenDelayMs);
             }
 
-            var tasks = embeddingModels.Select(async model =>
-            {
+            var tasks = embeddingModels.Select(async model => {
                 _logger.LogInformation($"🔄 Processing documents for model: {model.Name}");
 
                 var collectionId = await _collectionManager.GetOrCreateCollectionAsync(model);
@@ -899,9 +930,7 @@ namespace MEAI_GPT_API.Services
             // Validate input
             if (string.IsNullOrWhiteSpace(question))
                 throw new ArgumentException("Question cannot be empty");
-            EmployeeRecord? requester = !string.IsNullOrWhiteSpace(userId)
-                        ? await _employeeDirectory.GetEmployeeInfoAsync(userId)
-                        : null;
+
             try
             {
                 // Select models (use defaults for MEAI queries)
@@ -915,6 +944,16 @@ namespace MEAI_GPT_API.Services
 
                 // Create or load conversation context
                 var actualUserId = userId ?? "system"; // Fallback to "system" if not provided
+
+                // ✅ NEW: resolve this request's eligibility info once, up
+                // front. Read by BuildEligibilityClauses() inside
+                // PerformChromaSearch/SearchGeneral for the rest of this
+                // request. "system"/unknown userIds resolve to an all-null
+                // EmployeeRecord, which correctly means "no eligibility
+                // filter applied" rather than a guessed default — see
+                // JsonFileEmployeeDirectoryService.GetEmployeeInfoAsync.
+                _currentRequester = await _employeeDirectory.GetEmployeeInfoAsync(actualUserId);
+
                 var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
                   sessionId ?? Guid.NewGuid().ToString(),
                   actualUserId, // Use the passed userId
@@ -1148,8 +1187,7 @@ namespace MEAI_GPT_API.Services
                 var scored = await Task.WhenAll(
                   relevantChunks.OrderByDescending(x => x.Similarity)
                   .Take(5)
-                  .Select(async chunk =>
-                  {
+                  .Select(async chunk => {
                       var emb = await GetPerRequestEmbeddingAsync(chunk.Text);
                       var sim = CosineSimilarity(answerEmbedding, emb);
                       chunk.Similarity = sim;
@@ -3154,8 +3192,7 @@ namespace MEAI_GPT_API.Services
                 // Filter and prepare chunks
                 var validChunks = chunks
                   .Where(chunk => !string.IsNullOrWhiteSpace(chunk.Text))
-                  .Select(chunk => new
-                  {
+                  .Select(chunk => new {
                       Text = _stringProcessor.CleanText(chunk.Text),
                       SourceFile = chunk.SourceFile,
                       ChunkId = GenerateChunkId(chunk.SourceFile, chunk.Text, lastModified, model.Name),
@@ -3247,15 +3284,26 @@ namespace MEAI_GPT_API.Services
                 var documents = successfulChunks.Select(c => c.Text).ToList();
                 var ids = successfulChunks.Select(c => c.ChunkId).ToList();
                 var embeddings = successfulChunks.Select(c => c.Embedding).ToList();
-                var metadatas = new List<Dictionary<string, object>>();
+
+                // ✅ FIX: eligibility must be extracted PER CHUNK, not once for
+                // the whole batch. The previous version referenced a 'c' that
+                // wasn't in scope at this point (it only existed inside the
+                // .Select(c => ...) lambda below) and — had it compiled at all —
+                // would have stamped one chunk's eligibility onto every chunk in
+                // the file, defeating the entire point of per-clause extraction
+                // (different clauses in the same document can have different
+                // grade/category restrictions). .Select can't await, so this is
+                // a foreach instead.
+                var metadatas = new List<Dictionary<string,
+                  object>>();
                 foreach (var c in successfulChunks)
                 {
-                    var eligibility = await _gradeEligibilityService.GetOrExtractAsync(c.SourceFile, c.Text);
+                    var (eligibility, _) = await _gradeEligibilityService.GetOrExtractAsync(c.SourceFile, c.Text);
                     metadatas.Add(CreateChunkMetadata(c.SourceFile, lastModified, model.Name, c.Text, plant, c.SectionId, c.Title,
-                        minGradeBand: eligibility.MinGradeBand,
-                        maxGradeBand: eligibility.MaxGradeBand,
-                        employeeCategory: eligibility.EmployeeCategory,
-                        directSubtype: eligibility.DirectSubtype));
+                      minGradeBand: eligibility.MinGradeBand,
+                      maxGradeBand: eligibility.MaxGradeBand,
+                      employeeCategory: eligibility.EmployeeCategory,
+                      directSubtype: eligibility.DirectSubtype));
                 }
 
                 _logger.LogInformation($"💾 Saving {successfulChunks.Count} chunks to ChromaDB collection: {collectionId}");
@@ -3459,8 +3507,7 @@ namespace MEAI_GPT_API.Services
         private readonly ConcurrentDictionary<string, (List<RelevantChunk> Results, DateTime Timestamp)> _searchCache = new();
         public static void ConfigureOptimizedHttpClient(IServiceCollection services)
         {
-            services.AddHttpClient("OllamaAPI", client =>
-            {
+            services.AddHttpClient("OllamaAPI", client => {
                 client.Timeout = TimeSpan.FromSeconds(60);
                 client.DefaultRequestHeaders.Add("Connection", "keep-alive");
             })
@@ -3470,8 +3517,7 @@ namespace MEAI_GPT_API.Services
                   UseCookies = false
               });
 
-            services.AddHttpClient("ChromaDB", client =>
-            {
+            services.AddHttpClient("ChromaDB", client => {
                 client.Timeout = TimeSpan.FromSeconds(15); // Reduced from 30
                 client.DefaultRequestHeaders.Add("Connection", "keep-alive");
                 client.DefaultRequestHeaders.Add("Keep-Alive", "timeout=30, max=100");
@@ -3498,8 +3544,7 @@ namespace MEAI_GPT_API.Services
           "HR policy warm-up text"
         };
 
-                var tasks = embeddingModels.Select(async model =>
-                {
+                var tasks = embeddingModels.Select(async model => {
                     try
                     {
                         foreach (var text in warmUpTexts)
@@ -4133,118 +4178,64 @@ namespace MEAI_GPT_API.Services
         private bool IsExactSectionMatch(string lowerText, string sectionNumber)
         {
             if (string.IsNullOrWhiteSpace(sectionNumber)) return false;
-            var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num =>
-            {
+            var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num => {
                 var escaped = Regex.Escape(num);
                 return new Regex($@"\b(?:section|clause|part)\.?\s*{escaped}(?:\.\d+)*\b" + $@"|(?:^|\n)\s*{escaped}\.(?:\d+\.?)*\s", RegexOptions.IgnoreCase | RegexOptions.Compiled);
             });
             return pattern.IsMatch(lowerText);
         }
-        private async Task<List<RelevantChunk>> SearchForSpecificSection(SectionQuery sectionQuery, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId, EmployeeRecord? requester = null)
-
+        private async Task<List<RelevantChunk>> SearchForSpecificSection(SectionQuery sectionQuery, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId)
         {
-
             string combinedQuery;
 
-
-
             if (sectionQuery.IsAnnexure)
-
             {
-
                 // ✅ FIX: this used to hardcode "Section {N} ..." and expand it
-
                 // with GetDynamicSectionTopics(), which is tuned for ISO-style
-
                 // numbered sections (scope/definitions/etc), not annexures. That
-
                 // built an embedding query semantically about "Section 2" topics
-
                 // when the user asked for "Annexure 2" — the correct chunk never
-
                 // made it into the candidate pool for IsExactAnnexureMatch to
-
                 // evaluate. Keep the query short and literal instead; precision
-
                 // here comes from the exact-match filter below, not from the
-
                 // embedding search being smart about annexure semantics.
-
                 //
-
                 // ✅ NEW: generalized to use the query's actual ReferenceType
-
                 // (Clause, Form, etc. from DynamicRAG:ReferenceTypes) instead
-
                 // of always hardcoding "Annexure" — Annexure keeps its exact
-
                 // original wording for backward compatibility.
-
                 combinedQuery = string.Equals(sectionQuery.ReferenceType, "Annexure", StringComparison.OrdinalIgnoreCase) ?
-
                 $"Annexure {sectionQuery.SectionNumber} form approval technical baseline" :
-
           $"{sectionQuery.ReferenceType} {sectionQuery.SectionNumber}";
-
             }
-
             else
-
             {
-
                 // Create a single comprehensive search query instead of multiple
-
                 combinedQuery = $"Section {sectionQuery.SectionNumber} {sectionQuery.DocumentType} " +
-
                   string.Join(" ", _policyAnalysis.GetDynamicSectionTopics(sectionQuery.SectionNumber, sectionQuery.DocumentType));
-
             }
-
-
 
             // ✅ Annexure mentions are often a single line buried inside a large,
-
             // topically-unrelated chunk (e.g. a numbered list item covering
-
             // several unrelated procedures). We rely on exact-text filtering
-
             // afterward, not on the initial embedding ranking being precise, so
-
             // cast a much wider net for annexure lookups than for normal
-
             // section queries, where embedding similarity is a fairly reliable
-
             // signal on its own.
-
             var candidatePoolSize = sectionQuery.IsAnnexure ?
-
               Math.Max(maxResults * 6, 40) :
-
               maxResults * 2;
 
-
-
             // Single search instead of multiple
-
-            var results = await PerformChromaSearch(combinedQuery, embeddingModel, candidatePoolSize, plant, collectionId, requester);
-
-
+            var results = await PerformChromaSearch(combinedQuery, embeddingModel, candidatePoolSize, plant, collectionId);
 
             // Filter results after retrieval
-
             return results
-
               .Where(r => IsSectionContentDynamic(r.Text, r.Source, sectionQuery))
-
               .OrderByDescending(r => CalculateDynamicSectionRelevance(r, sectionQuery))
-
               .Take(maxResults)
-
               .ToList();
-
         }
-
-
         private double CalculateDynamicSectionRelevance(RelevantChunk chunk, SectionQuery sectionQuery)
         {
             double relevance = chunk.Similarity;
@@ -5272,256 +5263,243 @@ namespace MEAI_GPT_API.Services
             }
         }
 
-        private async Task<List<RelevantChunk>> PerformChromaSearch(
-            string query,
-            ModelConfiguration embeddingModel,
-            int maxResults,
-            string plant,
-            string collectionId,
-            EmployeeRecord? requester = null)
+        /// <summary>
+        /// Builds the eligibility $and-clauses for the current requester
+        /// (grade band, employee_category, direct_subtype), to be combined
+        /// with the existing plant clause. Returns an empty list if
+        /// _currentRequester is null or has no known fields — callers should
+        /// only wrap with $and when this returns at least one clause, so a
+        /// request with no resolved requester behaves exactly as it did
+        /// before eligibility filtering existed (plant-only filtering).
+        ///
+        /// Per the "don't silently default" principle: a null field on
+        /// _currentRequester means that dimension's filter is skipped
+        /// entirely for this request, not defaulted to some assumed value.
+        /// </summary>
+        private List<Dictionary<string, object>> BuildEligibilityClauses()
+        {
+            var clauses = new List<Dictionary<string,
+              object>>();
+            var requester = _currentRequester;
+            if (requester == null) return clauses;
+
+            if (!string.IsNullOrWhiteSpace(requester.Grade))
+            {
+                // Grade on the employee record is a job title (e.g. "Deputy
+                // Manager"), not a band name — resolve it the same
+                // inclusive-by-default way as extraction does, using the
+                // min-bound resolution since we're checking "is this
+                // requester's rank >= the chunk's minimum".
+                var resolvedBand = _gradeHierarchy.ResolveTitleForMinBound(requester.Grade) ??
+                  (_gradeHierarchy.RankOf(requester.Grade) != null ? requester.Grade : null);
+                var rank = resolvedBand != null ? _gradeHierarchy.RankOf(resolvedBand) : null;
+
+                if (rank.HasValue)
+                {
+                    clauses.Add(new Dictionary<string, object> {
+            {
+              "$and",
+              new List < Dictionary < string,
+              object >> {
+                new() {
+                  {
+                    "grade_min_rank",
+                    new Dictionary < string,
+                    object > {
+                      {
+                        "$lte",
+                        rank.Value
+                      }
+                    }
+                  }
+                },
+                new() {
+                  {
+                    "grade_max_rank",
+                    new Dictionary < string,
+                    object > {
+                      {
+                        "$gte",
+                        rank.Value
+                      }
+                    }
+                  }
+                },
+              }
+            }
+          });
+                }
+                else
+                {
+                    _logger.LogWarning($"⚠️ Could not resolve requester grade '{requester.Grade}' to a known band — grade filter skipped for this request, not defaulted");
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(requester.EmployeeCategory))
+            {
+                clauses.Add(new Dictionary<string, object> {
+          {
+            "$or",
+            new List < Dictionary < string,
+            object >> {
+              new() {
+                {
+                  "employee_category",
+                  requester.EmployeeCategory.ToLowerInvariant()
+                }
+              },
+              new() {
+                {
+                  "employee_category",
+                  "all"
+                }
+              },
+            }
+          }
+        });
+            }
+
+            if (!string.IsNullOrWhiteSpace(requester.DirectSubtype))
+            {
+                clauses.Add(new Dictionary<string, object> {
+          {
+            "$or",
+            new List < Dictionary < string,
+            object >> {
+              new() {
+                {
+                  "direct_subtype",
+                  requester.DirectSubtype.ToLowerInvariant()
+                }
+              },
+              new() {
+                {
+                  "direct_subtype",
+                  "all"
+                }
+              },
+            }
+          }
+        });
+            }
+
+            return clauses;
+        }
+
+        private async Task<List<RelevantChunk>> PerformChromaSearch(string query, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId)
         {
             try
             {
                 var queryEmbedding = await GetQueryEmbeddingAsync(query, embeddingModel);
-
                 if (queryEmbedding.Count == 0)
                 {
-                    _logger.LogError(
-                        "❌ Failed to generate embedding for query: {Query}",
-                        query);
-
+                    _logger.LogError($"❌ Failed to generate embedding for query: {query}");
                     return new List<RelevantChunk>();
                 }
 
                 var normalizedPlant = plant.ToLowerInvariant();
-
-                // ---------------------------------------------------------
-                // PLANT FILTER
-                // ---------------------------------------------------------
-                var plantClause = new Dictionary<string, object>
-        {
+                var plantClause = new Dictionary<string,
+                  object> {
             {
-                "$or",
-                new List<Dictionary<string, object>>
-                {
-                    new() { { "plant", normalizedPlant } },
-                    new() { { "plant", "centralized" } },
-                    new() { { "plant", "context" } },
-                    new() { { "plant", "general" } },
-                    new() { { "plant", "additional_source" } }
+              "$or",
+              new List < Dictionary < string,
+              object >> {
+                new Dictionary < string,
+                object > {
+                  {
+                    "plant",
+                    normalizedPlant
+                  }
+                },
+                new Dictionary < string,
+                object > {
+                  {
+                    "plant",
+                    "centralized"
+                  }
+                },
+                new Dictionary < string,
+                object > {
+                  {
+                    "plant",
+                    "context"
+                  }
+                },
+                new Dictionary < string,
+                object > {
+                  {
+                    "plant",
+                    "general"
+                  }
+                },
+                new Dictionary < string,
+                object > {
+                  {
+                    "plant",
+                    "additional_source"
+                  }
                 }
+              }
             }
-        };
+          };
 
-                // ---------------------------------------------------------
-                // BUILD FILTER CLAUSES
-                // ---------------------------------------------------------
-                var clauses = new List<Dictionary<string, object>>
-        {
-            plantClause
-        };
+                // ✅ NEW: combine plant filtering with eligibility filtering
+                // (grade/employee_category/direct_subtype) for the currently
+                // resolved requester, if any. A request with no resolved
+                // requester (unauthenticated, unknown userId, etc.) falls
+                // through to plant-only filtering exactly as before —
+                // eligibility clauses are additive, never a replacement.
+                var eligibilityClauses = BuildEligibilityClauses();
+                var whereFilter = eligibilityClauses.Count > 0 ?
+                  new Dictionary<string,
+                  object> {
+            {
+              "$and",
+              new List < Dictionary < string,
+              object >> (eligibilityClauses.Prepend(plantClause))
+            }
+                  } :
+                  plantClause;
 
-                // ---------------------------------------------------------
-                // GRADE FILTER
-                // ---------------------------------------------------------
-                if (!string.IsNullOrWhiteSpace(requester?.Grade))
-                {
-                    var rank = _gradeHierarchy.RankOf(requester.Grade);
-
-                    if (rank.HasValue)
-                    {
-                        clauses.Add(
-                            new Dictionary<string, object>
-                            {
-                        {
-                            "$and",
-                            new List<Dictionary<string, object>>
-                            {
-                                new()
-                                {
-                                    {
-                                        "grade_min_rank",
-                                        new Dictionary<string, object>
-                                        {
-                                            { "$lte", rank.Value }
-                                        }
-                                    }
-                                },
-                                new()
-                                {
-                                    {
-                                        "grade_max_rank",
-                                        new Dictionary<string, object>
-                                        {
-                                            { "$gte", rank.Value }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                            });
-                    }
-                    else
-                    {
-                        _logger.LogWarning(
-                            "⚠️ Could not determine grade rank for requester grade: {Grade}",
-                            requester.Grade);
-                    }
-                }
-
-                // ---------------------------------------------------------
-                // EMPLOYEE CATEGORY FILTER
-                // ---------------------------------------------------------
-                if (!string.IsNullOrWhiteSpace(requester?.EmployeeCategory))
-                {
-                    var employeeCategory =
-                        requester.EmployeeCategory.ToLowerInvariant();
-
-                    clauses.Add(
-                        new Dictionary<string, object>
-                        {
-                    {
-                        "$or",
-                        new List<Dictionary<string, object>>
-                        {
-                            new()
-                            {
-                                {
-                                    "employee_category",
-                                    employeeCategory
-                                }
-                            },
-                            new()
-                            {
-                                {
-                                    "employee_category",
-                                    "all"
-                                }
-                            }
-                        }
-                    }
-                        });
-                }
-
-                // ---------------------------------------------------------
-                // DIRECT SUBTYPE FILTER
-                // ---------------------------------------------------------
-                if (!string.IsNullOrWhiteSpace(requester?.DirectSubtype))
-                {
-                    var directSubtype =
-                        requester.DirectSubtype.ToLowerInvariant();
-
-                    clauses.Add(
-                        new Dictionary<string, object>
-                        {
-                    {
-                        "$or",
-                        new List<Dictionary<string, object>>
-                        {
-                            new()
-                            {
-                                {
-                                    "direct_subtype",
-                                    directSubtype
-                                }
-                            },
-                            new()
-                            {
-                                {
-                                    "direct_subtype",
-                                    "all"
-                                }
-                            }
-                        }
-                    }
-                        });
-                }
-
-                // ---------------------------------------------------------
-                // FINAL CHROMA WHERE FILTER
-                // ---------------------------------------------------------
-                var whereFilter = clauses.Count > 1
-                    ? new Dictionary<string, object>
-                    {
-                { "$and", clauses }
-                    }
-                    : clauses[0];
-
-                // ---------------------------------------------------------
-                // SEARCH REQUEST
-                // ---------------------------------------------------------
                 var searchData = new
                 {
-                    query_embeddings = new List<List<float>>
-            {
-                queryEmbedding
+                    query_embeddings = new List<List<float>> {
+              queryEmbedding
             },
-
                     n_results = maxResults,
-
-                    include = new[]
-                    {
-                "documents",
-                "metadatas",
-                "distances"
+                    include = new[] {
+              "documents",
+              "metadatas",
+              "distances"
             },
-
                     where = whereFilter
                 };
 
-                using var cts =
-                    new CancellationTokenSource(TimeSpan.FromSeconds(30));
-
+                using
+                var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                 var response = await _chromaClient.PostAsJsonAsync(
-                    $"/api/v2/tenants/{_chromaOptions.Tenant}" +
-                    $"/databases/{_chromaOptions.Database}" +
-                    $"/collections/{collectionId}/query",
-                    searchData,
-                    cts.Token);
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+                  searchData, cts.Token);
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    var errorContent =
-                        await response.Content.ReadAsStringAsync();
-
-                    _logger.LogError(
-                        "❌ ChromaDB search failed: {StatusCode} - {Error}",
-                        response.StatusCode,
-                        errorContent);
-
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    _logger.LogError($"❌ ChromaDB search failed: {response.StatusCode} - {errorContent}");
                     return new List<RelevantChunk>();
                 }
 
-                var responseContent =
-                    await response.Content.ReadAsStringAsync();
-
-                using var doc =
-                    JsonDocument.Parse(responseContent);
-
-                return ParseSearchResults(
-                    doc.RootElement,
-                    maxResults,
-                    plant,
-                    query);
+                var responseContent = await response.Content.ReadAsStringAsync();
+                using
+                var doc = JsonDocument.Parse(responseContent);
+                return ParseSearchResults(doc.RootElement, maxResults, plant, query);
             }
             catch (Exception ex)
             {
-                _logger.LogError(
-                    ex,
-                    "❌ PerformChromaSearch failed for query: {Query}",
-                    query);
-
+                _logger.LogError(ex, $"❌ PerformChromaSearch failed for query: {query}");
                 return new List<RelevantChunk>();
             }
         }
-        private async Task<List<RelevantChunk>> SearchGeneral(
-            string query,
-            ModelConfiguration embeddingModel,
-            int maxResults,
-            string plant,
-            string collectionId,
-            string originalQuery,
-            EmployeeRecord? requester = null)
+        private async Task<List<RelevantChunk>> SearchGeneral(string query, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId, string originalQuery)
         {
             try
             {
@@ -5536,83 +5514,90 @@ namespace MEAI_GPT_API.Services
 
                 var normalizedPlant = plant.ToLowerInvariant();
 
-                // 1. Build the existing plant clause
-                var plantClause = new Dictionary<string, object>
-        {
+                // Broader search criteria for general queries
+                var plantClause = new Dictionary<string,
+                  object> {
             {
-                "$or",
-                new List<Dictionary<string, object>>
-                {
-                    new() { { "plant", normalizedPlant } },
-                    new() { { "plant", "centralized" } },
-                    new() { { "plant", "context" } },
-                    new() { { "plant", "general" } },
-                    new() { { "plant", "additional_source" } }
+              "$or",
+              new List < Dictionary < string,
+              object >> {
+                new Dictionary < string,
+                object > {
+                  {
+                    "plant",
+                    normalizedPlant
+                  }
+                },
+                new Dictionary < string,
+                object > {
+                  {
+                    "plant",
+                    "centralized"
+                  }
+                },
+                new Dictionary < string,
+                object > {
+                  {
+                    "plant",
+                    "context"
+                  }
+                },
+                new Dictionary < string,
+                object > {
+                  {
+                    "plant",
+                    "general"
+                  }
+                },
+                new Dictionary < string,
+                object > {
+                  {
+                    "plant",
+                    "additional_source"
+                  }
                 }
+              }
             }
-        };
+          };
 
-                // 2. Initialize the dynamic clauses list
-                var clauses = new List<Dictionary<string, object>> { plantClause };
-
-                // 3. Append requester-based access control clauses if provided
-                if (requester?.Grade != null)
-                {
-                    var rank = _gradeHierarchy.RankOf(requester.Grade) ?? null;
-                    // If Grade is a job title rather than a band name, resolve it first:
-                    // rank = _gradeHierarchy.RankOf(_gradeHierarchy.ResolveTitleForMinBound(requester.Grade) ?? "");
-                    if (rank.HasValue)
-                    {
-                        clauses.Add(new Dictionary<string, object> {
-                    { "$and", new List<Dictionary<string, object>> {
-                        new() { { "grade_min_rank", new Dictionary<string, object> { { "$lte", rank.Value } } } },
-                        new() { { "grade_max_rank", new Dictionary<string, object> { { "$gte", rank.Value } } } }
-                    }}
-                });
-                    }
-                }
-
-                if (requester?.EmployeeCategory != null)
-                {
-                    clauses.Add(new Dictionary<string, object> {
-                { "$or", new List<Dictionary<string, object>> {
-                    new() { { "employee_category", requester.EmployeeCategory.ToLowerInvariant() } },
-                    new() { { "employee_category", "all" } }
-                }}
-            });
-                }
-
-                if (requester?.DirectSubtype != null)
-                {
-                    clauses.Add(new Dictionary<string, object> {
-                { "$or", new List<Dictionary<string, object>> {
-                    new() { { "direct_subtype", requester.DirectSubtype.ToLowerInvariant() } },
-                    new() { { "direct_subtype", "all" } }
-                }}
-            });
-                }
-
-                // 4. Combine into final where filter using $and if multiple clauses exist
-                var whereFilter = clauses.Count > 1
-                    ? new Dictionary<string, object> { { "$and", clauses } }
-                    : clauses[0];
+                // ✅ NEW: same eligibility-clause combination as
+                // PerformChromaSearch — see BuildEligibilityClauses for the
+                // "don't silently default" reasoning.
+                var eligibilityClauses = BuildEligibilityClauses();
+                var whereFilter = eligibilityClauses.Count > 0 ?
+                  new Dictionary<string,
+                  object> {
+            {
+              "$and",
+              new List < Dictionary < string,
+              object >> (eligibilityClauses.Prepend(plantClause))
+            }
+                  } :
+                  plantClause;
 
                 var searchData = new
                 {
-                    query_embeddings = new List<List<float>> { queryEmbedding },
+                    query_embeddings = new List<List<float>> {
+              queryEmbedding
+            },
                     n_results = Math.Min(maxResults * 2, 50), // Get more results for general search
-                    include = new[] { "documents", "metadatas", "distances" },
+                    include = new[] {
+              "documents",
+              "metadatas",
+              "distances"
+            },
                     where = whereFilter
                 };
 
                 var response = await _chromaClient.PostAsJsonAsync(
-                    $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
-                    searchData);
+          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+                  searchData);
 
                 if (response.IsSuccessStatusCode)
                 {
                     var responseContent = await response.Content.ReadAsStringAsync();
-                    using var doc = JsonDocument.Parse(responseContent);
+                    using
+                    var doc = JsonDocument.Parse(responseContent);
                     var results = ParseSearchResults(doc.RootElement, maxResults, plant, originalQuery);
 
                     _logger.LogInformation($"🔍 General search found {results.Count} results");
@@ -8109,9 +8094,6 @@ namespace MEAI_GPT_API.Services
         {
             var stopwatch = Stopwatch.StartNew();
 
-            EmployeeRecord? requester = !string.IsNullOrWhiteSpace(userId)
-                ? await _employeeDirectory.GetEmployeeInfoAsync(userId)
-                : null;
             // ============================
             // PRE-FLIGHT VALIDATION
             // ============================
@@ -8131,6 +8113,86 @@ namespace MEAI_GPT_API.Services
             }
 
             var agentContext = validationResult.Context!;
+
+            // ✅ NEW: same per-request resolution as ProcessQueryAsync — see
+            // that method's comment for why this is safe as instance state
+            // (DynamicRagService is Scoped, one instance per HTTP request).
+            _currentRequester = await _employeeDirectory.GetEmployeeInfoAsync(userId ?? "system");
+
+            // ✅ NEW: if this turn's message is the employee's answer to a
+            // clarifying question asked last turn (see
+            // TryGenerateClarifyingQuestionAsync / the grounding-failure
+            // branch below), combine it with the original question rather
+            // than treating it as a fresh, standalone query — a bare
+            // answer like "the Sanand plant one" means nothing to
+            // retrieval on its own without the question it's answering.
+            if (agentContext.AwaitingGeneralClarification && !string.IsNullOrWhiteSpace(agentContext.PendingGeneralClarificationOriginalQuestion))
+            {
+                var originalQuestion = agentContext.PendingGeneralClarificationOriginalQuestion;
+                var clarificationAnswer = question;
+
+                _logger.LogInformation($"✅ Resolving pending clarification. Original: '{originalQuestion}' | Employee answered: '{clarificationAnswer}'");
+
+                question = $"{originalQuestion} (Additional context from employee: {clarificationAnswer})";
+
+                agentContext.AwaitingGeneralClarification = false;
+                agentContext.PendingGeneralClarificationQuestion = null;
+                agentContext.PendingGeneralClarificationOriginalQuestion = null;
+                // Deliberately NOT resetting ClarificationAttemptCount here —
+                // it caps attempts across this whole resolution chain, so if
+                // the re-answer ALSO fails grounding, the cap still applies
+                // before asking a second time rather than looping forever.
+            }
+
+            // 🧑‍💼 Grade clarification — ported from ProcessQueryAsync, which
+            // had this logic but was never actually reachable from the
+            // streaming endpoint the live UI calls. Resolve an answer to a
+            // pending grade question, or pick up a volunteered grade
+            // mentioned unprompted in the question itself.
+            bool awaitingGradeAnswer = false;
+            if (agentContext.AwaitingGradeClarification)
+            {
+                var resolvedGrade = _policyAnalysis.TryResolveGradeAnswer(question, allowNumberedOptions: true);
+                if (resolvedGrade != null)
+                {
+                    _logger.LogInformation($"🧑‍💼 Grade clarified as '{resolvedGrade}' for session {agentContext.SessionId}");
+                    agentContext.EmployeeGrade = resolvedGrade;
+                    agentContext.AwaitingGradeClarification = false;
+                    question = agentContext.PendingClarificationQuestion ?? question;
+                    agentContext.PendingClarificationQuestion = null;
+                }
+                else
+                {
+                    // Didn't recognize an answer — re-ask rather than silently
+                    // proceeding with a guessed or blended answer.
+                    awaitingGradeAnswer = true;
+                }
+            }
+            else if (string.IsNullOrEmpty(agentContext.EmployeeGrade))
+            {
+                var gradeFromQuestion = _policyAnalysis.TryResolveGradeAnswer(question, allowNumberedOptions: false);
+                if (gradeFromQuestion != null)
+                    agentContext.EmployeeGrade = gradeFromQuestion;
+            }
+
+            if (awaitingGradeAnswer)
+            {
+                await foreach (var chunk in StreamTextResponse(
+                  "Sorry, I didn't quite catch that. Could you confirm your position so I can give you the correct answer?\n\n1. Supervisor and above\n2. Below Supervisor",
+                  cancellationToken))
+                {
+                    yield
+                    return chunk;
+                }
+                yield
+                return new StreamChunk
+                {
+                    Type = "complete",
+                    ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+                };
+                yield
+                break;
+            }
 
             _logger.LogInformation($"📝 Session {agentContext.SessionId} has {agentContext.History.Count} history items");
 
@@ -8255,9 +8317,46 @@ namespace MEAI_GPT_API.Services
             };
 
             var retrievalResult = await ExecuteRetrievalAsync(
-              question, embModel, maxResults, plant, agentContext, useReRanking, plan, requester);
+              question, embModel, maxResults, plant, agentContext, useReRanking, plan);
 
             var finalChunks = retrievalResult.Chunks;
+
+            // 🪦 Drop chunks describing the OTHER death scenario than the one
+            // asked about — ported alongside the grade check below, same
+            // reasoning as ProcessQueryAsync: structural filtering here, not
+            // a prompt instruction, so a mismatched chunk can't reach the
+            // model at all.
+            finalChunks = _policyAnalysis.FilterScenarioMismatchedChunks(finalChunks, question);
+
+            // 🧑‍💼 If retrieved content spans both grade tiers and we still
+            // don't know the employee's grade, pause and ask rather than
+            // generating an answer that guesses or blends both grades'
+            // provisions. Checked AFTER retrieval, not on the raw question,
+            // since "grade-specific" depends on the matched POLICY, not the
+            // question's wording. This existed in ProcessQueryAsync but was
+            // never reachable from this streaming method until now.
+            if (string.IsNullOrEmpty(agentContext.EmployeeGrade) && _policyAnalysis.HasGradeSpecificContent(finalChunks))
+            {
+                _logger.LogInformation($"🧑‍💼 Grade-specific policy content detected for session {agentContext.SessionId} — asking user to clarify position");
+                agentContext.AwaitingGradeClarification = true;
+                agentContext.PendingClarificationQuestion = question;
+
+                await foreach (var chunk in StreamTextResponse(
+                  "This policy has different provisions depending on your grade. Could you let me know your position?\n\n1. Supervisor and above\n2. Below Supervisor",
+                  cancellationToken))
+                {
+                    yield
+                    return chunk;
+                }
+                yield
+                return new StreamChunk
+                {
+                    Type = "complete",
+                    ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+                };
+                yield
+                break;
+            }
 
             // ============================
             // STREAM SOURCES
@@ -8298,11 +8397,20 @@ namespace MEAI_GPT_API.Services
                 Content = "Generating response..."
             };
 
+            // Once known, fold the grade into the question text the model
+            // actually sees — kept separate from `question` itself so
+            // conversation history/follow-up detection elsewhere continues
+            // to operate on the employee's original wording, not this
+            // annotated form. Same pattern as ProcessQueryAsync.
+            var questionForModel = string.IsNullOrEmpty(agentContext.EmployeeGrade) ?
+              question :
+              $"{question}\n\n(For context: I am {agentContext.EmployeeGrade}. Only use the policy provisions that apply to this grade; ignore provisions written for the other grade.)";
+
             async Task<(string Text, bool Errored, string? ErrorContent)> GenerateBufferedAsync(string modelName)
             {
                 var sb = new StringBuilder();
                 await foreach (var token in GenerateResponseFromContext(
-                  question, modelName, agentContext, finalChunks, meaiInfo, plant, cancellationToken))
+                  questionForModel, modelName, agentContext, finalChunks, meaiInfo, plant, cancellationToken))
                 {
                     if (token.StartsWith("__ERROR__:"))
                         return (sb.ToString(), true, token[10..]);
@@ -8442,34 +8550,60 @@ namespace MEAI_GPT_API.Services
             {
                 _logger.LogWarning(
                   "⚠️ Self-verification flagged ungrounded answer (confidence {Confidence:P0}) even after retry — " +
-                  "replacing with refusal instead of streaming a likely-hallucinated response.",
+                  "checking whether a clarifying question could resolve this before falling back to refusal.",
                   verification.OverallConfidence);
 
-                finalAnswer = $"I want to make sure I give you accurate information, but I'm not confident " +
-                $"the answer I generated is fully grounded in {plant}'s policy documents. " +
-                $"Please contact your supervisor or HR department for clarification on this matter.";
+                // ✅ NEW: one shot at asking the user something specific,
+                // rather than always giving up with "contact HR". Capped at
+                // 1 round per original question so a genuinely unresolvable
+                // ambiguity can't turn into an endless back-and-forth.
+                const int maxClarificationAttempts = 1;
+                string? clarifyingQuestion = null;
 
-                // ============================
-                // TRACK: log this refusal for pattern analysis
-                // ============================
-                // Fire-and-forget — logging a failure must never delay or break
-                // the actual refusal already being streamed to the user. This is
-                // the data source for the admin failure-review endpoint, and for
-                // ResolveGroundingFailuresForQuestionAsync to auto-close once a
-                // human correction comes in for the same question later.
-                var groundingReason = verification.Metadata.TryGetValue("grounding_reason", out
-                    var gr2) ?
-                  gr2?.ToString() ?? "" : "";
-
-                _ = _conversationStorage.LogGroundingFailureAsync(new GroundingFailure
+                if (agentContext.ClarificationAttemptCount < maxClarificationAttempts)
                 {
-                    Question = question,
-                    Plant = plant,
-                    RetrievedSourcesJson = JsonSerializer.Serialize(finalChunks.Select(c => c.Source).Distinct()),
-                    GroundingReason = groundingReason,
-                    Confidence = verification.OverallConfidence,
-                    GenerationModel = genModel.Name ?? ""
-                });
+                    clarifyingQuestion = await TryGenerateClarifyingQuestionAsync(question, finalChunks, genModel, cancellationToken);
+                }
+
+                if (clarifyingQuestion != null)
+                {
+                    agentContext.AwaitingGeneralClarification = true;
+                    agentContext.PendingGeneralClarificationQuestion = clarifyingQuestion;
+                    agentContext.PendingGeneralClarificationOriginalQuestion = question;
+                    agentContext.ClarificationAttemptCount++;
+
+                    _logger.LogInformation($"❓ Asking clarifying question instead of refusing: {clarifyingQuestion}");
+
+                    finalAnswer = clarifyingQuestion;
+                }
+                else
+                {
+                    finalAnswer = $"I want to make sure I give you accurate information, but I'm not confident " +
+                    $"the answer I generated is fully grounded in {plant}'s policy documents. " +
+                    $"Please contact your supervisor or HR department for clarification on this matter.";
+
+                    // ============================
+                    // TRACK: log this refusal for pattern analysis
+                    // ============================
+                    // Fire-and-forget — logging a failure must never delay or break
+                    // the actual refusal already being streamed to the user. This is
+                    // the data source for the admin failure-review endpoint, and for
+                    // ResolveGroundingFailuresForQuestionAsync to auto-close once a
+                    // human correction comes in for the same question later.
+                    var groundingReason = verification.Metadata.TryGetValue("grounding_reason", out
+                        var gr2) ?
+                      gr2?.ToString() ?? "" : "";
+
+                    _ = _conversationStorage.LogGroundingFailureAsync(new GroundingFailure
+                    {
+                        Question = question,
+                        Plant = plant,
+                        RetrievedSourcesJson = JsonSerializer.Serialize(finalChunks.Select(c => c.Source).Distinct()),
+                        GroundingReason = groundingReason,
+                        Confidence = verification.OverallConfidence,
+                        GenerationModel = genModel.Name ?? ""
+                    });
+                }
             }
 
             // ============================
@@ -8981,8 +9115,7 @@ namespace MEAI_GPT_API.Services
           string plant,
           AgentContext context,
           bool useReRanking,
-          ExecutionPlan plan,
-          EmployeeRecord? requester = null)
+          ExecutionPlan plan)
         {
             var result = new RetrievalResult
             {
@@ -9004,7 +9137,7 @@ namespace MEAI_GPT_API.Services
 
                     var collectionId = await _collectionManager.GetOrCreateCollectionAsync(embModel);
                     chunks = await SearchForSpecificSection(
-                      sectionQuery, embModel, maxResults, plant, collectionId, requester);
+                      sectionQuery, embModel, maxResults, plant, collectionId);
                 }
                 else
                 {
@@ -9140,6 +9273,140 @@ namespace MEAI_GPT_API.Services
         // ============================
         // VERIFICATION WRAPPER
         // ============================
+        /// <summary>
+        /// Called only when an answer has already failed grounding
+        /// verification even after retrying with a stronger model — the
+        /// last resort before falling back to a flat "contact HR" refusal.
+        /// Asks the LLM one narrow, structured question: is there a
+        /// specific missing piece of information that, if the user
+        /// provided it, would let this be answered confidently? This is
+        /// deliberately general — not tied to grade or any other single
+        /// dimension — since the cause of an ungrounded answer could be
+        /// anything (which policy variant, which plant, which benefit
+        /// type, an ambiguous date range, etc.).
+        ///
+        /// Returns null if no useful clarifying question exists (the
+        /// information genuinely isn't in any policy, or the ambiguity
+        /// isn't something a follow-up question could resolve) — callers
+        /// must fall back to the existing flat refusal in that case, not
+        /// invent a question just to have one.
+        /// </summary>
+        private async Task<string?> TryGenerateClarifyingQuestionAsync(
+          string question, List<RelevantChunk> chunks, ModelConfiguration genModel, CancellationToken cancellationToken)
+        {
+            try
+            {
+                // Source titles + a short excerpt each — enough for the model
+                // to see *why* the answer was ambiguous (e.g. two documents
+                // with conflicting eligibility) without needing the full
+                // chunk text that already went into the failed generation.
+                var excerpts = chunks
+                  .GroupBy(c => c.Source)
+                  .Take(6)
+                  .Select(g => $"[{g.Key}]: {g.First().Text.Substring(0, Math.Min(200, g.First().Text.Length))}...");
+
+                var prompt = $@"An HR policy assistant could not confidently answer this question from the
+              retrieved policy excerpts below— possibly because the answer genuinely
+        depends on something about the employee that wasn 't stated in the question
+          (their grade, which plant they 're at, Direct vs Indirect status, which
+            specific policy variant applies, a date / timeframe, etc.).
+
+        Question: "" {
+                    question
+        }
+                ""
+      
+        Retrieved excerpts: {
+                    string.Join("\n", excerpts)
+        }
+
+                Is there ONE specific, useful question you could ask the employee that
+                would likely
+                let you answer confidently and correctly? Only propose a
+              question
+              if answering it would genuinely resolve the ambiguity— do not
+        invent a question just to have one, and do not ask something the excerpts
+              already answer.
+
+        Respond with ONLY this JSON, nothing
+        else: {
+                    {
+                        ""
+                      needs_clarification "": true or false,
+              ""
+                      question "": "" < a single, specific, employee - facing question, or null > ""
+                    }
+                }
+                ";
+      
+        var modelName = !string.IsNullOrWhiteSpace(_config.GroundingRetryModel) ?
+          _config.GroundingRetryModel :
+          genModel.Name;
+
+                var requestData = new
+                {
+                    model = modelName,
+                    messages = new[] {
+              new {
+                role = "system", content = "You output ONLY valid JSON. No markdown fences, no commentary."
+              },
+              new {
+                role = "user", content = prompt
+              }
+            },
+                    temperature = 0.1,
+                    stream = false
+                };
+
+                using
+                var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                cts.CancelAfter(TimeSpan.FromSeconds(30));
+
+                var response = await _ollamaClient.PostAsJsonAsync("/api/chat", requestData, cts.Token);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning($"⚠️ Clarifying-question generation call failed: {response.StatusCode}");
+                    return null;
+                }
+
+                var raw = await response.Content.ReadAsStringAsync();
+                using
+                var doc = JsonDocument.Parse(raw);
+                var content = doc.RootElement.GetProperty("message").GetProperty("content").GetString() ?? "";
+                content = content.Trim();
+                if (content.StartsWith("```"))
+                {
+                    var firstNewline = content.IndexOf('\n');
+                    if (firstNewline >= 0) content = content[(firstNewline + 1)..];
+                    var lastFence = content.LastIndexOf("```");
+                    if (lastFence >= 0) content = content[..lastFence];
+                }
+
+                using
+                var parsed = JsonDocument.Parse(content.Trim());
+                var root = parsed.RootElement;
+
+                var needsClarification = root.TryGetProperty("needs_clarification", out
+                  var nc) && nc.ValueKind == JsonValueKind.True;
+                if (!needsClarification) return null;
+
+                var clarifyingQuestion = root.TryGetProperty("question", out
+                    var q) && q.ValueKind == JsonValueKind.String ?
+                  q.GetString() :
+                  null;
+
+                return string.IsNullOrWhiteSpace(clarifyingQuestion) ? null : clarifyingQuestion;
+            }
+            catch (Exception ex)
+            {
+                // Never let this block the existing refusal fallback —
+                // worst case, we lose the clarification opportunity and
+                // behave exactly as before this feature existed.
+                _logger.LogWarning(ex, "⚠️ Clarifying-question generation failed — falling back to standard refusal");
+                return null;
+            }
+        }
+
         private async Task<VerificationResult?> VerifyResponseSafelyAsync(
           string question,
           string response,

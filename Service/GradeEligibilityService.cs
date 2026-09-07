@@ -137,18 +137,94 @@ namespace MEAI_GPT_API.Service.Models
         /// since this is an enrichment layer that must never block or fail
         /// the core indexing pipeline.
         /// </summary>
-        public async Task<ChunkEligibility> GetOrExtractAsync(string sourceFile, string chunkText, CancellationToken cancellationToken = default)
+        // Mirrors PolicyAnalysisService.GradeTiers exactly — deliberately
+        // duplicated rather than shared, since these two services live in
+        // different parts of the codebase and this pattern set is small and
+        // stable. If GradeTiers changes, update both.
+        //
+        // "Jr. Supervisor and above" / "indirect category" is the same
+        // threshold as employee_category=indirect with a grade floor at the
+        // bottom of the Indirect ladder (ManagementStaff) — confirmed
+        // against the org chart data, "Jr. Supervisor" just isn't the term
+        // the org chart itself uses. "Below Jr. Supervisor" / "direct
+        // category" is a pure Direct-employee statement with no grade band
+        // at all, since Direct employees have no position on that ladder.
+        private static readonly string[] IndirectThresholdPatterns = {
+            @"jr\.?\s*supervisor\s*(&|and)\s*above",
+            @"supervisor\s*(&|and)\s*above",
+            @"indirect\s*category",
+        };
+        private static readonly string[] DirectThresholdPatterns = {
+            @"below\s*jr\.?\s*supervisor",
+            @"below\s*supervisor",
+            @"direct\s*category",
+        };
+
+        /// <summary>
+        /// Deterministic check for the single most common eligibility
+        /// phrasing in these policies. Returns null if neither pattern set
+        /// matches, meaning the caller should fall through to the general
+        /// LLM-based extraction instead. Matching here means zero LLM calls,
+        /// zero chance of extraction failure, and guaranteed agreement with
+        /// PolicyAnalysisService's existing chunk-level grade detection —
+        /// both are checking for the literal same phrases.
+        /// </summary>
+        private ChunkEligibility? TryDeterministicThresholdMatch(string sourceFile, string chunkKey, string chunkText)
+        {
+            bool isIndirect = IndirectThresholdPatterns.Any(p => System.Text.RegularExpressions.Regex.IsMatch(chunkText, p, System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+            bool isDirect = DirectThresholdPatterns.Any(p => System.Text.RegularExpressions.Regex.IsMatch(chunkText, p, System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+
+            if (isIndirect && !isDirect)
+            {
+                // Bottom of the Indirect ladder — same semantics as "Jr.
+                // Supervisor and above" without needing that literal title
+                // present anywhere in grade-hierarchy.json.
+                return new ChunkEligibility
+                {
+                    SourceFile = sourceFile,
+                    ChunkKey = chunkKey,
+                    MinGradeBand = _hierarchy.AllBands.FirstOrDefault(),
+                    EmployeeCategory = "indirect"
+                };
+            }
+
+            if (isDirect && !isIndirect)
+            {
+                return new ChunkEligibility
+                {
+                    SourceFile = sourceFile,
+                    ChunkKey = chunkKey,
+                    EmployeeCategory = "direct"
+                    // No grade band — Direct employees have no position on
+                    // the Indirect-only ladder at all.
+                };
+            }
+
+            // Both or neither matched — genuinely ambiguous or irrelevant,
+            // let the LLM path make the call (or find nothing, correctly).
+            return null;
+        }
+
+        public async Task<(ChunkEligibility Entry, bool MadeRealCall)> GetOrExtractAsync(string sourceFile, string chunkText, CancellationToken cancellationToken = default)
         {
             var key = MakeChunkKey(sourceFile, chunkText);
 
             if (_cache.TryGetValue(key, out var cached))
-                return cached;
+                return (cached, false);
+
+            var deterministic = TryDeterministicThresholdMatch(sourceFile, key, chunkText);
+            if (deterministic != null)
+            {
+                await SaveEntryAsync(deterministic);
+                _logger.LogInformation($"✅ Deterministic threshold match for chunk in {sourceFile}: category={deterministic.EmployeeCategory}, minGrade={deterministic.MinGradeBand}");
+                return (deterministic, false); // no LLM call made
+            }
 
             if (!MightContainEligibilityClause(chunkText))
             {
                 var none = new ChunkEligibility { SourceFile = sourceFile, ChunkKey = key };
                 await SaveEntryAsync(none);
-                return none;
+                return (none, false);
             }
 
             try
@@ -177,7 +253,7 @@ namespace MEAI_GPT_API.Service.Models
                 {
                     _logger.LogWarning($"⚠️ Grade eligibility extraction call failed for a chunk in {sourceFile}: {response.StatusCode}");
                     var failed = new ChunkEligibility { SourceFile = sourceFile, ChunkKey = key };
-                    return failed; // NOT cached — retry next refresh, unlike the true-negative case above
+                    return (failed, true); // NOT cached — retry next refresh, unlike the true-negative case above. Still a real call for throttling purposes.
                 }
 
                 var raw = await response.Content.ReadAsStringAsync();
@@ -187,17 +263,17 @@ namespace MEAI_GPT_API.Service.Models
 
                 await SaveEntryAsync(entry);
                 _logger.LogInformation($"✅ Extracted eligibility for chunk in {sourceFile}: min={entry.MinGradeBand}, max={entry.MaxGradeBand}, category={entry.EmployeeCategory}");
-                return entry;
+                return (entry, true);
             }
             catch (OperationCanceledException)
             {
                 _logger.LogWarning($"⚠️ Grade eligibility extraction timed out for a chunk in {sourceFile}");
-                return new ChunkEligibility { SourceFile = sourceFile, ChunkKey = key };
+                return (new ChunkEligibility { SourceFile = sourceFile, ChunkKey = key }, true);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"❌ Grade eligibility extraction failed for a chunk in {sourceFile}");
-                return new ChunkEligibility { SourceFile = sourceFile, ChunkKey = key };
+                return (new ChunkEligibility { SourceFile = sourceFile, ChunkKey = key }, true);
             }
         }
 
