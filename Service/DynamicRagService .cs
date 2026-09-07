@@ -272,8 +272,8 @@ namespace MEAI_GPT_API.Services
 
         These abbreviations are standard across all MEAI HR policies and should be interpreted consistently.
               ";
-      
-        File.WriteAllText(abbreviationsPath, abbreviationContent);
+
+                File.WriteAllText(abbreviationsPath, abbreviationContent);
                 _logger.LogInformation("Created abbreviations context file");
             }
         }
@@ -292,13 +292,11 @@ namespace MEAI_GPT_API.Services
                     var plantOrgContent = $@"MEAI {plant} Plant - Organization Details
         
           These are the fixed organizational details
-          for {
-                            plant
-          }
+          for {plant}
                     plant.
                   ";
-        
-          File.WriteAllText(plantOrgPath, plantOrgContent);
+
+                    File.WriteAllText(plantOrgPath, plantOrgContent);
                     _logger.LogInformation($"Created organization context file for {plant}");
                 }
             }
@@ -399,7 +397,8 @@ namespace MEAI_GPT_API.Services
                 //await Task.Delay(triggerGenDelayMs);
             }
 
-            var tasks = embeddingModels.Select(async model => {
+            var tasks = embeddingModels.Select(async model =>
+            {
                 _logger.LogInformation($"🔄 Processing documents for model: {model.Name}");
 
                 var collectionId = await _collectionManager.GetOrCreateCollectionAsync(model);
@@ -1187,7 +1186,8 @@ namespace MEAI_GPT_API.Services
                 var scored = await Task.WhenAll(
                   relevantChunks.OrderByDescending(x => x.Similarity)
                   .Take(5)
-                  .Select(async chunk => {
+                  .Select(async chunk =>
+                  {
                       var emb = await GetPerRequestEmbeddingAsync(chunk.Text);
                       var sim = CosineSimilarity(answerEmbedding, emb);
                       chunk.Similarity = sim;
@@ -3192,7 +3192,8 @@ namespace MEAI_GPT_API.Services
                 // Filter and prepare chunks
                 var validChunks = chunks
                   .Where(chunk => !string.IsNullOrWhiteSpace(chunk.Text))
-                  .Select(chunk => new {
+                  .Select(chunk => new
+                  {
                       Text = _stringProcessor.CleanText(chunk.Text),
                       SourceFile = chunk.SourceFile,
                       ChunkId = GenerateChunkId(chunk.SourceFile, chunk.Text, lastModified, model.Name),
@@ -3507,7 +3508,8 @@ namespace MEAI_GPT_API.Services
         private readonly ConcurrentDictionary<string, (List<RelevantChunk> Results, DateTime Timestamp)> _searchCache = new();
         public static void ConfigureOptimizedHttpClient(IServiceCollection services)
         {
-            services.AddHttpClient("OllamaAPI", client => {
+            services.AddHttpClient("OllamaAPI", client =>
+            {
                 client.Timeout = TimeSpan.FromSeconds(60);
                 client.DefaultRequestHeaders.Add("Connection", "keep-alive");
             })
@@ -3517,7 +3519,8 @@ namespace MEAI_GPT_API.Services
                   UseCookies = false
               });
 
-            services.AddHttpClient("ChromaDB", client => {
+            services.AddHttpClient("ChromaDB", client =>
+            {
                 client.Timeout = TimeSpan.FromSeconds(15); // Reduced from 30
                 client.DefaultRequestHeaders.Add("Connection", "keep-alive");
                 client.DefaultRequestHeaders.Add("Keep-Alive", "timeout=30, max=100");
@@ -3544,7 +3547,8 @@ namespace MEAI_GPT_API.Services
           "HR policy warm-up text"
         };
 
-                var tasks = embeddingModels.Select(async model => {
+                var tasks = embeddingModels.Select(async model =>
+                {
                     try
                     {
                         foreach (var text in warmUpTexts)
@@ -4178,7 +4182,8 @@ namespace MEAI_GPT_API.Services
         private bool IsExactSectionMatch(string lowerText, string sectionNumber)
         {
             if (string.IsNullOrWhiteSpace(sectionNumber)) return false;
-            var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num => {
+            var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num =>
+            {
                 var escaped = Regex.Escape(num);
                 return new Regex($@"\b(?:section|clause|part)\.?\s*{escaped}(?:\.\d+)*\b" + $@"|(?:^|\n)\s*{escaped}\.(?:\d+\.?)*\s", RegexOptions.IgnoreCase | RegexOptions.Compiled);
             });
@@ -8119,6 +8124,113 @@ namespace MEAI_GPT_API.Services
             // (DynamicRagService is Scoped, one instance per HTTP request).
             _currentRequester = await _employeeDirectory.GetEmployeeInfoAsync(userId ?? "system");
 
+            // ✅ CRITICAL: AgentContext is rebuilt from scratch every request
+            // by CreateAgentContextAsync (it reloads History from the DB but
+            // has no persistence for arbitrary flags) — a flag set on it
+            // would vanish by the very next turn. ConversationContext, via
+            // the Conversation singleton's ConcurrentDictionary keyed by
+            // SessionId, is what actually survives across turns — it's what
+            // ProcessQueryAsync already relies on for this exact purpose.
+            // All clarification state below lives here, not on agentContext.
+            var conversationContext = _conversation.GetOrCreateConversationContext(agentContext.SessionId);
+
+            // ✅ NEW: resolve an answer to a pending designation ask (see the
+            // trigger below). Classifying Direct vs Indirect here also
+            // answers the EXISTING coarse "Supervisor and above / Below
+            // Supervisor" question for free — per the org structure, Jr.
+            // Supervisor and above IS the Indirect category, and below it
+            // IS Direct — so conversationContext.EmployeeGrade is set directly
+            // from this, and the grade-clarification check further below
+            // won't ask again since it only fires when that's still empty.
+            if (conversationContext.AwaitingDesignationClarification)
+            {
+                var designationAnswer = question.Trim();
+                conversationContext.AwaitingDesignationClarification = false;
+                question = conversationContext.PendingDesignationClarificationOriginalQuestion ?? question;
+                conversationContext.PendingDesignationClarificationOriginalQuestion = null;
+
+                if (!string.IsNullOrWhiteSpace(designationAnswer))
+                {
+                    var lower = designationAnswer.ToLowerInvariant();
+                    EmployeeRecord updatedRecord;
+
+                    if (lower.Contains("direct worker"))
+                    {
+                        updatedRecord = new EmployeeRecord
+                        {
+                            UserId = _currentRequester!.UserId,
+                            EmployeeCategory = "Direct",
+                            DirectSubtype = "Direct Worker"
+                        };
+                        conversationContext.EmployeeGrade = "Below Supervisor";
+                    }
+                    else if (lower.Contains("administrative staff") || lower.Contains("admin staff"))
+                    {
+                        updatedRecord = new EmployeeRecord
+                        {
+                            UserId = _currentRequester!.UserId,
+                            EmployeeCategory = "Direct",
+                            DirectSubtype = "Administrative Staff"
+                        };
+                        conversationContext.EmployeeGrade = "Below Supervisor";
+                    }
+                    else
+                    {
+                        // Grade only exists on the Indirect side — same
+                        // structural rule GradeEligibilityService applies
+                        // when extracting eligibility from policy chunks.
+                        updatedRecord = new EmployeeRecord
+                        {
+                            UserId = _currentRequester!.UserId,
+                            EmployeeCategory = "Indirect",
+                            Grade = designationAnswer
+                        };
+                        conversationContext.EmployeeGrade = "Supervisor and above";
+                    }
+
+                    var persisted = await _employeeDirectory.SetEmployeeInfoAsync(updatedRecord);
+                    _currentRequester = updatedRecord; // use immediately — don't make them wait a request for their own answer to take effect
+
+                    _logger.LogInformation(
+            $"📋 Designation captured for '{updatedRecord.UserId}': Category={updatedRecord.EmployeeCategory}, " +
+                      $"Grade={updatedRecord.Grade}, DirectSubtype={updatedRecord.DirectSubtype} (persisted={persisted})");
+
+                    if (!persisted)
+                        _logger.LogWarning("⚠️ Designation captured but not persisted to disk — will be asked again next session if this keeps happening");
+                }
+            }
+            // ✅ NEW: ask an employee with NO record at all in the directory
+            // for their designation, once — this populates the directory
+            // (used for retrieval-time eligibility filtering) so they're
+            // never asked again, in this session or any future one.
+            // Deliberately independent of whether THIS specific question
+            // happens to be grade-specific — unlike the check further below,
+            // the goal here is a complete directory, not just unblocking
+            // one answer.
+            else if (string.IsNullOrEmpty(_currentRequester?.Grade) && string.IsNullOrEmpty(_currentRequester?.EmployeeCategory) &&
+              string.IsNullOrEmpty(conversationContext.EmployeeGrade))
+            {
+                conversationContext.AwaitingDesignationClarification = true;
+                conversationContext.PendingDesignationClarificationOriginalQuestion = question;
+
+                await foreach (var chunk in StreamTextResponse(
+                  "Before I answer — I don't have your position on file yet. Could you tell me your designation or job title " +
+                  "(e.g. \"Deputy Manager\", \"Officer\", \"Direct Worker\", \"Administrative Staff\")? I'll remember it so I don't need to ask again.",
+                  cancellationToken))
+                {
+                    yield
+                    return chunk;
+                }
+                yield
+                return new StreamChunk
+                {
+                    Type = "complete",
+                    ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+                };
+                yield
+                break;
+            }
+
             // ✅ NEW: if this turn's message is the employee's answer to a
             // clarifying question asked last turn (see
             // TryGenerateClarifyingQuestionAsync / the grounding-failure
@@ -8126,18 +8238,18 @@ namespace MEAI_GPT_API.Services
             // than treating it as a fresh, standalone query — a bare
             // answer like "the Sanand plant one" means nothing to
             // retrieval on its own without the question it's answering.
-            if (agentContext.AwaitingGeneralClarification && !string.IsNullOrWhiteSpace(agentContext.PendingGeneralClarificationOriginalQuestion))
+            if (conversationContext.AwaitingGeneralClarification && !string.IsNullOrWhiteSpace(conversationContext.PendingGeneralClarificationOriginalQuestion))
             {
-                var originalQuestion = agentContext.PendingGeneralClarificationOriginalQuestion;
+                var originalQuestion = conversationContext.PendingGeneralClarificationOriginalQuestion;
                 var clarificationAnswer = question;
 
                 _logger.LogInformation($"✅ Resolving pending clarification. Original: '{originalQuestion}' | Employee answered: '{clarificationAnswer}'");
 
                 question = $"{originalQuestion} (Additional context from employee: {clarificationAnswer})";
 
-                agentContext.AwaitingGeneralClarification = false;
-                agentContext.PendingGeneralClarificationQuestion = null;
-                agentContext.PendingGeneralClarificationOriginalQuestion = null;
+                conversationContext.AwaitingGeneralClarification = false;
+                conversationContext.PendingGeneralClarificationQuestion = null;
+                conversationContext.PendingGeneralClarificationOriginalQuestion = null;
                 // Deliberately NOT resetting ClarificationAttemptCount here —
                 // it caps attempts across this whole resolution chain, so if
                 // the re-answer ALSO fails grounding, the cap still applies
@@ -8150,16 +8262,16 @@ namespace MEAI_GPT_API.Services
             // pending grade question, or pick up a volunteered grade
             // mentioned unprompted in the question itself.
             bool awaitingGradeAnswer = false;
-            if (agentContext.AwaitingGradeClarification)
+            if (conversationContext.AwaitingGradeClarification)
             {
                 var resolvedGrade = _policyAnalysis.TryResolveGradeAnswer(question, allowNumberedOptions: true);
                 if (resolvedGrade != null)
                 {
                     _logger.LogInformation($"🧑‍💼 Grade clarified as '{resolvedGrade}' for session {agentContext.SessionId}");
-                    agentContext.EmployeeGrade = resolvedGrade;
-                    agentContext.AwaitingGradeClarification = false;
-                    question = agentContext.PendingClarificationQuestion ?? question;
-                    agentContext.PendingClarificationQuestion = null;
+                    conversationContext.EmployeeGrade = resolvedGrade;
+                    conversationContext.AwaitingGradeClarification = false;
+                    question = conversationContext.PendingClarificationQuestion ?? question;
+                    conversationContext.PendingClarificationQuestion = null;
                 }
                 else
                 {
@@ -8168,11 +8280,11 @@ namespace MEAI_GPT_API.Services
                     awaitingGradeAnswer = true;
                 }
             }
-            else if (string.IsNullOrEmpty(agentContext.EmployeeGrade))
+            else if (string.IsNullOrEmpty(conversationContext.EmployeeGrade))
             {
                 var gradeFromQuestion = _policyAnalysis.TryResolveGradeAnswer(question, allowNumberedOptions: false);
                 if (gradeFromQuestion != null)
-                    agentContext.EmployeeGrade = gradeFromQuestion;
+                    conversationContext.EmployeeGrade = gradeFromQuestion;
             }
 
             if (awaitingGradeAnswer)
@@ -8335,11 +8447,11 @@ namespace MEAI_GPT_API.Services
             // since "grade-specific" depends on the matched POLICY, not the
             // question's wording. This existed in ProcessQueryAsync but was
             // never reachable from this streaming method until now.
-            if (string.IsNullOrEmpty(agentContext.EmployeeGrade) && _policyAnalysis.HasGradeSpecificContent(finalChunks))
+            if (string.IsNullOrEmpty(conversationContext.EmployeeGrade) && _policyAnalysis.HasGradeSpecificContent(finalChunks))
             {
                 _logger.LogInformation($"🧑‍💼 Grade-specific policy content detected for session {agentContext.SessionId} — asking user to clarify position");
-                agentContext.AwaitingGradeClarification = true;
-                agentContext.PendingClarificationQuestion = question;
+                conversationContext.AwaitingGradeClarification = true;
+                conversationContext.PendingClarificationQuestion = question;
 
                 await foreach (var chunk in StreamTextResponse(
                   "This policy has different provisions depending on your grade. Could you let me know your position?\n\n1. Supervisor and above\n2. Below Supervisor",
@@ -8402,9 +8514,9 @@ namespace MEAI_GPT_API.Services
             // conversation history/follow-up detection elsewhere continues
             // to operate on the employee's original wording, not this
             // annotated form. Same pattern as ProcessQueryAsync.
-            var questionForModel = string.IsNullOrEmpty(agentContext.EmployeeGrade) ?
+            var questionForModel = string.IsNullOrEmpty(conversationContext.EmployeeGrade) ?
               question :
-              $"{question}\n\n(For context: I am {agentContext.EmployeeGrade}. Only use the policy provisions that apply to this grade; ignore provisions written for the other grade.)";
+              $"{question}\n\n(For context: I am {conversationContext.EmployeeGrade}. Only use the policy provisions that apply to this grade; ignore provisions written for the other grade.)";
 
             async Task<(string Text, bool Errored, string? ErrorContent)> GenerateBufferedAsync(string modelName)
             {
@@ -8560,17 +8672,17 @@ namespace MEAI_GPT_API.Services
                 const int maxClarificationAttempts = 1;
                 string? clarifyingQuestion = null;
 
-                if (agentContext.ClarificationAttemptCount < maxClarificationAttempts)
+                if (conversationContext.ClarificationAttemptCount < maxClarificationAttempts)
                 {
                     clarifyingQuestion = await TryGenerateClarifyingQuestionAsync(question, finalChunks, genModel, cancellationToken);
                 }
 
                 if (clarifyingQuestion != null)
                 {
-                    agentContext.AwaitingGeneralClarification = true;
-                    agentContext.PendingGeneralClarificationQuestion = clarifyingQuestion;
-                    agentContext.PendingGeneralClarificationOriginalQuestion = question;
-                    agentContext.ClarificationAttemptCount++;
+                    conversationContext.AwaitingGeneralClarification = true;
+                    conversationContext.PendingGeneralClarificationQuestion = clarifyingQuestion;
+                    conversationContext.PendingGeneralClarificationOriginalQuestion = question;
+                    conversationContext.ClarificationAttemptCount++;
 
                     _logger.LogInformation($"❓ Asking clarifying question instead of refusing: {clarifyingQuestion}");
 
@@ -9311,14 +9423,10 @@ namespace MEAI_GPT_API.Services
           (their grade, which plant they 're at, Direct vs Indirect status, which
             specific policy variant applies, a date / timeframe, etc.).
 
-        Question: "" {
-                    question
-        }
+        Question: "" {question}
                 ""
       
-        Retrieved excerpts: {
-                    string.Join("\n", excerpts)
-        }
+        Retrieved excerpts: {string.Join("\n", excerpts)}
 
                 Is there ONE specific, useful question you could ask the employee that
                 would likely
@@ -9329,19 +9437,17 @@ namespace MEAI_GPT_API.Services
               already answer.
 
         Respond with ONLY this JSON, nothing
-        else: {
-                    {
+        else: {{
                         ""
                       needs_clarification "": true or false,
               ""
                       question "": "" < a single, specific, employee - facing question, or null > ""
-                    }
-                }
+                   }}
                 ";
-      
-        var modelName = !string.IsNullOrWhiteSpace(_config.GroundingRetryModel) ?
-          _config.GroundingRetryModel :
-          genModel.Name;
+
+                var modelName = !string.IsNullOrWhiteSpace(_config.GroundingRetryModel) ?
+                  _config.GroundingRetryModel :
+                  genModel.Name;
 
                 var requestData = new
                 {

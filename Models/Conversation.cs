@@ -81,6 +81,18 @@ namespace MEAI_GPT_API.Models
             /// into an endless back-and-forth.
             /// </summary>
             public int ClarificationAttemptCount { get; set; } = 0;
+
+            // 🆕 Designation ask — separate from the general clarification
+            // flow above and from AwaitingGradeClarification below. Triggered
+            // once, the first time an employee with NO record at all in the
+            // persistent employee directory asks something, rather than only
+            // when a specific policy turns out to be grade-specific — the
+            // goal is to populate the directory (used for retrieval-time
+            // filtering) so this employee is never asked again, not just to
+            // unblock the current answer. See DynamicRagService's
+            // ProcessQueryStreamAsync for where this is resolved.
+            public bool AwaitingDesignationClarification { get; set; } = false;
+            public string? PendingDesignationClarificationOriginalQuestion { get; set; }
         }
 
         public class ConversationTurn
