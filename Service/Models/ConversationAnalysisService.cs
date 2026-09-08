@@ -178,11 +178,37 @@ namespace MEAI_GPT_API.Service.Models
     "not that", "actually", "i meant", "no, i mean", "what i meant was"
 };
 
-            if (contextualPhrases.Any(phrase => currentQuestion.ToLower().Contains(phrase)))
+            // Multi-word phrases (e.g. "what about", "as before") are a
+            // strong enough signal alone. Bare single words ("it", "also",
+            // "same", "any") are NOT — those are common enough that a brand
+            // new question about a totally different policy will contain
+            // one by coincidence, and splicing the PREVIOUS turn's Q&A into
+            // the retrieval query in that case actively drags the embedding
+            // toward the wrong document (confirmed in production: cycling
+            // through policies A -> B -> C and then asking about A again got
+            // C's snippet spliced in just because the question happened to
+            // contain "also" or "it", biasing retrieval toward C). Require
+            // either a strong phrase, or a bare word CORROBORATED by actual
+            // similarity to the turn being spliced in.
+            var lowerQuestion = currentQuestion.ToLower();
+            var strongPhraseHit = contextualPhrases.Any(p => p.Contains(' ') && lowerQuestion.Contains(p));
+            var weakWordHit = contextualPhrases.Any(p => !p.Contains(' ') && lowerQuestion.Contains(p));
+
+            if (strongPhraseHit || weakWordHit)
             {
                 var lastTurn = history.LastOrDefault();
                 if (lastTurn != null)
                 {
+                    if (weakWordHit && !strongPhraseHit)
+                    {
+                        var similarity = TextUtils.CalculateAdvancedSimilarity(currentQuestion, lastTurn.Question);
+                        if (similarity < 0.15)
+                        {
+                            _logger.LogDebug($"Contextual word present but no similarity to last turn ({similarity:P0}) — not splicing prior context for: {currentQuestion}");
+                            return currentQuestion;
+                        }
+                    }
+
                     // Only splice in a short snippet of prior context, and put the
                     // CURRENT question first. Previously this embedded the entire
                     // previous answer (often 200-400+ words of generic policy
@@ -227,7 +253,22 @@ namespace MEAI_GPT_API.Service.Models
                     }
                 }
             }
-            // 1. Universal continuation indicators
+            // 1. Universal continuation indicators — NOTE: this list alone is
+            // NOT sufficient to call something a continuation. Words like
+            // "about", "also", "it", "same", "other" are so common that a
+            // brand-new question about a COMPLETELY different policy will
+            // routinely contain one by accident (e.g. cycling A -> B -> C ->
+            // back to A: the return-to-A question saying "what about my
+            // eligibility" used to get treated as a continuation of C,
+            // dragging retrieval toward C's vocabulary and reserving most of
+            // the retrieval budget for C's document). Confirmed in
+            // production: this was the root cause of "asking about an
+            // earlier policy after 2-3 others gets confused."
+            //
+            // Now requires EITHER genuine topic/semantic overlap with recent
+            // history (checked immediately below, folded into this same
+            // gate) OR a strong multi-word phrase pattern, not a bare
+            // single common word.
             string[] universalContinuation = new[]
             {
         // Direct continuation requests
@@ -251,14 +292,30 @@ namespace MEAI_GPT_API.Service.Models
         "his", "her", "their", "its"
     };
 
-            // 2. Check for universal continuation phrases
-            if (universalContinuation.Any(phrase => lowerQuestion.Contains(phrase)))
+            // Multi-word phrases are a strong enough signal on their own —
+            // nobody accidentally types "tell me more" or "what other"
+            // unless they mean it as a follow-up. Bare single common words
+            // are NOT, and now require corroborating similarity to recent
+            // history before being trusted (checked in the combined gate
+            // below, which runs topic-overlap and semantic-similarity BEFORE
+            // falling back to single-word matches).
+            var strongPhrases = universalContinuation.Where(p => p.Contains(' ')).ToArray();
+            var weakSingleWords = universalContinuation.Where(p => !p.Contains(' ')).ToArray();
+
+            if (strongPhrases.Any(phrase => lowerQuestion.Contains(phrase)))
             {
-                _logger.LogDebug($"Universal continuation detected: {question}");
+                _logger.LogDebug($"Strong continuation phrase detected: {question}");
                 return false;
             }
 
+            // 2. Check for weak single-word continuation indicators — ONLY
+            // trusted if history actually supports it (checked together with
+            // methods 3-4 immediately below, instead of short-circuiting
+            // here unconditionally like the old Method 1 did).
+            var hasWeakWordSignal = weakSingleWords.Any(phrase => lowerQuestion.Contains(phrase));
+
             // 3. Smart topic overlap detection
+            double overlapRatio = 0;
             if (context.History.Any())
             {
                 var currentTopics = ExtractKeyTopics(question);
@@ -267,7 +324,7 @@ namespace MEAI_GPT_API.Service.Models
 
                 // Calculate topic overlap
                 var commonTopics = currentTopics.Intersect(lastTopics, StringComparer.OrdinalIgnoreCase).ToList();
-                var overlapRatio = commonTopics.Count > 0 ?
+                overlapRatio = commonTopics.Count > 0 ?
                     (double)commonTopics.Count / Math.Max(currentTopics.Count, lastTopics.Count) : 0;
 
                 if (overlapRatio >= 0.3) // 30% topic overlap indicates same domain
@@ -278,6 +335,7 @@ namespace MEAI_GPT_API.Service.Models
             }
 
             // 4. Semantic similarity with conversation history
+            double bestSimilarity = 0;
             if (context.History.Count > 0)
             {
                 var recentQuestions = context.History.TakeLast(3).Select(h => h.Question).ToList();
@@ -285,12 +343,26 @@ namespace MEAI_GPT_API.Service.Models
                 foreach (var recentQ in recentQuestions)
                 {
                     double similarity = TextUtils.CalculateAdvancedSimilarity(question, recentQ);
+                    bestSimilarity = Math.Max(bestSimilarity, similarity);
                     if (similarity >= 0.25) // Lower threshold for better continuity
                     {
                         _logger.LogDebug($"Semantic similarity detected ({similarity:P0}) with: {recentQ}");
                         return false;
                     }
                 }
+            }
+
+            // 4b. The weak single-word signal from method 1/2 (bare "about",
+            // "it", "same", etc.) is only trusted as CORROBORATION here —
+            // some partial topic/semantic echo of recent history, even
+            // below the standalone thresholds above, is required alongside
+            // it. A bare pronoun/common-word with ZERO overlap to recent
+            // history (the "returning to policy A after B, C" case) does
+            // NOT count as a continuation just because the word is present.
+            if (hasWeakWordSignal && (overlapRatio > 0.1 || bestSimilarity >= 0.15))
+            {
+                _logger.LogDebug($"Weak continuation word corroborated by partial overlap (topic={overlapRatio:P0}, similarity={bestSimilarity:P0}): {question}");
+                return false;
             }
 
             // 5. Pattern-based continuation detection

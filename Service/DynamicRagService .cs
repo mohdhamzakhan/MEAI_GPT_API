@@ -4,6 +4,7 @@ using DocumentFormat.OpenXml.Drawing.Charts;
 using DocumentFormat.OpenXml.Drawing.Diagrams;
 using DocumentFormat.OpenXml.Math;
 using DocumentFormat.OpenXml.Office.SpreadSheetML.Y2023.MsForms;
+using DocumentFormat.OpenXml.Office2013.Drawing.Chart;
 using DocumentFormat.OpenXml.Office2013.Drawing.ChartStyle;
 using DocumentFormat.OpenXml.Spreadsheet;
 using DocumentFormat.OpenXml.Wordprocessing;
@@ -17,6 +18,8 @@ using MEAIGPTAPI.Services;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualBasic;
 using NPOI.SS.Formula.Functions;
+using NPOI.XWPF.UserModel;
+using OpenTelemetry.Trace;
 using StackExchange.Redis;
 using System;
 using System.Collections.Concurrent;
@@ -5057,7 +5060,7 @@ namespace MEAI_GPT_API.Services
                 // boost, but doesn't exclude every other relevant policy outright.
                 var isNarrowContinuation = lastTurnSources != null && lastTurnSources.Any() &&
                   context?.History != null && context.History.Any() &&
-                  _conversationAnalysis.IsTopicChanged(query, context);
+                  !_conversationAnalysis.IsTopicChanged(query, context);
 
                 if (isNarrowContinuation)
                 {
