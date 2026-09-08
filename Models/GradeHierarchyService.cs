@@ -88,14 +88,18 @@ namespace MEAI_GPT_API.Service.Models
             {
                 foreach (var title in titles)
                 {
-                    var key = title.Trim();
-                    if (!lookup.TryGetValue(key, out var bands))
+                    foreach (var part in title.Split('/').Append(title))
                     {
-                        bands = new List<string>();
-                        lookup[key] = bands;
+                        var key = part.Trim();
+                        if (string.IsNullOrEmpty(key)) continue;
+                        if (!lookup.TryGetValue(key, out var bandsForTitle))
+                        {
+                            bandsForTitle = new List<string>();
+                            lookup[key] = bandsForTitle;
+                        }
+                        if (!bandsForTitle.Contains(band, StringComparer.OrdinalIgnoreCase))
+                            bandsForTitle.Add(band);
                     }
-                    if (!bands.Contains(band, StringComparer.OrdinalIgnoreCase))
-                        bands.Add(band);
                 }
             }
 

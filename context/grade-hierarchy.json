@@ -30,19 +30,22 @@
         "Deputy Manager",
         "Manager",
         "Sr. Manager",
-        "Senior Manager"
+        "Senior Manager",
+        "Section Incharge"
       ],
       "JuniorManagement": [
         "Executive Manager",
         "Operation Manager",
         "Executive Senior Manager",
-        "Operational Senior Manager"
+        "Operational Senior Manager",
+        "Section Incharge"
       ],
       "OperationalManagement": [
         "Executive Sr. Manager",
         "Executive Senior Manager",
         "Operation Sr. Manager",
-        "Operational Senior Manager"
+        "Operational Senior Manager",
+        "Section Incharge"
       ],
       "MiddleManagement": [
         "Functional Head cum Senior Manager",
@@ -105,6 +108,10 @@
       "Manager": {
         "PreferForMinBound": "ManagementStaff",
         "PreferForMaxBound": "LowerManagement"
+      },
+      "Section Incharge": {
+        "PreferForMinBound": "LowerManagement",
+        "PreferForMaxBound": "OperationalManagement"
       },
       "Executive Senior Manager": {
         "PreferForMinBound": "JuniorManagement",

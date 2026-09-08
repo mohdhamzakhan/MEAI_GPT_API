@@ -126,7 +126,7 @@ namespace MEAI_GPT_API.Service.Models
             // mean a real eligibility clause gets missed (expensive to
             // correctness), so this errs on the side of over-triggering.
             string[] rankWords = { "manager", "engineer", "executive", "officer",
-                "director", "president", "gm", "avp", "vp", "ceo", "coo", "head" };
+                "director", "president", "gm", "avp", "vp", "ceo", "coo", "head","incharge", "in-charge", "in charge" };
             return rankWords.Any(lowerText.Contains);
         }
 
