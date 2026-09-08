@@ -80,6 +80,24 @@ namespace MEAI_GPT_API.Service.Models
             }
         }
 
+        /// <summary>
+        /// Normalizes a title/phrase before matching: lowercases, expands
+        /// "&" to "and" (policy text frequently uses "Manager & above"
+        /// where the config and/or extraction uses the word "and"),
+        /// strips periods (so "Asst. Manager" == "Asst Manager" == "asst
+        /// manager"), and collapses whitespace. Without this, punctuation
+        /// variants of the same abbreviation silently split into unrelated,
+        /// unambiguous single-band entries instead of correctly being
+        /// treated as the same ambiguous title.
+        /// </summary>
+        internal static string Normalize(string s)
+        {
+            var result = s.ToLowerInvariant()
+                .Replace("&", " and ")
+                .Replace(".", "");
+            return string.Join(' ', result.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        }
+
         private Dictionary<string, List<string>> BuildTitleLookup(GradeHierarchyConfig config)
         {
             var lookup = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
@@ -88,18 +106,14 @@ namespace MEAI_GPT_API.Service.Models
             {
                 foreach (var title in titles)
                 {
-                    foreach (var part in title.Split('/').Append(title))
+                    var key = Normalize(title);
+                    if (!lookup.TryGetValue(key, out var bands))
                     {
-                        var key = part.Trim();
-                        if (string.IsNullOrEmpty(key)) continue;
-                        if (!lookup.TryGetValue(key, out var bandsForTitle))
-                        {
-                            bandsForTitle = new List<string>();
-                            lookup[key] = bandsForTitle;
-                        }
-                        if (!bandsForTitle.Contains(band, StringComparer.OrdinalIgnoreCase))
-                            bandsForTitle.Add(band);
+                        bands = new List<string>();
+                        lookup[key] = bands;
                     }
+                    if (!bands.Contains(band, StringComparer.OrdinalIgnoreCase))
+                        bands.Add(band);
                 }
             }
 
@@ -143,7 +157,7 @@ namespace MEAI_GPT_API.Service.Models
 
         private string? ResolveTitle(string title, bool preferMin)
         {
-            var key = title.Trim();
+            var key = Normalize(title);
             if (!_titleLookup.TryGetValue(key, out var bands) || bands.Count == 0)
             {
                 _logger.LogDebug($"Title '{title}' not found in grade hierarchy");
@@ -153,10 +167,14 @@ namespace MEAI_GPT_API.Service.Models
             if (bands.Count == 1)
                 return bands[0];
 
-            // Ambiguous — appears in more than one band.
-            if (_config.AmbiguousTitles.TryGetValue(key, out var resolution))
+            // Ambiguous — appears in more than one band. AmbiguousTitles
+            // keys are normalized the same way so "Asst. Manager" and
+            // "Assistant Manager" both hit the same override entry.
+            var ambiguousMatch = _config.AmbiguousTitles
+                .FirstOrDefault(kv => Normalize(kv.Key) == key);
+            if (ambiguousMatch.Value != null)
             {
-                var preferred = preferMin ? resolution.PreferForMinBound : resolution.PreferForMaxBound;
+                var preferred = preferMin ? ambiguousMatch.Value.PreferForMinBound : ambiguousMatch.Value.PreferForMaxBound;
                 if (!string.IsNullOrEmpty(preferred) && bands.Contains(preferred, StringComparer.OrdinalIgnoreCase))
                     return preferred;
             }

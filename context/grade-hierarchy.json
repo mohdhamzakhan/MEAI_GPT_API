@@ -21,7 +21,10 @@
         "Assistant Manager",
         "Dy.Manager",
         "Deputy Manager",
-        "Manager"
+        "Manager",
+        "MS Level",
+        "Management Staff Level",
+        "Management Staff"
       ],
       "LowerManagement": [
         "Asst Manager",
@@ -31,21 +34,42 @@
         "Manager",
         "Sr. Manager",
         "Senior Manager",
-        "Section Incharge"
+        "Section Incharge",
+        "Section In-charge",
+        "Section In Charge",
+        "Function Incharge",
+        "Section/Function Incharge",
+        "LM Level",
+        "Lower Management Level",
+        "Lower Management"
       ],
       "JuniorManagement": [
         "Executive Manager",
         "Operation Manager",
         "Executive Senior Manager",
         "Operational Senior Manager",
-        "Section Incharge"
+        "Section Incharge",
+        "Section In-charge",
+        "Section In Charge",
+        "Function Incharge",
+        "Section/Function Incharge",
+        "JM Level",
+        "Junior Management Level",
+        "Junior Management"
       ],
       "OperationalManagement": [
         "Executive Sr. Manager",
         "Executive Senior Manager",
         "Operation Sr. Manager",
         "Operational Senior Manager",
-        "Section Incharge"
+        "Section Incharge",
+        "Section In-charge",
+        "Section In Charge",
+        "Function Incharge",
+        "Section/Function Incharge",
+        "OM Level",
+        "Operational Management Level",
+        "Operational Management"
       ],
       "MiddleManagement": [
         "Functional Head cum Senior Manager",
@@ -55,7 +79,10 @@
         "Functional Head cum Deputy General Manager",
         "FH cum DGM",
         "Functional Head cum General Manager",
-        "FH cum GM"
+        "FH cum GM",
+        "MM Level",
+        "Middle Management Level",
+        "Middle Management"
       ],
       "SeniorManagement": [
         "Sr.GM/MEO",
@@ -79,7 +106,10 @@
         "CTO",
         "Chief Technical Officer",
         "CIO",
-        "Chief Information Officer"
+        "Chief Information Officer",
+        "SM Level",
+        "Senior Management Level",
+        "Senior Management"
       ],
       "TopManagement": [
         "CEO",
@@ -93,10 +123,14 @@
         "Sr.VP",
         "Sr. Vice President",
         "EVP",
-        "Executive Vice President"
+        "Executive Vice President",
+        "TM Level",
+        "Top Management Level",
+        "Top Management"
       ]
     },
     "AmbiguousTitles": {
+      "_comment": "Titles appearing in more than one band. Resolution rule: 'X and above' clauses resolve to the LOWER band, 'X and below' clauses resolve to the HIGHER band. Confirm this default is correct, or override a specific title's resolution here if not.",
       "Assistant Manager": {
         "PreferForMinBound": "ManagementStaff",
         "PreferForMaxBound": "LowerManagement"
@@ -108,10 +142,6 @@
       "Manager": {
         "PreferForMinBound": "ManagementStaff",
         "PreferForMaxBound": "LowerManagement"
-      },
-      "Section Incharge": {
-        "PreferForMinBound": "LowerManagement",
-        "PreferForMaxBound": "OperationalManagement"
       },
       "Executive Senior Manager": {
         "PreferForMinBound": "JuniorManagement",
@@ -128,6 +158,26 @@
       "Chief Operating Officer": {
         "PreferForMinBound": "SeniorManagement",
         "PreferForMaxBound": "TopManagement"
+      },
+      "Section Incharge": {
+        "PreferForMinBound": "LowerManagement",
+        "PreferForMaxBound": "OperationalManagement"
+      },
+      "Section In-charge": {
+        "PreferForMinBound": "LowerManagement",
+        "PreferForMaxBound": "OperationalManagement"
+      },
+      "Section In Charge": {
+        "PreferForMinBound": "LowerManagement",
+        "PreferForMaxBound": "OperationalManagement"
+      },
+      "Function Incharge": {
+        "PreferForMinBound": "LowerManagement",
+        "PreferForMaxBound": "OperationalManagement"
+      },
+      "Section/Function Incharge": {
+        "PreferForMinBound": "LowerManagement",
+        "PreferForMaxBound": "OperationalManagement"
       }
     }
   }
