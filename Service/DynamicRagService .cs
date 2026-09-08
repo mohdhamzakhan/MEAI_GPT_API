@@ -8159,63 +8159,89 @@ namespace MEAI_GPT_API.Services
             // IS Direct — so conversationContext.EmployeeGrade is set directly
             // from this, and the grade-clarification check further below
             // won't ask again since it only fires when that's still empty.
-            if (conversationContext.AwaitingDesignationClarification)
+
+
+            //if (conversationContext.AwaitingDesignationClarification)
+            //{
+            //    var designationAnswer = question.Trim();
+            //    conversationContext.AwaitingDesignationClarification = false;
+            //    question = conversationContext.PendingDesignationClarificationOriginalQuestion ?? question;
+            //    conversationContext.PendingDesignationClarificationOriginalQuestion = null;
+
+            //    if (!string.IsNullOrWhiteSpace(designationAnswer))
+            //    {
+            //        var lower = designationAnswer.ToLowerInvariant();
+            //        EmployeeRecord updatedRecord;
+
+            //        if (lower.Contains("direct worker"))
+            //        {
+            //            updatedRecord = new EmployeeRecord
+            //            {
+            //                UserId = _currentRequester!.UserId,
+            //                EmployeeCategory = "Direct",
+            //                DirectSubtype = "Direct Worker"
+            //            };
+            //            conversationContext.EmployeeGrade = "Below Supervisor";
+            //        }
+            //        else if (lower.Contains("administrative staff") || lower.Contains("admin staff"))
+            //        {
+            //            updatedRecord = new EmployeeRecord
+            //            {
+            //                UserId = _currentRequester!.UserId,
+            //                EmployeeCategory = "Direct",
+            //                DirectSubtype = "Administrative Staff"
+            //            };
+            //            conversationContext.EmployeeGrade = "Below Supervisor";
+            //        }
+            //        else
+            //        {
+            //            // Grade only exists on the Indirect side — same
+            //            // structural rule GradeEligibilityService applies
+            //            // when extracting eligibility from policy chunks.
+            //            updatedRecord = new EmployeeRecord
+            //            {
+            //                UserId = _currentRequester!.UserId,
+            //                EmployeeCategory = "Indirect",
+            //                Grade = designationAnswer
+            //            };
+            //            conversationContext.EmployeeGrade = "Supervisor and above";
+            //        }
+
+            //        var persisted = await _employeeDirectory.SetEmployeeInfoAsync(updatedRecord);
+            //        _currentRequester = updatedRecord; // use immediately — don't make them wait a request for their own answer to take effect
+
+            //        _logger.LogInformation(
+            //$"📋 Designation captured for '{updatedRecord.UserId}': Category={updatedRecord.EmployeeCategory}, " +
+            //          $"Grade={updatedRecord.Grade}, DirectSubtype={updatedRecord.DirectSubtype} (persisted={persisted})");
+
+            //        if (!persisted)
+            //            _logger.LogWarning("⚠️ Designation captured but not persisted to disk — will be asked again next session if this keeps happening");
+            //    }
+            //}
+
+            // ✅ CHANGED: an employee with no record at all in the directory
+            // no longer gets asked via a free-text chat question — instead
+            // this signals the frontend to show a structured picker
+            // (dropdown of known designations), which persists the answer
+            // directly through POST /api/rag/employee/designation. No
+            // cross-turn state is needed here anymore: the frontend holds
+            // onto the original question and resubmits it once the picker
+            // is saved, so there's nothing to resolve on a "next turn" —
+            // the very next request will simply have a known _currentRequester.
+            if (string.IsNullOrEmpty(_currentRequester?.Grade) && string.IsNullOrEmpty(_currentRequester?.EmployeeCategory))
             {
-                var designationAnswer = question.Trim();
-                conversationContext.AwaitingDesignationClarification = false;
-                question = conversationContext.PendingDesignationClarificationOriginalQuestion ?? question;
-                conversationContext.PendingDesignationClarificationOriginalQuestion = null;
+                _logger.LogInformation($"📋 No designation on file for '{_currentRequester?.UserId}' — signaling frontend to collect it via the position picker");
 
-                if (!string.IsNullOrWhiteSpace(designationAnswer))
+                yield return new StreamChunk
                 {
-                    var lower = designationAnswer.ToLowerInvariant();
-                    EmployeeRecord updatedRecord;
-
-                    if (lower.Contains("direct worker"))
-                    {
-                        updatedRecord = new EmployeeRecord
-                        {
-                            UserId = _currentRequester!.UserId,
-                            EmployeeCategory = "Direct",
-                            DirectSubtype = "Direct Worker"
-                        };
-                        conversationContext.EmployeeGrade = "Below Supervisor";
-                    }
-                    else if (lower.Contains("administrative staff") || lower.Contains("admin staff"))
-                    {
-                        updatedRecord = new EmployeeRecord
-                        {
-                            UserId = _currentRequester!.UserId,
-                            EmployeeCategory = "Direct",
-                            DirectSubtype = "Administrative Staff"
-                        };
-                        conversationContext.EmployeeGrade = "Below Supervisor";
-                    }
-                    else
-                    {
-                        // Grade only exists on the Indirect side — same
-                        // structural rule GradeEligibilityService applies
-                        // when extracting eligibility from policy chunks.
-                        updatedRecord = new EmployeeRecord
-                        {
-                            UserId = _currentRequester!.UserId,
-                            EmployeeCategory = "Indirect",
-                            Grade = designationAnswer
-                        };
-                        conversationContext.EmployeeGrade = "Supervisor and above";
-                    }
-
-                    var persisted = await _employeeDirectory.SetEmployeeInfoAsync(updatedRecord);
-                    _currentRequester = updatedRecord; // use immediately — don't make them wait a request for their own answer to take effect
-
-                    _logger.LogInformation(
-            $"📋 Designation captured for '{updatedRecord.UserId}': Category={updatedRecord.EmployeeCategory}, " +
-                      $"Grade={updatedRecord.Grade}, DirectSubtype={updatedRecord.DirectSubtype} (persisted={persisted})");
-
-                    if (!persisted)
-                        _logger.LogWarning("⚠️ Designation captured but not persisted to disk — will be asked again next session if this keeps happening");
-                }
+                    Type = "requires_designation",
+                    Content = "Please select your position to continue.",
+                    PendingQuestion = question
+                };
+                yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+                yield break;
             }
+
             // ✅ NEW: ask an employee with NO record at all in the directory
             // for their designation, once — this populates the directory
             // (used for retrieval-time eligibility filtering) so they're
@@ -11241,6 +11267,19 @@ namespace MEAI_GPT_API.Services
                 get;
                 set;
             }
+            /// <summary>
+            /// Only populated on a "requires_designation" chunk — the
+            /// original question that triggered the designation prompt, so
+            /// the frontend can hold onto it and auto-resubmit once the
+            /// employee picks their position from the picker, without
+            /// making them retype what they asked.
+            /// </summary>
+            public string? PendingQuestion
+            {
+                get;
+                set;
+            }
+
         }
 
         public class ResponseGenerationResult
