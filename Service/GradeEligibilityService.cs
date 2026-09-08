@@ -126,7 +126,8 @@ namespace MEAI_GPT_API.Service.Models
             // mean a real eligibility clause gets missed (expensive to
             // correctness), so this errs on the side of over-triggering.
             string[] rankWords = { "manager", "engineer", "executive", "officer",
-                "director", "president", "gm", "avp", "vp", "ceo", "coo", "head","incharge", "in-charge", "in charge" };
+                "director", "president", "gm", "avp", "vp", "ceo", "coo", "head",
+                "incharge", "in-charge", "in charge" };
             return rankWords.Any(lowerText.Contains);
         }
 
@@ -327,34 +328,81 @@ Respond with ONLY this JSON, nothing else:
 }}";
         }
 
+        /// <summary>
+        /// Small local models (llama3.1:8b here) occasionally emit more than
+        /// one JSON object in a single response — a duplicate, an echoed
+        /// retry, or trailing commentary — which makes JsonDocument.Parse on
+        /// the raw string throw even though a perfectly valid object is
+        /// sitting right at the start. Scans for the first balanced
+        /// top-level {...} span (respecting quoted strings and escapes) and
+        /// returns just that substring for parsing.
+        /// </summary>
+        private static string? ExtractFirstJsonObject(string text)
+        {
+            var start = text.IndexOf('{');
+            if (start < 0) return null;
+
+            int depth = 0;
+            bool inString = false;
+            bool escaped = false;
+
+            for (int i = start; i < text.Length; i++)
+            {
+                var c = text[i];
+
+                if (inString)
+                {
+                    if (escaped) escaped = false;
+                    else if (c == '\\') escaped = true;
+                    else if (c == '"') inString = false;
+                    continue;
+                }
+
+                if (c == '"') { inString = true; continue; }
+                if (c == '{') depth++;
+                else if (c == '}')
+                {
+                    depth--;
+                    if (depth == 0) return text.Substring(start, i - start + 1);
+                }
+            }
+
+            return null; // never closed — malformed, let the caller fail loudly
+        }
+
+        /// <summary>
+        /// Parses the LLM response. Throws on failure (does NOT swallow the
+        /// exception) so the caller's existing failure path — which
+        /// deliberately does not cache — is what actually runs. Silently
+        /// returning an empty-but-valid entry here would get that entry
+        /// permanently cached by SaveEntryAsync as if it were a genuine
+        /// "no eligibility clause" result, indistinguishable from a real
+        /// negative and never retried.
+        /// </summary>
         private ChunkEligibility ParseExtractionResponse(string rawHttpBody, string sourceFile, string chunkKey)
         {
             var entry = new ChunkEligibility { SourceFile = sourceFile, ChunkKey = chunkKey };
 
-            try
-            {
-                using var doc = JsonDocument.Parse(rawHttpBody);
-                var content = doc.RootElement.GetProperty("message").GetProperty("content").GetString() ?? string.Empty;
-                content = StripMarkdownFences(content).Trim();
+            using var doc = JsonDocument.Parse(rawHttpBody);
+            var content = doc.RootElement.GetProperty("message").GetProperty("content").GetString() ?? string.Empty;
+            content = StripMarkdownFences(content).Trim();
 
-                using var parsed = JsonDocument.Parse(content);
-                var root = parsed.RootElement;
+            var jsonObject = ExtractFirstJsonObject(content)
+                ?? throw new JsonException($"No balanced JSON object found in model output for {sourceFile}");
 
-                var minTitle = GetStringOrNull(root, "min_grade_title");
-                var maxTitle = GetStringOrNull(root, "max_grade_title");
+            using var parsed = JsonDocument.Parse(jsonObject);
+            var root = parsed.RootElement;
 
-                // Resolve title text -> a band, using the min/max-appropriate
-                // ambiguous-title default (see GradeHierarchyService).
-                entry.MinGradeBand = minTitle != null ? _hierarchy.ResolveTitleForMinBound(minTitle) : null;
-                entry.MaxGradeBand = maxTitle != null ? _hierarchy.ResolveTitleForMaxBound(maxTitle) : null;
+            var minTitle = GetStringOrNull(root, "min_grade_title");
+            var maxTitle = GetStringOrNull(root, "max_grade_title");
 
-                entry.EmployeeCategory = GetStringOrNull(root, "employee_category")?.ToLowerInvariant();
-                entry.DirectSubtype = GetStringOrNull(root, "direct_subtype");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, $"⚠️ Could not parse grade eligibility response for {sourceFile}");
-            }
+            // Resolve title text -> a band, using the min/max-appropriate
+            // ambiguous-title default (see GradeHierarchyService).
+            entry.MinGradeBand = minTitle != null ? _hierarchy.ResolveTitleForMinBound(minTitle) : null;
+            entry.MaxGradeBand = maxTitle != null ? _hierarchy.ResolveTitleForMaxBound(maxTitle) : null;
+
+            entry.EmployeeCategory = GetStringOrNull(root, "employee_category")?.ToLowerInvariant();
+            entry.DirectSubtype = GetStringOrNull(root, "direct_subtype");
 
             return entry;
         }
