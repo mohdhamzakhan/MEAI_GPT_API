@@ -24,7 +24,7 @@ public interface IRAGService
     Task SaveCorrectionToDatabase(string sessionId, string question, string correctedAnswer);
     Task DeleteModelDataFromChroma(string modelName);
     Task WarmUpEmbeddingsAsync();
-    IAsyncEnumerable<StreamChunk> ProcessQueryStreamAsync(string question, string plant, string? generationModel = null, string? embeddingModel = null, int maxResults = 10, bool meaiInfo = true, string? sessionId = null, bool useReRanking = true, string userId = null, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<StreamChunk> ProcessQueryStreamAsync(string question, string plant, string? generationModel = null, string? embeddingModel = null, int maxResults = 10, bool meaiInfo = true, string? sessionId = null, bool useReRanking = true, string userId = null, string? persona = null, double? temperature = null, CancellationToken cancellationToken = default);
     Task ClearFileCacheAsync(string filePath);
 
     Task ProcessSingleFileAsync(string filePath, string plant);

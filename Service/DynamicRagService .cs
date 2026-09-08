@@ -1,10 +1,12 @@
 ﻿// Services/DynamicRagService.cs
 using DocumentFormat.OpenXml.Drawing;
+using DocumentFormat.OpenXml.Drawing.Charts;
 using DocumentFormat.OpenXml.Drawing.Diagrams;
 using DocumentFormat.OpenXml.Math;
 using DocumentFormat.OpenXml.Office.SpreadSheetML.Y2023.MsForms;
 using DocumentFormat.OpenXml.Office2013.Drawing.ChartStyle;
 using DocumentFormat.OpenXml.Spreadsheet;
+using DocumentFormat.OpenXml.Wordprocessing;
 using MEAI_GPT_API.Models;
 using MEAI_GPT_API.Service;
 using MEAI_GPT_API.Service.Interface;
@@ -16,6 +18,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.VisualBasic;
 using NPOI.SS.Formula.Functions;
 using StackExchange.Redis;
+using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.DirectoryServices.ActiveDirectory;
@@ -272,8 +275,8 @@ namespace MEAI_GPT_API.Services
 
         These abbreviations are standard across all MEAI HR policies and should be interpreted consistently.
               ";
-
-                File.WriteAllText(abbreviationsPath, abbreviationContent);
+      
+        File.WriteAllText(abbreviationsPath, abbreviationContent);
                 _logger.LogInformation("Created abbreviations context file");
             }
         }
@@ -292,11 +295,13 @@ namespace MEAI_GPT_API.Services
                     var plantOrgContent = $@"MEAI {plant} Plant - Organization Details
         
           These are the fixed organizational details
-          for {plant}
+          for {
+                            plant
+          }
                     plant.
                   ";
-
-                    File.WriteAllText(plantOrgPath, plantOrgContent);
+        
+          File.WriteAllText(plantOrgPath, plantOrgContent);
                     _logger.LogInformation($"Created organization context file for {plant}");
                 }
             }
@@ -397,8 +402,7 @@ namespace MEAI_GPT_API.Services
                 //await Task.Delay(triggerGenDelayMs);
             }
 
-            var tasks = embeddingModels.Select(async model =>
-            {
+            var tasks = embeddingModels.Select(async model => {
                 _logger.LogInformation($"🔄 Processing documents for model: {model.Name}");
 
                 var collectionId = await _collectionManager.GetOrCreateCollectionAsync(model);
@@ -1186,8 +1190,7 @@ namespace MEAI_GPT_API.Services
                 var scored = await Task.WhenAll(
                   relevantChunks.OrderByDescending(x => x.Similarity)
                   .Take(5)
-                  .Select(async chunk =>
-                  {
+                  .Select(async chunk => {
                       var emb = await GetPerRequestEmbeddingAsync(chunk.Text);
                       var sim = CosineSimilarity(answerEmbedding, emb);
                       chunk.Similarity = sim;
@@ -2331,6 +2334,10 @@ namespace MEAI_GPT_API.Services
           string systemPrompt,
           List<ConversationTurn> history,
           string userQuestion,
+          // ✅ NEW: applied as the final override after BuildGenerationOptionsAsync
+          // returns, so an explicit user choice wins over both these defaults
+          // and any per-model Temperature configured in appsettings.json.
+          double? temperatureOverride = null,
           [EnumeratorCancellation] CancellationToken ct =
           default)
         {
@@ -2348,6 +2355,13 @@ namespace MEAI_GPT_API.Services
                 ["num_ctx"] = 32768,
                 ["repeat_penalty"] = 1.1
             });
+
+            // ✅ NEW: BuildGenerationOptionsAsync already overwrote
+            // "temperature" with any per-model appsettings.json config —
+            // this has to come after that, as a genuinely final step, or
+            // an explicit user choice would get silently discarded.
+            if (temperatureOverride.HasValue)
+                options["temperature"] = temperatureOverride.Value;
 
             var requestBody = new
             {
@@ -3192,8 +3206,7 @@ namespace MEAI_GPT_API.Services
                 // Filter and prepare chunks
                 var validChunks = chunks
                   .Where(chunk => !string.IsNullOrWhiteSpace(chunk.Text))
-                  .Select(chunk => new
-                  {
+                  .Select(chunk => new {
                       Text = _stringProcessor.CleanText(chunk.Text),
                       SourceFile = chunk.SourceFile,
                       ChunkId = GenerateChunkId(chunk.SourceFile, chunk.Text, lastModified, model.Name),
@@ -3508,8 +3521,7 @@ namespace MEAI_GPT_API.Services
         private readonly ConcurrentDictionary<string, (List<RelevantChunk> Results, DateTime Timestamp)> _searchCache = new();
         public static void ConfigureOptimizedHttpClient(IServiceCollection services)
         {
-            services.AddHttpClient("OllamaAPI", client =>
-            {
+            services.AddHttpClient("OllamaAPI", client => {
                 client.Timeout = TimeSpan.FromSeconds(60);
                 client.DefaultRequestHeaders.Add("Connection", "keep-alive");
             })
@@ -3519,8 +3531,7 @@ namespace MEAI_GPT_API.Services
                   UseCookies = false
               });
 
-            services.AddHttpClient("ChromaDB", client =>
-            {
+            services.AddHttpClient("ChromaDB", client => {
                 client.Timeout = TimeSpan.FromSeconds(15); // Reduced from 30
                 client.DefaultRequestHeaders.Add("Connection", "keep-alive");
                 client.DefaultRequestHeaders.Add("Keep-Alive", "timeout=30, max=100");
@@ -3547,8 +3558,7 @@ namespace MEAI_GPT_API.Services
           "HR policy warm-up text"
         };
 
-                var tasks = embeddingModels.Select(async model =>
-                {
+                var tasks = embeddingModels.Select(async model => {
                     try
                     {
                         foreach (var text in warmUpTexts)
@@ -4182,8 +4192,7 @@ namespace MEAI_GPT_API.Services
         private bool IsExactSectionMatch(string lowerText, string sectionNumber)
         {
             if (string.IsNullOrWhiteSpace(sectionNumber)) return false;
-            var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num =>
-            {
+            var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num => {
                 var escaped = Regex.Escape(num);
                 return new Regex($@"\b(?:section|clause|part)\.?\s*{escaped}(?:\.\d+)*\b" + $@"|(?:^|\n)\s*{escaped}\.(?:\d+\.?)*\s", RegexOptions.IgnoreCase | RegexOptions.Compiled);
             });
@@ -6834,7 +6843,7 @@ namespace MEAI_GPT_API.Services
               "Never fabricate information.";
 
             await foreach (var token in StreamGenerateWithHistoryAsync(
-              modelName, systemPrompt, history, processedQuestion, ct))
+              modelName, systemPrompt, history, processedQuestion, ct: ct))
             {
                 yield
                 return token;
@@ -8094,6 +8103,11 @@ namespace MEAI_GPT_API.Services
           string? sessionId = null,
           bool useReRanking = true,
           string? userId = null,
+          // ✅ NEW: previously accepted by the frontend but never actually
+          // wired through — persona shapes the system prompt's tone,
+          // temperature overrides the per-model sampling default.
+          string? persona = null,
+          double? temperature = null,
           [EnumeratorCancellation] CancellationToken cancellationToken =
           default)
         {
@@ -8522,7 +8536,7 @@ namespace MEAI_GPT_API.Services
             {
                 var sb = new StringBuilder();
                 await foreach (var token in GenerateResponseFromContext(
-                  questionForModel, modelName, agentContext, finalChunks, meaiInfo, plant, cancellationToken))
+                  questionForModel, modelName, agentContext, finalChunks, meaiInfo, plant, persona, temperature, cancellationToken))
                 {
                     if (token.StartsWith("__ERROR__:"))
                         return (sb.ToString(), true, token[10..]);
@@ -8785,6 +8799,11 @@ namespace MEAI_GPT_API.Services
           List<RelevantChunk> chunks,
           bool meaiInfo,
           string plant,
+          // ✅ NEW: optional so existing callers (e.g. ExecuteDirectPathAsync)
+          // keep compiling unchanged and simply don't get persona/temperature
+          // applied — only the main path passes these explicitly.
+          string? persona,
+          double? temperature,
           [EnumeratorCancellation] CancellationToken cancellationToken)
         {
             // Get or create conversation context
@@ -8809,6 +8828,8 @@ namespace MEAI_GPT_API.Services
               plant,
               QuestionType.NewTopic,
               false,
+              persona,
+              temperature,
               cancellationToken))
             {
                 yield
@@ -9423,10 +9444,14 @@ namespace MEAI_GPT_API.Services
           (their grade, which plant they 're at, Direct vs Indirect status, which
             specific policy variant applies, a date / timeframe, etc.).
 
-        Question: "" {question}
+        Question: "" {
+                    question
+        }
                 ""
       
-        Retrieved excerpts: {string.Join("\n", excerpts)}
+        Retrieved excerpts: {
+                    string.Join("\n", excerpts)
+        }
 
                 Is there ONE specific, useful question you could ask the employee that
                 would likely
@@ -9442,12 +9467,12 @@ namespace MEAI_GPT_API.Services
                       needs_clarification "": true or false,
               ""
                       question "": "" < a single, specific, employee - facing question, or null > ""
-                   }}
+                    }}
                 ";
-
-                var modelName = !string.IsNullOrWhiteSpace(_config.GroundingRetryModel) ?
-                  _config.GroundingRetryModel :
-                  genModel.Name;
+      
+        var modelName = !string.IsNullOrWhiteSpace(_config.GroundingRetryModel) ?
+          _config.GroundingRetryModel :
+          genModel.Name;
 
                 var requestData = new
                 {
@@ -9511,6 +9536,40 @@ namespace MEAI_GPT_API.Services
                 _logger.LogWarning(ex, "⚠️ Clarifying-question generation failed — falling back to standard refusal");
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Appends a persona-specific instruction to an already-built system
+        /// prompt. Deliberately additive, not a replacement — the base
+        /// prompt from _systemPromptBuilder already carries the grounding/
+        /// anti-hallucination rules and eligibility framing, and persona
+        /// should shape tone on top of that, not compete with it. Unknown
+        /// or "default" persona values are a no-op — passing through
+        /// whatever the frontend Settings dropdown sends only needs three
+        /// values recognized today, but a mismatch shouldn't break anything.
+        /// </summary>
+        private string ApplyPersonaToSystemPrompt(string systemPrompt, string? persona)
+        {
+            if (string.IsNullOrWhiteSpace(persona) || persona.Equals("default", StringComparison.OrdinalIgnoreCase))
+                return systemPrompt;
+
+            string? personaInstruction = persona.ToLowerInvariant() switch
+            {
+                "policy_auditor" =>
+                "\n\nTone for this response: adopt a strict, factual policy-auditor stance. " +
+                "Cite the exact clause or condition behind each claim, flag any ambiguity in the " +
+                "source material explicitly rather than smoothing over it, and never soften or " +
+                "round away a specific numeric limit, date, or eligibility condition.",
+
+                "code_reviewer" =>
+                "\n\nTone for this response: adopt a code-reviewer's technical focus. Prioritize " +
+                "precision over brevity, call out edge cases and failure modes, and structure the " +
+                "answer so the reasoning is easy to follow, not just the conclusion.",
+
+                _ => null // unrecognized persona value — no-op, base prompt unchanged
+            };
+
+            return personaInstruction == null ? systemPrompt : systemPrompt + personaInstruction;
         }
 
         private async Task<VerificationResult?> VerifyResponseSafelyAsync(
@@ -9788,6 +9847,8 @@ namespace MEAI_GPT_API.Services
               chunks,
               meaiInfo,
               plant,
+              null, // persona — not threaded into this fallback path yet, see known gaps
+              null, // temperature — same
               cancellationToken))
             {
                 if (token.StartsWith("__ERROR__:"))
@@ -10109,6 +10170,14 @@ namespace MEAI_GPT_API.Services
           string plant,
           QuestionType questionType = QuestionType.NewTopic,
           bool isOracleEbsQuery = false,
+          // ✅ NEW: persona shapes tone via an additive instruction appended
+          // to the existing system prompt (never replaces the grounding/
+          // anti-hallucination rules _systemPromptBuilder already sets up).
+          // temperature overrides the per-model sampling default, applied
+          // as the final step in StreamGenerateWithHistoryAsync so an
+          // explicit user choice wins over appsettings.json config.
+          string? persona = null,
+          double? temperature = null,
           [EnumeratorCancellation] CancellationToken ct =
           default)
         {
@@ -10136,6 +10205,8 @@ namespace MEAI_GPT_API.Services
             else
                 systemPrompt = _systemPromptBuilder.BuildGeneralSystemPrompt();
 
+            systemPrompt = ApplyPersonaToSystemPrompt(systemPrompt, persona);
+
             // Use history from the centralised service — always current
             var history = _historyService.GetHistory(context.SessionId);
 
@@ -10143,7 +10214,7 @@ namespace MEAI_GPT_API.Services
               context.SessionId, history.Count, relevantChunks.Count);
 
             await foreach (var token in StreamGenerateWithHistoryAsync(
-              model, systemPrompt, history, question, ct))
+              model, systemPrompt, history, question, temperature, ct))
             {
                 yield
                 return token;

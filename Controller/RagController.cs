@@ -1,6 +1,7 @@
 ﻿using MEAI_GPT_API.Models;
 using MEAI_GPT_API.Service;
 using MEAI_GPT_API.Service.Interface;
+using MEAI_GPT_API.Service.Models;
 using MEAI_GPT_API.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -27,6 +28,7 @@ namespace MEAI_GPT_API.Controller
         private readonly IConversationStorageService _conversationStorage;
         private readonly TranslationService _translationService;
         private readonly AccessControlOptions _accessControl;
+        private readonly IEmployeeDirectoryService _employeeDirectory;
 
 
         [ActivatorUtilitiesConstructor]
@@ -38,7 +40,8 @@ namespace MEAI_GPT_API.Controller
          IConversationStorageService conversationStorage,
          TranslationService translationService,
         ILogger<RagController> logger,
-        Microsoft.Extensions.Options.IOptions<AccessControlOptions> accessControl)
+        Microsoft.Extensions.Options.IOptions<AccessControlOptions> accessControl,
+        IEmployeeDirectoryService employeeDirectory)
         {
             _ragService = ragService;
             _codingService = codingService;
@@ -48,6 +51,7 @@ namespace MEAI_GPT_API.Controller
             _conversationStorage = conversationStorage;
             _translationService = translationService;
             _accessControl = accessControl.Value;
+            _employeeDirectory = employeeDirectory;
         }
         [HttpPost("query")]
         //public async Task<IActionResult> Query([FromBody] QueryRequest request, [FromServices] IBackgroundTaskQueue taskQueue)
@@ -595,6 +599,8 @@ namespace MEAI_GPT_API.Controller
                 request.sessionId,
                 useReRanking: true,
                 request.UserId,
+                request.Persona,
+                request.Temperature,
                 ct))
             {
                 if (ct.IsCancellationRequested) yield break;
@@ -1099,6 +1105,69 @@ namespace MEAI_GPT_API.Controller
             }
         }
 
+        // ✅ NEW: lets the frontend show and update what the assistant knows
+        // about an employee's designation — used both to pre-fill a
+        // "your position" settings field and to let someone update it
+        // themselves after a promotion, without waiting to be re-asked in
+        // chat (which only happens once, the first time it's needed).
+        [HttpGet("employee/{userId}")]
+        public async Task<ActionResult<EmployeeRecord>> GetEmployeeDesignation(string userId)
+        {
+            if (string.IsNullOrWhiteSpace(userId))
+                return BadRequest("userId is required");
+
+            try
+            {
+                var record = await _employeeDirectory.GetEmployeeInfoAsync(userId);
+                return Ok(record);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to retrieve employee designation for {UserId}", userId);
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        [HttpPost("employee/designation")]
+        public async Task<ActionResult> SetEmployeeDesignation([FromBody] SetEmployeeDesignationRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.UserId))
+                return BadRequest("userId is required");
+
+            if (string.IsNullOrWhiteSpace(request.Grade) && string.IsNullOrWhiteSpace(request.DirectSubtype))
+                return BadRequest("Provide either a grade/designation (e.g. 'Deputy Manager') or a direct-category subtype (e.g. 'Direct Worker')");
+
+            try
+            {
+                var record = new EmployeeRecord
+                {
+                    UserId = request.UserId,
+                    Grade = string.IsNullOrWhiteSpace(request.Grade) ? null : request.Grade.Trim(),
+                    // If a direct subtype was given, this is a Direct-category employee (no grade
+                    // ladder); otherwise a title was given, which only exists on the Indirect side —
+                    // same structural rule GradeEligibilityService already applies elsewhere.
+                    EmployeeCategory = !string.IsNullOrWhiteSpace(request.DirectSubtype) ? "Direct" : "Indirect",
+                    DirectSubtype = string.IsNullOrWhiteSpace(request.DirectSubtype) ? null : request.DirectSubtype.Trim()
+                };
+
+                var saved = await _employeeDirectory.SetEmployeeInfoAsync(record);
+                if (!saved)
+                {
+                    // Cache was still updated (see SetEmployeeInfoAsync) — this
+                    // request and the rest of this app run work fine, only the
+                    // "survives a restart" guarantee didn't happen.
+                    return Ok(new { message = "Saved for this session, but couldn't write to disk — please try again later so it's remembered after a restart.", persisted = false });
+                }
+
+                return Ok(new { message = "Designation saved", persisted = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to save employee designation for {UserId}", request.UserId);
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
         [HttpGet("sessions")]
         public async Task<ActionResult<List<SessionSummary>>> GetAllSessions([FromQuery] string? userId = null)
         {
@@ -1252,6 +1321,15 @@ namespace MEAI_GPT_API.Controller
         {
             public string FilePath { get; set; } = "";
             public string Plant { get; set; } = "";
+        }
+
+        public class SetEmployeeDesignationRequest
+        {
+            public string UserId { get; set; } = "";
+            /// <summary>Job title, e.g. "Deputy Manager" — Indirect-side only, resolved to a band elsewhere. Leave null/empty if DirectSubtype is set instead.</summary>
+            public string? Grade { get; set; }
+            /// <summary>"Direct Worker" | "Administrative Staff" — set instead of Grade for Direct-category employees, who have no grade ladder.</summary>
+            public string? DirectSubtype { get; set; }
         }
 
         public class ChromaGetRequest
