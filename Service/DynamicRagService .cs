@@ -1131,7 +1131,7 @@ namespace MEAI_GPT_API.Services
                           question,
                           relevantChunks,
                           "qllama/bge-reranker-v2-m3:f16",
-                          topK: 5);
+                          topK: 8);
                     }
                 }
 
@@ -1189,7 +1189,7 @@ namespace MEAI_GPT_API.Services
                 // 🔍 Rank top chunks
                 var scored = await Task.WhenAll(
                   relevantChunks.OrderByDescending(x => x.Similarity)
-                  .Take(5)
+                  .Take(8)
                   .Select(async chunk => {
                       var emb = await GetPerRequestEmbeddingAsync(chunk.Text);
                       var sim = CosineSimilarity(answerEmbedding, emb);
@@ -1202,7 +1202,7 @@ namespace MEAI_GPT_API.Services
                 // It is already correct IF Similarity was never inflated. Double-check here:
 
                 var dynamicThreshold = scored.Any(s => s.sim > 0.6) ? 0.5 : 0.3;
-                var topChunks = rankedChunks.Where(c => c.Similarity > dynamicThreshold).Take(5).ToList();
+                var topChunks = rankedChunks.Where(c => c.Similarity > dynamicThreshold).Take(8).ToList();
 
                 // If thresholding filtered out everything (e.g. a section-specific query                // with few, weaker matches), fall back to the best few we actually                // retrieved rather than reporting zero sources/confidence.
                 if (!topChunks.Any() && rankedChunks.Any())
@@ -1439,7 +1439,7 @@ namespace MEAI_GPT_API.Services
                 try
                 {
                     namedEntities = await _entityExtraction.ExtractEntitiesAsync(answer);
-                    _logger.LogInformation($"📌 Extracted {namedEntities.Count} entities: {string.Join(", ", namedEntities.Take(5))}");
+                    _logger.LogInformation($"📌 Extracted {namedEntities.Count} entities: {string.Join(", ", namedEntities.Take(8))}");
                 }
                 catch (Exception ex)
                 {
@@ -3121,7 +3121,7 @@ namespace MEAI_GPT_API.Services
                     .Where(c => !string.IsNullOrEmpty(c.TopicTag))
                     .GroupBy(c => c.TopicTag)
                     .OrderByDescending(g => g.Count())
-                    .Take(5)
+                    .Take(8)
                     .ToDictionary(g => g.Key!, g => g.Count())
                 };
             }
@@ -3281,7 +3281,7 @@ namespace MEAI_GPT_API.Services
 
                 if (failedChunks.Any())
                 {
-                    _logger.LogWarning($"⚠️ Failed chunks: {string.Join(", ", failedChunks.Take(5).Select(f => f.ChunkId))}");
+                    _logger.LogWarning($"⚠️ Failed chunks: {string.Join(", ", failedChunks.Take(8).Select(f => f.ChunkId))}");
                     if (failedChunks.Count > 5)
                     {
                         _logger.LogWarning($"... and {failedChunks.Count - 5} more");
@@ -3957,7 +3957,7 @@ namespace MEAI_GPT_API.Services
                 // Perform search
                 var chunks = await SearchChromaDBAsync(question, embeddingModel, 20, plant);
                 diagnostic.ChunksFound = chunks.Count;
-                diagnostic.ChunkDetails = chunks.Take(5).Select(c => new ChunkDiagnostic
+                diagnostic.ChunkDetails = chunks.Take(8).Select(c => new ChunkDiagnostic
                 {
                     Source = c.Source,
                     Similarity = c.Similarity,
@@ -5057,7 +5057,7 @@ namespace MEAI_GPT_API.Services
                 // boost, but doesn't exclude every other relevant policy outright.
                 var isNarrowContinuation = lastTurnSources != null && lastTurnSources.Any() &&
                   context?.History != null && context.History.Any() &&
-                  _conversationAnalysis.IsQuestionPatternContinuation(query, context);
+                  _conversationAnalysis.IsTopicChanged(query, context);
 
                 if (isNarrowContinuation)
                 {
@@ -9354,7 +9354,7 @@ namespace MEAI_GPT_API.Services
                     try
                     {
                         hybridChunks = await _rerankerService.RerankAsync(
-                          question, hybridChunks, "qllama/bge-reranker-v2-m3:f16", topK: 5);
+                          question, hybridChunks, "qllama/bge-reranker-v2-m3:f16", topK: 8);
                     }
                     catch (Exception ex)
                     {
@@ -9362,7 +9362,7 @@ namespace MEAI_GPT_API.Services
                     }
                 }
 
-                result.Chunks = hybridChunks.Take(5).ToList();
+                result.Chunks = hybridChunks.Take(8).ToList();
 
                 // Added for hallucination debugging: the earlier log lines
                 // (raw=/boosted= scores) only show similarity numbers, not
@@ -11651,7 +11651,7 @@ namespace MEAI_GPT_API.Services
             if (relevantChunks.Any())
             {
                 promptBuilder.AppendLine("Relevant information from company documents:");
-                foreach (var chunk in relevantChunks.Take(5))
+                foreach (var chunk in relevantChunks.Take(8))
                 {
                     promptBuilder.AppendLine($"Source: {chunk.Source}");
                     promptBuilder.AppendLine(chunk.Text);
