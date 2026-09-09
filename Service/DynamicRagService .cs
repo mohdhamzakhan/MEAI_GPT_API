@@ -8160,7 +8160,6 @@ namespace MEAI_GPT_API.Services
             // from this, and the grade-clarification check further below
             // won't ask again since it only fires when that's still empty.
 
-
             //if (conversationContext.AwaitingDesignationClarification)
             //{
             //    var designationAnswer = question.Trim();
@@ -8232,14 +8231,21 @@ namespace MEAI_GPT_API.Services
             {
                 _logger.LogInformation($"📋 No designation on file for '{_currentRequester?.UserId}' — signaling frontend to collect it via the position picker");
 
-                yield return new StreamChunk
+                yield
+                return new StreamChunk
                 {
                     Type = "requires_designation",
                     Content = "Please select your position to continue.",
                     PendingQuestion = question
                 };
-                yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
-                yield break;
+                yield
+                return new StreamChunk
+                {
+                    Type = "complete",
+                    ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+                };
+                yield
+                break;
             }
 
             // ✅ NEW: ask an employee with NO record at all in the directory
@@ -8475,6 +8481,7 @@ namespace MEAI_GPT_API.Services
               question, embModel, maxResults, plant, agentContext, useReRanking, plan);
 
             var finalChunks = retrievalResult.Chunks;
+            var topicChanged = retrievalResult.TopicChanged;
 
             // 🪦 Drop chunks describing the OTHER death scenario than the one
             // asked about — ported alongside the grade check below, same
@@ -8525,6 +8532,37 @@ namespace MEAI_GPT_API.Services
                     Sources = finalChunks.Select(c => c.Source).Distinct().ToList()
                 };
 
+                // ✅ NEW: turn the wait into something meaningful instead of a
+                // generic spinner — we already know which policies matched,
+                // so show that instead of hiding it. Capped at 6 and lightly
+                // paced (not real per-policy work — retrieval already
+                // finished) purely so each name is readable rather than
+                // flashing past; the actual "sources" event above already
+                // carries the full, uncapped list for citations.
+                var statusTemplates = new[] {
+          "📄 Extracting details from {0}...",
+          "🔍 Reading {0}...",
+          "📚 Checking {0}..."
+        };
+                var displaySourceNames = finalChunks
+                  .Select(c => System.IO.Path.GetFileNameWithoutExtension(c.Source ?? "")
+                    .Replace('_', ' ').Replace('-', ' ').Trim())
+                  .Where(n => !string.IsNullOrWhiteSpace(n))
+                  .Distinct()
+                  .Take(6)
+                  .ToList();
+
+                for (int i = 0; i < displaySourceNames.Count; i++)
+                {
+                    yield
+                    return new StreamChunk
+                    {
+                        Type = "status",
+                        Content = string.Format(statusTemplates[i % statusTemplates.Length], displaySourceNames[i])
+                    };
+                    await Task.Delay(280, cancellationToken);
+                }
+
                 var combinedAnnexureLinks = finalChunks
                   .Where(c => c.AnnexureLinks != null)
                   .SelectMany(c => c.AnnexureLinks!)
@@ -8565,7 +8603,7 @@ namespace MEAI_GPT_API.Services
             {
                 var sb = new StringBuilder();
                 await foreach (var token in GenerateResponseFromContext(
-                  questionForModel, modelName, agentContext, finalChunks, meaiInfo, plant, persona, temperature, cancellationToken))
+                  questionForModel, modelName, agentContext, finalChunks, meaiInfo, plant, persona, temperature, topicChanged, cancellationToken))
                 {
                     if (token.StartsWith("__ERROR__:"))
                         return (sb.ToString(), true, token[10..]);
@@ -8833,6 +8871,7 @@ namespace MEAI_GPT_API.Services
           // applied — only the main path passes these explicitly.
           string? persona,
           double? temperature,
+          bool topicChanged,
           [EnumeratorCancellation] CancellationToken cancellationToken)
         {
             // Get or create conversation context
@@ -8859,6 +8898,7 @@ namespace MEAI_GPT_API.Services
               false,
               persona,
               temperature,
+              topicChanged,
               cancellationToken))
             {
                 yield
@@ -9270,6 +9310,49 @@ namespace MEAI_GPT_API.Services
         // ============================
         // In ExecuteRetrievalAsync method, replace the call with:
 
+        /// <summary>
+        /// Selects up to maxTotal chunks from an already-relevance-sorted
+        /// list, capping how many can come from any single source document.
+        /// Without this, a broad question needing input from 5+ different
+        /// policies can end up with its entire chunk budget consumed by
+        /// just 2-3 policies that happen to score highest, silently
+        /// dropping the others — the "only 5 policies, information missing"
+        /// symptom. Backfills with the next-best chunks regardless of the
+        /// per-source cap if there aren't enough distinct sources to fill
+        /// maxTotal, so budget is never wasted when the question genuinely
+        /// is narrow (one policy, many relevant chunks in it).
+        /// </summary>
+        private List<RelevantChunk> DiversifyBySource(List<RelevantChunk> rankedChunks, int maxTotal, int maxPerSource)
+        {
+            var selected = new List<RelevantChunk>();
+            var perSourceCount = new Dictionary<string,
+              int>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var chunk in rankedChunks)
+            {
+                if (selected.Count >= maxTotal) break;
+
+                var source = chunk.Source ?? "";
+                perSourceCount.TryGetValue(source, out
+                  var count);
+                if (count >= maxPerSource) continue;
+
+                selected.Add(chunk);
+                perSourceCount[source] = count + 1;
+            }
+
+            if (selected.Count < maxTotal)
+            {
+                foreach (var chunk in rankedChunks)
+                {
+                    if (selected.Count >= maxTotal) break;
+                    if (!selected.Contains(chunk)) selected.Add(chunk);
+                }
+            }
+
+            return selected;
+        }
+
         private async Task<RetrievalResult> ExecuteRetrievalAsync(
           string question,
           ModelConfiguration embModel,
@@ -9327,6 +9410,16 @@ namespace MEAI_GPT_API.Services
                           "🔄 Topic changed for session {SessionId}; resetting retrieval context",
                           context.SessionId);
                         ClearContext(conversationContext);
+                        // ✅ NEW: this used to only affect retrieval anchoring
+                        // (via the now-cleared conversationContext.History
+                        // feeding BuildContextualQuery below). It never
+                        // reached generation, which re-populates
+                        // conversationContext.History from the full,
+                        // untouched agentContext.History moments later —
+                        // so the model still saw the prior topic's Q&A
+                        // regardless. Recording it here lets it actually
+                        // reach BuildMessageList.
+                        result.TopicChanged = true;
                     }
 
                     // ✅ NEW: anchor follow-up questions to the prior turn's topic before
@@ -9382,8 +9475,15 @@ namespace MEAI_GPT_API.Services
                 {
                     try
                     {
+                        // ✅ CHANGED: was topK: 8 — raised so enough candidates
+                        // survive reranking for DiversifyBySource below to
+                        // actually have material from more than 2-3 sources
+                        // to choose from. Cutting to 8 here BEFORE
+                        // diversifying meant the diversity step below had
+                        // nothing left to diversify — most candidates from
+                        // less-dominant policies were already discarded.
                         hybridChunks = await _rerankerService.RerankAsync(
-                          question, hybridChunks, "qllama/bge-reranker-v2-m3:f16", topK: 8);
+                          question, hybridChunks, "qllama/bge-reranker-v2-m3:f16", topK: 20);
                     }
                     catch (Exception ex)
                     {
@@ -9391,7 +9491,15 @@ namespace MEAI_GPT_API.Services
                     }
                 }
 
-                result.Chunks = hybridChunks.Take(8).ToList();
+                // ✅ CHANGED: was a flat hybridChunks.Take(8) — that let a
+                // broad question's entire chunk budget get consumed by
+                // whichever 2-3 policies scored highest, silently dropping
+                // relevant content from the rest. Caps at 3 chunks per
+                // source and 14 total, giving room for ~5+ distinct
+                // policies on a broad question while still letting a
+                // genuinely narrow single-policy question use more of its
+                // budget on that one document via the backfill step.
+                result.Chunks = DiversifyBySource(hybridChunks, maxTotal: 14, maxPerSource: 3);
 
                 // Added for hallucination debugging: the earlier log lines
                 // (raw=/boosted= scores) only show similarity numbers, not
@@ -9878,6 +9986,7 @@ namespace MEAI_GPT_API.Services
               plant,
               null, // persona — not threaded into this fallback path yet, see known gaps
               null, // temperature — same
+              false, // topicChanged — same
               cancellationToken))
             {
                 if (token.StartsWith("__ERROR__:"))
@@ -9988,6 +10097,20 @@ namespace MEAI_GPT_API.Services
                 set;
             } = new();
             public double AverageConfidence
+            {
+                get;
+                set;
+            }
+            /// <summary>
+            /// True when IsTopicChanged fired during retrieval for this
+            /// turn. Propagated to generation so BuildMessageList can skip
+            /// including recent conversation history — without this, a
+            /// question correctly re-anchored to Policy A after discussing
+            /// B and C still had the model SEE its own prior answer about C
+            /// sitting in the chat history, biasing it toward blending in
+            /// facts from the wrong policy despite retrieval being correct.
+            /// </summary>
+            public bool TopicChanged
             {
                 get;
                 set;
@@ -10207,6 +10330,9 @@ namespace MEAI_GPT_API.Services
           // explicit user choice wins over appsettings.json config.
           string? persona = null,
           double? temperature = null,
+          // ✅ NEW: when true, the history fetched below gets dropped for
+          // this turn — see the fetch site for why.
+          bool topicChanged = false,
           [EnumeratorCancellation] CancellationToken ct =
           default)
         {
@@ -10238,6 +10364,26 @@ namespace MEAI_GPT_API.Services
 
             // Use history from the centralised service — always current
             var history = _historyService.GetHistory(context.SessionId);
+
+            // ✅ NEW: retrieval already correctly re-anchors to the new
+            // topic when IsTopicChanged fires (see ExecuteRetrievalAsync) —
+            // but that only affected the RETRIEVAL query, not what gets
+            // shown to the model here. Without this, a question correctly
+            // re-anchored to Policy A after discussing B and C still had
+            // the model SEE its own prior answer about C sitting in the
+            // chat history, and LLMs are strongly biased toward continuity
+            // with their immediately-preceding turn — confirmed in
+            // production as the root cause of "ask A, then B, then C, then
+            // back to A gets confused" even when the retrieved chunks were
+            // already correct. Dropping history here, not just at
+            // retrieval, is what actually closes the gap.
+            if (topicChanged)
+            {
+                _logger.LogInformation(
+                  "🔄 Topic changed for session {S} — excluding {N} prior turns from generation to prevent blending facts from the previous topic",
+                  context.SessionId, history.Count);
+                history = new List<ConversationTurn>();
+            }
 
             _logger.LogInformation("Streaming MEAI response: session {S}, {N} history turns, {C} chunks",
               context.SessionId, history.Count, relevantChunks.Count);
