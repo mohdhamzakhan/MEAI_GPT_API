@@ -130,8 +130,7 @@
       ]
     },
     "AmbiguousTitles": {
-      "_comment": "Titles appearing in more than one band. Resolution rule: 'X and above' clauses resolve to the LOWER band, 'X and below' clauses resolve to the HIGHER band. Confirm this default is correct, or override a specific title's resolution here if not.",
-      "Assistant Manager": {
+        "Assistant Manager": {
         "PreferForMinBound": "ManagementStaff",
         "PreferForMaxBound": "LowerManagement"
       },

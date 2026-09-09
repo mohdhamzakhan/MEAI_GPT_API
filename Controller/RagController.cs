@@ -29,6 +29,7 @@ namespace MEAI_GPT_API.Controller
         private readonly TranslationService _translationService;
         private readonly AccessControlOptions _accessControl;
         private readonly IEmployeeDirectoryService _employeeDirectory;
+        private readonly GradeHierarchyService _gradeHierarchy;
 
 
         [ActivatorUtilitiesConstructor]
@@ -41,7 +42,8 @@ namespace MEAI_GPT_API.Controller
          TranslationService translationService,
         ILogger<RagController> logger,
         Microsoft.Extensions.Options.IOptions<AccessControlOptions> accessControl,
-        IEmployeeDirectoryService employeeDirectory)
+        IEmployeeDirectoryService employeeDirectory,
+        GradeHierarchyService gradeHierarchy)
         {
             _ragService = ragService;
             _codingService = codingService;
@@ -52,6 +54,7 @@ namespace MEAI_GPT_API.Controller
             _translationService = translationService;
             _accessControl = accessControl.Value;
             _employeeDirectory = employeeDirectory;
+            _gradeHierarchy = gradeHierarchy;
         }
         [HttpPost("query")]
         //public async Task<IActionResult> Query([FromBody] QueryRequest request, [FromServices] IBackgroundTaskQueue taskQueue)
@@ -1102,6 +1105,24 @@ namespace MEAI_GPT_API.Controller
             {
                 _logger.LogError(ex, $"Failed to reprocess file: {request.FilePath}");
                 return StatusCode(500, new { error = "Failed to reprocess file", details = ex.Message });
+            }
+        }
+
+        // ✅ NEW: source of truth for the "Your position" picker's Level ->
+        // Position cascade, read from grade-hierarchy.json's
+        // EmployeeSelfService section instead of being hardcoded in the
+        // frontend. Bands come back in seniority order (junior first).
+        [HttpGet("designation-options")]
+        public ActionResult<DesignationOptions> GetDesignationOptions()
+        {
+            try
+            {
+                return Ok(_gradeHierarchy.GetDesignationOptions());
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to load designation options");
+                return StatusCode(500, new { error = ex.Message });
             }
         }
 

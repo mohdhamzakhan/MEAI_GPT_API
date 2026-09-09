@@ -35,22 +35,110 @@ namespace MEAI_GPT_API.Service.Models
         public Dictionary<string, AmbiguousTitleResolution> AmbiguousTitles { get; set; } = new();
     }
 
+    internal class EmployeeSelfServiceConfig
+    {
+        public List<string> DirectCategorySubtypes { get; set; } = new();
+        public Dictionary<string, List<string>> TitlesByBand { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Public DTO for the "Your position" picker — bands in seniority
+    /// order, each with its curated single-band title list (empty list is
+    /// valid and means that band has no distinct picker entries; see
+    /// OperationalManagement), plus the two Direct-category subtypes which
+    /// have no grade ladder at all.
+    /// </summary>
+    public class DesignationOptions
+    {
+        public List<string> Bands { get; set; } = new();
+        public Dictionary<string, List<string>> TitlesByBand { get; set; } = new();
+        public List<string> DirectCategorySubtypes { get; set; } = new();
+    }
+
     public class GradeHierarchyService
     {
         private readonly ILogger<GradeHierarchyService> _logger;
         private readonly GradeHierarchyConfig _config;
+        private readonly EmployeeSelfServiceConfig _selfServiceConfig;
 
         // title (lowercased, trimmed) -> set of bands it appears in
         private readonly Dictionary<string, List<string>> _titleLookup;
+
+        // Reverse lookup for the picker: canonical self-service title
+        // (as stored verbatim, not normalized) -> its one band. Built from
+        // EmployeeSelfService.TitlesByBand, which is single-band-per-title
+        // by construction, so this is a plain 1:1 map, not the multi-band
+        // ambiguity _titleLookup has to handle.
+        private readonly Dictionary<string, string> _selfServiceTitleToBand;
 
         public GradeHierarchyService(IConfiguration configuration, ILogger<GradeHierarchyService> logger)
         {
             _logger = logger;
             _config = LoadConfig(configuration);
             _titleLookup = BuildTitleLookup(_config);
+            _selfServiceConfig = LoadSelfServiceConfig(configuration);
+            _selfServiceTitleToBand = _selfServiceConfig.TitlesByBand
+                .SelectMany(kv => kv.Value.Select(title => (title, band: kv.Key)))
+                .ToDictionary(x => x.title, x => x.band, StringComparer.OrdinalIgnoreCase);
 
             _logger.LogInformation(
                 $"📊 Grade hierarchy loaded: {_config.Bands.Count} bands, {_titleLookup.Count} distinct titles, {_config.AmbiguousTitles.Count} flagged as ambiguous");
+        }
+
+        /// <summary>
+        /// Public options for the "Your position" picker — bands in
+        /// seniority order (same order as the underlying Bands list, so
+        /// the frontend's Level dropdown reads junior-to-senior without
+        /// having to know the ordering itself), each band's curated title
+        /// list, and the two Direct-category subtypes.
+        /// </summary>
+        public DesignationOptions GetDesignationOptions()
+        {
+            return new DesignationOptions
+            {
+                Bands = _config.Bands,
+                TitlesByBand = _selfServiceConfig.TitlesByBand,
+                DirectCategorySubtypes = _selfServiceConfig.DirectCategorySubtypes
+            };
+        }
+
+        /// <summary>
+        /// Given a previously-saved title (e.g. an employee's stored
+        /// Grade), returns which band it belongs to per the self-service
+        /// list — used to pre-select the Level dropdown when someone
+        /// reopens the picker to update their position. Returns null for a
+        /// title that isn't in the curated list (e.g. an old free-text
+        /// value saved before this became a dropdown).
+        /// </summary>
+        public string? GetSelfServiceBandForTitle(string? title)
+        {
+            if (string.IsNullOrWhiteSpace(title)) return null;
+            return _selfServiceTitleToBand.TryGetValue(title.Trim(), out var band) ? band : null;
+        }
+
+        private EmployeeSelfServiceConfig LoadSelfServiceConfig(IConfiguration configuration)
+        {
+            try
+            {
+                var path = configuration["GradeHierarchyFilePath"] ?? "./context/grade-hierarchy.json";
+                if (!File.Exists(path)) return new EmployeeSelfServiceConfig();
+
+                var json = File.ReadAllText(path);
+                using var doc = JsonDocument.Parse(json);
+                if (!doc.RootElement.TryGetProperty("EmployeeSelfService", out var root))
+                {
+                    _logger.LogWarning("⚠️ No EmployeeSelfService section in grade-hierarchy.json — the position picker will have no options");
+                    return new EmployeeSelfServiceConfig();
+                }
+
+                return JsonSerializer.Deserialize<EmployeeSelfServiceConfig>(root.GetRawText(),
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new EmployeeSelfServiceConfig();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Failed to load EmployeeSelfService section — the position picker will have no options");
+                return new EmployeeSelfServiceConfig();
+            }
         }
 
         private GradeHierarchyConfig LoadConfig(IConfiguration configuration)
