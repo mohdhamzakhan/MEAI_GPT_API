@@ -9615,14 +9615,12 @@ namespace MEAI_GPT_API.Services
               already answer.
 
         Respond with ONLY this JSON, nothing
-        else: {
-                    {
+        else: {{
                         ""
                       needs_clarification "": true or false,
               ""
                       question "": "" < a single, specific, employee - facing question, or null > ""
-                    }
-                }
+                    }}
                 ";
       
         var modelName = !string.IsNullOrWhiteSpace(_config.GroundingRetryModel) ?
