@@ -5303,11 +5303,27 @@ namespace MEAI_GPT_API.Services
             if (!string.IsNullOrWhiteSpace(requester.Grade))
             {
                 // Grade on the employee record is a job title (e.g. "Deputy
-                // Manager"), not a band name — resolve it the same
-                // inclusive-by-default way as extraction does, using the
-                // min-bound resolution since we're checking "is this
-                // requester's rank >= the chunk's minimum".
-                var resolvedBand = _gradeHierarchy.ResolveTitleForMinBound(requester.Grade) ??
+                // Manager"), not a band name. IMPORTANT: this must NOT reuse
+                // ResolveTitleForMinBound — that's the ambiguous-title resolver
+                // built for interpreting vague POLICY TEXT, which defaults an
+                // ambiguous title to its most junior band (e.g. "Deputy Manager"
+                // -> ManagementStaff, since that title spans ManagementStaff/
+                // LowerManagement in the eligibility-matching config and
+                // PreferForMinBound picks the lower one). Applied to a REAL
+                // PERSON instead of a policy clause, that silently under-ranks
+                // them — a genuine LowerManagement-grade Deputy Manager got
+                // computed as ManagementStaff and was then wrongly excluded from
+                // "LowerManagement and above" policies they actually qualify for.
+                // Confirmed in production.
+                //
+                // GetSelfServiceBandForTitle uses the curated, single-band-per-
+                // title EmployeeSelfService list instead — the same one backing
+                // the "Your position" picker — so a real employee's title maps to
+                // their one true band. Only titles never selected via that picker
+                // (old free-text values saved before it was a dropdown) fall
+                // through to the ambiguous resolver as a last resort.
+                var resolvedBand = _gradeHierarchy.GetSelfServiceBandForTitle(requester.Grade) ??
+                  _gradeHierarchy.ResolveTitleForMinBound(requester.Grade) ??
                   (_gradeHierarchy.RankOf(requester.Grade) != null ? requester.Grade : null);
                 var rank = resolvedBand != null ? _gradeHierarchy.RankOf(resolvedBand) : null;
 
@@ -9599,12 +9615,14 @@ namespace MEAI_GPT_API.Services
               already answer.
 
         Respond with ONLY this JSON, nothing
-        else: {{
+        else: {
+                    {
                         ""
                       needs_clarification "": true or false,
               ""
                       question "": "" < a single, specific, employee - facing question, or null > ""
-                    }}
+                    }
+                }
                 ";
       
         var modelName = !string.IsNullOrWhiteSpace(_config.GroundingRetryModel) ?

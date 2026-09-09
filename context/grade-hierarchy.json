@@ -130,7 +130,7 @@
       ]
     },
     "AmbiguousTitles": {
-        "Assistant Manager": {
+      "Assistant Manager": {
         "PreferForMinBound": "ManagementStaff",
         "PreferForMaxBound": "LowerManagement"
       },
@@ -178,6 +178,57 @@
         "PreferForMinBound": "LowerManagement",
         "PreferForMaxBound": "OperationalManagement"
       }
+    }
+  },
+
+  "EmployeeSelfService": {
+    "DirectCategorySubtypes": [ "Direct Worker", "Administrative Staff" ],
+    "TitlesByBand": {
+      "ManagementStaff": [
+        "Jr. Engineer/ Jr. Executive",
+        "Engineer/ Executive",
+        "Senior Executive/Senior Engineer"
+      ],
+      "LowerManagement": [
+        "Assistant Manager",
+        "Deputy Manager",
+        "Manager",
+        "Senior Manager"
+      ],
+      "JuniorManagement": [
+        "Executive Manager",
+        "Operation Manager",
+        "Executive Senior Manager",
+        "Operational Senior Manager"
+      ],
+      "OperationalManagement": [],
+      "MiddleManagement": [
+        "Functional Head cum Senior Manager",
+        "Functional Head cum Assistant General Manager",
+        "Functional Head cum Deputy General Manager",
+        "Functional Head cum General Manager"
+      ],
+      "SeniorManagement": [
+        "Senior General Manager",
+        "Managing Executive Officers",
+        "Assistant Vice President",
+        "Chief Business Officer",
+        "Chief People Officer",
+        "Chief Procurement Officer",
+        "Chief Shop-floor Officer",
+        "Chief Marketing Officer",
+        "Chief Operating Officer",
+        "Chief Quality Officer",
+        "Chief Technical Officer",
+        "Chief Information Officer"
+      ],
+      "TopManagement": [
+        "Chief Executive Officer",
+        "Executive Director",
+        "Vice President",
+        "Senior Vice President",
+        "Executive Vice President"
+      ]
     }
   }
 }
