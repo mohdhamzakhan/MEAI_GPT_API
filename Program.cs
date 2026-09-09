@@ -225,6 +225,13 @@ builder.Services.AddSingleton<LearnedTriggerService>(sp =>
 
 builder.Services.AddSingleton<GradeHierarchyService>();
 
+// Monthly working-days calendar (weekends/holidays already excluded) used
+// to compute real elapsed working days for leave-accrual questions like EL
+// eligibility (see WorkingDaysCalendarService for details). Config key
+// "WorkingDaysCalendar:FilePath" overrides the default location, same
+// pattern as GradeEligibility:CacheFilePath above.
+builder.Services.AddSingleton<WorkingDaysCalendarService>();
+
 builder.Services.AddSingleton<GradeEligibilityService>(provider =>
 {
     var ollamaClient = provider.GetRequiredService<OllamaHttpClient>();

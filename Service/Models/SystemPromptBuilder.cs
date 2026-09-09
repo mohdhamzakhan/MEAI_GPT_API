@@ -9,12 +9,14 @@ namespace MEAI_GPT_API.Service.Models
         private readonly PolicyAnalysisService _policyAnalysis;
         private readonly EntityExtractionService _entityExtraction;
         private readonly OracleEBSQuery _oracleEBSQuery;
+        private readonly WorkingDaysCalendarService _workingDaysCalendar;
 
-        public SystemPromptBuilder(PolicyAnalysisService policyAnalysis, EntityExtractionService entityExtraction, OracleEBSQuery oracleEBSQuery)
+        public SystemPromptBuilder(PolicyAnalysisService policyAnalysis, EntityExtractionService entityExtraction, OracleEBSQuery oracleEBSQuery, WorkingDaysCalendarService workingDaysCalendar)
         {
             _policyAnalysis = policyAnalysis;
             _entityExtraction = entityExtraction;
             _oracleEBSQuery = oracleEBSQuery;
+            _workingDaysCalendar = workingDaysCalendar;
         }
 
         // Add these helper methods to SystemPromptBuilder class
@@ -285,7 +287,7 @@ Would you like detailed information about any specific policy?
             // member) entirely. Now sourced from the same shared
             // BuildGroundingRulesBlock() as every other builder, so this
             // path gets every current and future grounding fix automatically.
-            sb.Append(BuildGroundingRulesBlock());
+            sb.Append(BuildGroundingRulesBlock(query));
 
             sb.AppendLine("═══════════════════════════════════════════════════════════════");
             sb.AppendLine();
@@ -819,9 +821,142 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
         // needs to be written once and automatically applies everywhere,
         // instead of requiring a manual, easy-to-miss copy into each builder
         // — which is exactly how rule 8 ended up missing from one path.
-        private string BuildGroundingRulesBlock()
+        //
+        // Added after a real incident: a query like "I joined on 1-Apr-2026,
+        // how many EL am I eligible for?" gave a wrong/unusable answer.
+        // Root cause was two-fold: (1) the model was never told what
+        // "today" is, so it had no way to know how much time had elapsed
+        // since the joining date, and (2) even the existing rate-application
+        // exception (below) only fires when the USER hands over a ready-made
+        // number of days worked — it never converts a joining DATE into a
+        // day-count first. Exact calendar-day arithmetic (28/29/30/31-day
+        // months, year boundaries) is also exactly the kind of thing an LLM
+        // gets subtly wrong, so that step is done deterministically in C#
+        // here rather than delegated to the model — the model still does the
+        // (simple, low-risk) division/rate step per rule 6.
+        private static readonly Regex[] JoiningDatePatterns = new[]
+        {
+            // "joined on 1-Apr-2026", "joining date is 01/04/2026", "DOJ: 2026-04-01", "date of joining 1st April 2026"
+            new Regex(@"(?:joined|joining\s+date|date\s+of\s+joining|doj)\D{0,15}?(\d{1,2}(?:st|nd|rd|th)?[\s\-\/]+[A-Za-z]{3,9}[\s\-\/]+\d{2,4})", RegexOptions.IgnoreCase),
+            new Regex(@"(?:joined|joining\s+date|date\s+of\s+joining|doj)\D{0,15}?(\d{1,2}[\s\-\/]\d{1,2}[\s\-\/]\d{2,4})", RegexOptions.IgnoreCase),
+            new Regex(@"(?:joined|joining\s+date|date\s+of\s+joining|doj)\D{0,15}?(\d{4}[\s\-\/]\d{1,2}[\s\-\/]\d{1,2})", RegexOptions.IgnoreCase),
+        };
+
+        private static readonly string[] JoiningDateFormats = new[]
+        {
+            "d-MMM-yyyy", "d-MMM-yy", "d MMM yyyy", "d MMMM yyyy",
+            "dd-MM-yyyy", "dd/MM/yyyy", "d-M-yyyy", "d/M/yyyy",
+            "yyyy-MM-dd", "yyyy/MM/dd",
+        };
+
+        // Always tells the model the current date/time (server clock), since
+        // it otherwise has no way to know "today" at all — needed for EL-style
+        // eligibility questions, but useful for any other date-relative
+        // question too, so this part is unconditional rather than only
+        // firing when a joining date is detected.
+        private string BuildCurrentDateTimeFact()
+        {
+            var now = DateTime.Now;
+            return $"🕒 CURRENT DATE AND TIME: {now:dddd, dd MMMM yyyy, HH:mm} (server time). Use this as \"today\" for any date-relative question — do not assume or guess a different date.";
+        }
+
+        // Tries to find a joining/DOJ date in the user's query and, if found,
+        // deterministically computes how many WORKING days have elapsed
+        // between that date and today, using the actual company working-days
+        // calendar (context/working-days-calendar.json via
+        // WorkingDaysCalendarService) rather than raw calendar days — that
+        // calendar already has weekends and holidays excluded per month.
+        // Only the joining month and the current month are partial (and so
+        // only those two are prorated by calendar-day share); every whole
+        // month in between uses its exact figure from the table.
+        //
+        // If the calendar has no data for a month the range touches (e.g. a
+        // joining date from before the file's coverage starts), falls back
+        // to a plain calendar-day count and says so explicitly, rather than
+        // silently producing a wrong working-day figure.
+        //
+        // Returns null if no date-eligibility pattern is detected at all, so
+        // callers can skip this block entirely for unrelated queries.
+        private string TryBuildServiceDurationFact(string query)
+        {
+            if (string.IsNullOrWhiteSpace(query)) return null;
+
+            string rawMatch = null;
+            foreach (var pattern in JoiningDatePatterns)
+            {
+                var m = pattern.Match(query);
+                if (m.Success)
+                {
+                    rawMatch = m.Groups[1].Value.Trim();
+                    break;
+                }
+            }
+            if (rawMatch == null) return null;
+
+            // Strip ordinal suffixes ("1st" -> "1") before parsing.
+            var cleaned = Regex.Replace(rawMatch, @"(\d+)(st|nd|rd|th)", "$1", RegexOptions.IgnoreCase);
+            cleaned = cleaned.Replace("/", "-");
+
+            DateTime joinDate;
+            bool parsed = DateTime.TryParseExact(cleaned, JoiningDateFormats,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out joinDate);
+
+            if (!parsed)
+            {
+                // Fall back to a culture-aware general parse (day-first, as
+                // used in India) rather than failing silently.
+                var indianCulture = new System.Globalization.CultureInfo("en-GB");
+                parsed = DateTime.TryParse(cleaned, indianCulture,
+                    System.Globalization.DateTimeStyles.None, out joinDate);
+            }
+            if (!parsed) return null;
+
+            var today = DateTime.Today;
+            if (joinDate.Date > today) return null; // future date — nothing meaningful to compute
+
+            var fact = new StringBuilder();
+            fact.AppendLine("📅 SYSTEM-COMPUTED SERVICE-DURATION FACT — USE THIS, DO NOT RECOMPUTE THE DATE MATH YOURSELF:");
+            fact.AppendLine($"   - Today's date: {today:dd-MMM-yyyy}");
+            fact.AppendLine($"   - Joining date found in the user's question: {joinDate:dd-MMM-yyyy}");
+
+            var workingDays = _workingDaysCalendar?.GetWorkingDaysBetween(joinDate.Date, today);
+            if (workingDays.HasValue)
+            {
+                int roundedWorkingDays = (int)Math.Round(workingDays.Value, MidpointRounding.AwayFromZero);
+                fact.AppendLine($"   - Actual working days elapsed (from the company working-days calendar, weekends/holidays already excluded): {roundedWorkingDays} working days");
+                fact.AppendLine("     (the joining month and the current month are prorated by calendar-day share since only");
+                fact.AppendLine("     whole-month totals are available for them; every full month in between is exact)");
+                fact.AppendLine("   - If the retrieved policy context below states an accrual rate or formula for this leave");
+                fact.AppendLine("     type (e.g., \"1 day for every 10.73 working days\"), apply that rate to the");
+                fact.AppendLine($"     {roundedWorkingDays}-working-day figure above (per the calculation rule further down) to");
+                fact.AppendLine("     answer the user's eligibility question. Do not ask the user to do this math themselves.");
+            }
+            else
+            {
+                int calendarDays = (today - joinDate.Date).Days;
+                fact.AppendLine($"   - Calendar days elapsed between joining date and today: {calendarDays} days");
+                fact.AppendLine("   - NOTE: the working-days calendar does not have data covering this full period, so this is");
+                fact.AppendLine("     a CALENDAR-day count, not an actual working-day count — flag this to the user as an");
+                fact.AppendLine("     approximation if you use it to apply an accrual rate, since a working-day-based rate");
+                fact.AppendLine("     applied to raw calendar days will overstate the true figure.");
+            }
+            fact.AppendLine();
+            return fact.ToString();
+        }
+
+        private string BuildGroundingRulesBlock(string query = null)
         {
             var prompt = new StringBuilder();
+
+            prompt.AppendLine(BuildCurrentDateTimeFact());
+            prompt.AppendLine();
+
+            var serviceDurationFact = TryBuildServiceDurationFact(query);
+            if (serviceDurationFact != null)
+            {
+                prompt.AppendLine(serviceDurationFact);
+            }
 
             prompt.AppendLine("1. **BASE ANSWER ON PROVIDED CONTEXT ONLY**");
             prompt.AppendLine("   - The context below contains actual policy excerpts");
@@ -944,7 +1079,7 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
 
             prompt.AppendLine("🎯 CRITICAL INSTRUCTIONS:");
             prompt.AppendLine();
-            prompt.Append(BuildGroundingRulesBlock());
+            prompt.Append(BuildGroundingRulesBlock(query));
 
             prompt.AppendLine("═══════════════════════════════════════════════════════════════");
             prompt.AppendLine();
