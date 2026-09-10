@@ -85,15 +85,42 @@ namespace MEAIGPTAPI.Services
             }
         }
 
+        // ✅ CHANGED: action now takes the per-attempt CancellationToken instead of
+        // closing over a single token supplied by the caller. Previously, callers
+        // that wanted a request-level timeout (GradeEligibilityService,
+        // PolicyTriggerService, DynamicRagService's clarifying-question call) did
+        // `cts.CancelAfter(45s)` THEMSELVES and passed that single token in. That
+        // token's deadline is absolute wall-clock time, not "45s per try" — so if
+        // attempt 1 used up the whole 45s (e.g. Ollama slow/overloaded) and got
+        // cancelled, attempts 2 and 3 inherited an ALREADY-EXPIRED token and failed
+        // near-instantly without ever really being retried. Symptom in the logs:
+        // "attempt 1/3" through "attempt 3/3" all failing within ~100ms of each
+        // other with TaskCanceledException / socket-aborted errors, even though
+        // each retry is supposed to get a fresh shot.
+        //
+        // Fix: `outerCancellationToken` is the caller's REAL cancellation signal
+        // (request aborted, app shutdown, or CancellationToken.None if the caller
+        // doesn't have one) and is honored immediately — if it fires, we stop
+        // retrying right away rather than burning through remaining attempts.
+        // `perAttemptTimeout`, if supplied, is applied FRESH on every single
+        // attempt via its own linked CancellationTokenSource, so a slow attempt
+        // failing doesn't poison the budget for the next one.
         private async Task<HttpResponseMessage> ExecuteWithFailoverAsync(
-            Func<string, Task<HttpResponseMessage>> action,
-            int maxRetries = 3)
+            Func<string, CancellationToken, Task<HttpResponseMessage>> action,
+            int maxRetries = 3,
+            TimeSpan? perAttemptTimeout = null,
+            CancellationToken outerCancellationToken = default)
         {
             Exception? lastException = null;
             var attemptedEndpoints = new HashSet<string>();
 
             for (int attempt = 0; attempt < maxRetries; attempt++)
             {
+                // Caller actually cancelled (request aborted, shutdown, etc.) —
+                // stop immediately rather than spending the remaining attempts
+                // on a result nobody wants anymore.
+                outerCancellationToken.ThrowIfCancellationRequested();
+
                 var endpoint = GetNextHealthyEndpoint();
 
                 if (endpoint == null)
@@ -115,19 +142,39 @@ namespace MEAIGPTAPI.Services
 
                 attemptedEndpoints.Add(endpoint.Url);
 
+                // Fresh per-attempt deadline, linked to (but independent of the
+                // remaining budget of) the caller's real cancellation token.
+                using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(outerCancellationToken);
+                if (perAttemptTimeout.HasValue)
+                {
+                    attemptCts.CancelAfter(perAttemptTimeout.Value);
+                }
+
                 try
                 {
                     _logger.LogDebug($"Attempt {attempt + 1}: Using endpoint {endpoint.Url}");
-                    var response = await action(endpoint.Url);
+                    var response = await action(endpoint.Url, attemptCts.Token);
 
                     // Success - mark endpoint as healthy
                     MarkEndpointHealthy(endpoint);
                     return response;
                 }
+                catch (OperationCanceledException) when (outerCancellationToken.IsCancellationRequested)
+                {
+                    // The CALLER cancelled (not our per-attempt timeout) —
+                    // propagate immediately instead of logging it as a
+                    // retryable endpoint failure and looping again.
+                    throw;
+                }
                 catch (Exception ex)
                 {
                     lastException = ex;
-                    _logger.LogWarning(ex, $"Request to {endpoint.Url} failed (attempt {attempt + 1}/{maxRetries})");
+
+                    var timedOut = attemptCts.IsCancellationRequested && perAttemptTimeout.HasValue;
+                    _logger.LogWarning(ex,
+                        timedOut
+                            ? $"Request to {endpoint.Url} timed out after {perAttemptTimeout} (attempt {attempt + 1}/{maxRetries})"
+                            : $"Request to {endpoint.Url} failed (attempt {attempt + 1}/{maxRetries})");
 
                     // Mark endpoint as unhealthy
                     MarkEndpointUnhealthy(endpoint);
@@ -135,7 +182,7 @@ namespace MEAIGPTAPI.Services
                     // Don't delay on last attempt
                     if (attempt < maxRetries - 1)
                     {
-                        await Task.Delay(100 * (attempt + 1)); // Exponential backoff
+                        await Task.Delay(100 * (attempt + 1), outerCancellationToken); // Exponential backoff
                     }
                 }
             }
@@ -170,12 +217,20 @@ namespace MEAIGPTAPI.Services
             }
         }
 
+        // ✅ CHANGED: added maxRetries / perAttemptTimeout. Pass perAttemptTimeout
+        // when you want a bounded-latency call (e.g. a live-request-path or
+        // best-effort background call) — each retry gets that full budget fresh,
+        // instead of the caller pre-cancelling a shared token (see
+        // ExecuteWithFailoverAsync for why that was wrong). Leave it null to keep
+        // the old "only the caller's own cancellationToken governs it" behavior.
         public async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             HttpCompletionOption completionOption = HttpCompletionOption.ResponseContentRead,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            int maxRetries = 3,
+            TimeSpan? perAttemptTimeout = null)
         {
-            return await ExecuteWithFailoverAsync(async (endpointUrl) =>
+            return await ExecuteWithFailoverAsync(async (endpointUrl, attemptToken) =>
             {
                 var clonedRequest = await CloneHttpRequestMessageAsync(request);
                 var relativeUrl = request.RequestUri?.ToString() ?? string.Empty;
@@ -185,36 +240,40 @@ namespace MEAIGPTAPI.Services
                 var client = _httpClientFactory.CreateClient("OllamaAPI");
                 _logger.LogDebug($"SendAsync {clonedRequest.Method} {fullUrl}");
 
-                return await client.SendAsync(clonedRequest, completionOption, cancellationToken);
-            });
+                return await client.SendAsync(clonedRequest, completionOption, attemptToken);
+            }, maxRetries, perAttemptTimeout, cancellationToken);
         }
 
         public async Task<HttpResponseMessage> PostAsJsonAsync<T>(
             string relativeUrl,
             T content,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            int maxRetries = 3,
+            TimeSpan? perAttemptTimeout = null)
         {
-            return await ExecuteWithFailoverAsync(async (endpointUrl) =>
+            return await ExecuteWithFailoverAsync(async (endpointUrl, attemptToken) =>
             {
                 var fullUrl = $"{endpointUrl}/{relativeUrl.TrimStart('/')}";
                 var client = _httpClientFactory.CreateClient("OllamaAPI");
                 _logger.LogDebug($"POST {fullUrl}");
 
-                return await client.PostAsJsonAsync(fullUrl, content, cancellationToken);
-            });
+                return await client.PostAsJsonAsync(fullUrl, content, attemptToken);
+            }, maxRetries, perAttemptTimeout, cancellationToken);
         }
 
         public async Task<HttpResponseMessage> GetAsync(
             string relativeUrl,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            int maxRetries = 3,
+            TimeSpan? perAttemptTimeout = null)
         {
-            return await ExecuteWithFailoverAsync(async (endpointUrl) =>
+            return await ExecuteWithFailoverAsync(async (endpointUrl, attemptToken) =>
             {
                 var fullUrl = $"{endpointUrl}/{relativeUrl.TrimStart('/')}";
                 var client = _httpClientFactory.CreateClient("OllamaAPI");
 
-                return await client.GetAsync(fullUrl, cancellationToken);
-            });
+                return await client.GetAsync(fullUrl, attemptToken);
+            }, maxRetries, perAttemptTimeout, cancellationToken);
         }
 
         // Periodic health check (runs in background)

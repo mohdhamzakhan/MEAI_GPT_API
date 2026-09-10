@@ -152,16 +152,25 @@ namespace MEAI_GPT_API.Service.Models
                     stream = false
                 };
 
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 // 45s, not 2 minutes: this is a lightweight background
                 // enhancement, not a critical-path call. A refresh touching
                 // ~180 policies can't afford to eat 2 minutes per file on
                 // every hang — better to skip fast and let the next refresh
                 // (with its content-hash check) pick the file back up once
                 // the LLM server has recovered.
-                cts.CancelAfter(TimeSpan.FromSeconds(45));
-
-                var response = await _ollamaClient.PostAsJsonAsync("/api/chat", requestData, cts.Token);
+                //
+                // ✅ CHANGED: previously CancelAfter(45s) was applied to a single
+                // token shared across OllamaHttpClient's internal 3-retry loop —
+                // if attempt 1 ate the full 45s, attempts 2-3 inherited an
+                // already-expired token and failed instantly rather than really
+                // retrying. maxRetries: 1 makes the "skip fast, don't retry"
+                // intent explicit instead of it happening as an accidental side
+                // effect, and perAttemptTimeout gives that one attempt the full
+                // 45s it's meant to have.
+                var response = await _ollamaClient.PostAsJsonAsync(
+                    "/api/chat", requestData, cancellationToken,
+                    maxRetries: 1,
+                    perAttemptTimeout: TimeSpan.FromSeconds(45));
                 if (!response.IsSuccessStatusCode)
                 {
                     var err = await response.Content.ReadAsStringAsync();
