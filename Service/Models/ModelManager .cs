@@ -212,6 +212,18 @@ namespace MEAI_GPT_API.Services
                     ["temperature"] = 0.1,
                     ["top_p"] = 0.9
                 }
+            },
+            new ModelConfiguration
+            {
+                Name = "gemma4:12b",
+                Type = "generation",
+                MaxContextLength = 8192,
+                ModelOptions = new()
+                {
+                    ["num_ctx"] = 8192,
+                    ["temperature"] = 0.1,
+                    ["top_p"] = 0.9
+                }
             }
         };
 

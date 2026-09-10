@@ -6429,6 +6429,7 @@ namespace MEAI_GPT_API.Services
             var candidate =
               wc <= 12 ? "llama3.2:1b" :
               wc <= 40 ? "llama3.1:8b" :
+              wc <= 60 ? "gemma4:12b" :
               "qwen3:8b";
 
             if (await _modelManager.ValidateModelAsync(candidate))

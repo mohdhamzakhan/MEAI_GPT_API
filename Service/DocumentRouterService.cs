@@ -69,7 +69,7 @@ namespace MEAI_GPT_API.Service
                 var docs = await GetCachedDocumentsAsync(plant, embeddingModelName);
                 if (docs.Count == 0) return new List<string>();
 
-                var routerModel = _config.GetValue<string>("DocumentRouter:Model", "llama3.2:1b");
+                var routerModel = _config.GetValue<string>("DocumentRouter:Model", "llama3.1:8b");
                 var maxCandidates = _config.GetValue<int>("DocumentRouter:MaxDocumentsInPrompt", 200);
 
                 // Defensive cap: an extremely large corpus could make the
