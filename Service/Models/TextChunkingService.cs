@@ -77,7 +77,21 @@ namespace MEAI_GPT_API.Service.Models
                 RegexOptions.Compiled | RegexOptions.IgnoreCase),
             
             // NEW: All-caps standalone headings (common in boxes)
-            new Regex(@"^([A-Z][A-Z\s]{10,})$",
+            // ✅ CHANGED: was ^([A-Z][A-Z\s]{10,})$ — letters and spaces only.
+            // This is the array entry actually checked FIRST by
+            // DetectSectionHeader's loop; a near-identical (but separately
+            // maintained) copy of this same pattern also exists further
+            // down inside the type-determination fallback and was fixed
+            // there first, but that fallback is only reachable once one of
+            // THESE array patterns has already matched — so a heading like
+            // "EARNED LEAVE (EL)" that fails here never even reaches that
+            // other fix. This is the one that actually gates real behavior.
+            // See the fallback fix further down for the full incident
+            // writeup (confirmed real case: 02SP_General Information
+            // Policy's EARNED LEAVE (EL) section, and 7 of 11 headings in
+            // that same document, silently merged into neighboring
+            // sections because of this exact character-class gap).
+            new Regex(@"^([A-Z][A-Z0-9\s&\-/,\.():]{10,})$",
                 RegexOptions.Compiled),
             
             // NEW: Introduction phrases
@@ -407,7 +421,33 @@ namespace MEAI_GPT_API.Service.Models
                         return (true, $"Questions: {sectionId}", title);
                     else if (line.Contains("Checklist", StringComparison.OrdinalIgnoreCase))
                         return (true, $"Checklist: {sectionId}", title);
-                    else if (Regex.IsMatch(line, @"^[A-Z][A-Z\s]{10,}$"))
+                    // ✅ CHANGED: was ^[A-Z][A-Z\s]{10,}$ — letters and spaces
+                    // only. A real, confirmed incident: "EARNED LEAVE (EL)"
+                    // failed this match purely because of the parentheses,
+                    // so it was never recognized as a section boundary at
+                    // all — its content (including the actual "10.73 working
+                    // days per EL" / "26 EL" / "175 days" figures) silently
+                    // got appended into whichever section preceded it
+                    // ("SICK LEAVES"), diluting that chunk's embedding and
+                    // mislabeling the EL content under the wrong section
+                    // title. That chunk then ranked well for sick-leave
+                    // queries (matching its real title) but never surfaced
+                    // for EL-specific queries, so the model had zero actual
+                    // EL data in context and fabricated numbers instead —
+                    // caught by grounding verification, but the real fix is
+                    // here, not in generation. This pattern (TERM
+                    // (ABBREVIATION) as a heading) is common throughout HR
+                    // policy docs — e.g. "PROVIDENT FUND (PF)", "PROFESSIONAL
+                    // TAX (PT)" — so this almost certainly affected other
+                    // sections too, not just this one.
+                    //
+                    // Now tolerates parentheses, digits, and common heading
+                    // punctuation (&, -, /, comma, period, colon) while still
+                    // requiring the line be otherwise all-uppercase (no
+                    // lowercase), so it still won't match ordinary prose
+                    // sentences, which virtually always contain lowercase
+                    // words.
+                    else if (Regex.IsMatch(line, @"^[A-Z][A-Z0-9\s&\-/,\.():]{10,}$"))
                         return (true, "Special Section", line.Trim());
                     else
                         return (true, sectionId, title);

@@ -8669,9 +8669,21 @@ namespace MEAI_GPT_API.Services
             // produces a properly grounded answer or honestly admits it lacks the
             // specific information — both are better outcomes than a hallucination,
             // and the honest-admission case is still caught by the same gate below.
+            //
+            // ✅ CHANGED: was `!verification.IsGrounded` only. A confirmed real
+            // case (gemma4:12b, "how many EL will be given in a year") came back
+            // grounded=true, hallucination_free=true, complete=false, confidence
+            // 0.41 — genuinely relevant content from one retrieved document
+            // (02SP_General Information Policy) was in context but never made it
+            // into the synthesized answer. NeedsReprocessing was already true
+            // (confidence well under the 0.7 threshold — CalculateConfidence
+            // halves it specifically for incompleteness), but the old condition's
+            // extra `!IsGrounded` requirement meant this exact failure mode never
+            // reached the retry logic at all and shipped straight to the user.
             bool usedRetryModel = false;
 
-            if (verification != null && verification.NeedsReprocessing && !verification.IsGrounded)
+            if (verification != null && verification.NeedsReprocessing &&
+              (!verification.IsGrounded || !verification.IsComplete))
             {
                 var retryModelName = _config.GroundingRetryModel;
 
@@ -8694,13 +8706,18 @@ namespace MEAI_GPT_API.Services
                             var retryVerification = await VerifyResponseSafelyAsync(question, retryText, finalChunks, meaiInfo);
 
                             // Accept the retry if it's no longer flagged as an ungrounded
-                            // hallucination — including the case where the stronger model
-                            // honestly says "I don't have that specific information" rather
-                            // than fabricating, since that's still strictly better than the
-                            // original answer and will itself be caught downstream if needed.
+                            // hallucination AND is now complete — including the case where
+                            // the stronger model honestly says "I don't have that specific
+                            // information" rather than fabricating, since that's still
+                            // strictly better than the original answer and will itself be
+                            // caught downstream if needed. Checking IsComplete here too,
+                            // not just IsGrounded — otherwise a retry that's grounded but
+                            // still incomplete (e.g. still only partially synthesizes the
+                            // retrieved content) would be silently accepted as if the
+                            // original problem were fixed.
                             if (retryVerification == null ||
                               !retryVerification.NeedsReprocessing ||
-                              retryVerification.IsGrounded)
+                              (retryVerification.IsGrounded && retryVerification.IsComplete))
                             {
                                 responseText = retryText;
                                 verification = retryVerification;
@@ -8756,12 +8773,13 @@ namespace MEAI_GPT_API.Services
 
             string finalAnswer = responseText;
 
-            if (verification != null && verification.NeedsReprocessing && !verification.IsGrounded)
+            if (verification != null && verification.NeedsReprocessing &&
+              (!verification.IsGrounded || !verification.IsComplete))
             {
                 _logger.LogWarning(
-                  "⚠️ Self-verification flagged ungrounded answer (confidence {Confidence:P0}) even after retry — " +
+                  "⚠️ Self-verification flagged a low-confidence answer (confidence {Confidence:P0}, grounded={Grounded}, complete={Complete}) even after retry — " +
                   "checking whether a clarifying question could resolve this before falling back to refusal.",
-                  verification.OverallConfidence);
+                  verification.OverallConfidence, verification.IsGrounded, verification.IsComplete);
 
                 // ✅ NEW: one shot at asking the user something specific,
                 // rather than always giving up with "contact HR". Capped at
@@ -8788,9 +8806,22 @@ namespace MEAI_GPT_API.Services
                 }
                 else
                 {
-                    finalAnswer = $"I want to make sure I give you accurate information, but I'm not confident " +
+                    // ✅ CHANGED: the message used to unconditionally say "not
+                    // confident ... fully grounded", which is actively
+                    // misleading when the real failure was incompleteness —
+                    // the answer WAS grounded in real policy text, it just
+                    // didn't cover everything relevant that was retrieved.
+                    // Telling the user to contact HR because of a phantom
+                    // "grounding" concern when the actual gap is coverage
+                    // sends them looking for the wrong kind of help.
+                    finalAnswer = !verification.IsGrounded ?
+                    $"I want to make sure I give you accurate information, but I'm not confident " +
                     $"the answer I generated is fully grounded in {plant}'s policy documents. " +
-                    $"Please contact your supervisor or HR department for clarification on this matter.";
+                    $"Please contact your supervisor or HR department for clarification on this matter." :
+            $"I found some relevant information, but I'm not confident this answer covers " +
+                    $"everything {plant}'s policy documents say on this — it may be missing details from " +
+                    $"one or more of the retrieved sections. Please contact your supervisor or HR department " +
+                    $"to confirm the complete picture, or try rephrasing your question to be more specific.";
 
                     // ============================
                     // TRACK: log this refusal for pattern analysis
@@ -8802,7 +8833,7 @@ namespace MEAI_GPT_API.Services
                     // human correction comes in for the same question later.
                     var groundingReason = verification.Metadata.TryGetValue("grounding_reason", out
                         var gr2) ?
-                      gr2?.ToString() ?? "" : "";
+                      gr2?.ToString() ?? "" : (!verification.IsComplete ? "incomplete_answer" : "");
 
                     _ = _conversationStorage.LogGroundingFailureAsync(new GroundingFailure
                     {
