@@ -77,7 +77,7 @@ namespace MEAI_GPT_API.Service.Models
                 RegexOptions.Compiled | RegexOptions.IgnoreCase),
             
             // NEW: All-caps standalone headings (common in boxes)
-            // ✅ CHANGED: was ^([A-Z][A-Z\s]{10,})$ — letters and spaces only.
+            // ✅ CHANGED: was ^([A-Z][A-Z\s]{10,})$— letters and spaces only.
             // This is the array entry actually checked FIRST by
             // DetectSectionHeader's loop; a near-identical (but separately
             // maintained) copy of this same pattern also exists further
@@ -421,7 +421,7 @@ namespace MEAI_GPT_API.Service.Models
                         return (true, $"Questions: {sectionId}", title);
                     else if (line.Contains("Checklist", StringComparison.OrdinalIgnoreCase))
                         return (true, $"Checklist: {sectionId}", title);
-                    // ✅ CHANGED: was ^[A-Z][A-Z\s]{10,}$ — letters and spaces
+                    // ✅ CHANGED: was ^[A-Z][A-Z\s]{10,}$— letters and spaces
                     // only. A real, confirmed incident: "EARNED LEAVE (EL)"
                     // failed this match purely because of the parentheses,
                     // so it was never recognized as a section boundary at

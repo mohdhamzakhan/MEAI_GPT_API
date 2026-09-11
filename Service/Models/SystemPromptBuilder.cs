@@ -1499,8 +1499,5 @@ Be thorough in checking for all variations of terms."
             if (lowerSource.Contains("environment")) return "Environment";
             return "General";
         }
-
-
-
     }
 }

@@ -112,24 +112,65 @@ namespace MEAI_GPT_API.Service
     .Select(m => int.Parse(m.Value))
     .ToList();
 
-                // ✅ NEW: if the model ignored the "1-2 numbers only" instruction and
-                // listed many numbers instead (seen in practice: 7+ numbers from
-                // llama3.2:1b on a single query), that's a clear sign of router failure,
-                // not a real answer — trusting the first 2 in that noise picks
-                // essentially arbitrary documents. Fail open (empty list) instead.
-                if (allNumbers.Count > 3)
+                var distinctValidNumbers = allNumbers
+    .Where(n => n >= 1 && n <= candidateDocs.Count)
+    .Distinct()
+    .ToList();
+
+                // ✅ CHANGED: was a hard `allNumbers.Count > 3` that discarded
+                // EVERY number the moment more than 3 appeared, and a
+                // `.Take(2)` that truncated whatever survived down to at
+                // most 2 titles. That threshold was added for a real, but
+                // DIFFERENT, failure mode noted in the comment above: a
+                // small model (llama3.2:1b) spewing garbled/repeated noise.
+                // It also discards a genuinely correct answer from a
+                // capable model recognizing a broad question needs many
+                // documents — confirmed in production: the actually
+                // configured router model (llama3.1:8b, not the small 1b
+                // one the original safeguard targeted) returned a clean,
+                // fully-deduplicated, all-in-range list of 7 distinct
+                // indices ('4, 5, 8, 18, 30, 31, 49') for "what are the
+                // benefits for AM" — a genuinely broad question spanning
+                // many benefit-granting policies. The old logic discarded
+                // all 7, including whichever index was the Parking Policy
+                // (which mentions "AM and above" eligibility directly), and
+                // that policy never surfaced via plain semantic search on
+                // its own since "parking slots/vehicle" wording is distant
+                // from "benefits/perks/allowances" wording.
+                //
+                // Now distinguishes genuine noise (raw number-matches that
+                // ARE duplicated or fall outside the valid document range —
+                // a sign of garbage/repetition, not a deliberate list) from
+                // a clean broader answer (every match is a distinct, valid,
+                // in-range index), and only discards on the former. A clean
+                // list is capped generously rather than truncated to 2,
+                // since this is a fail-open supplementary retrieval boost
+                // (see class comment) — the caller already loops over
+                // however many titles come back and runs an anchored search
+                // for each one, so trusting more of them costs a few extra
+                // Chroma lookups, not correctness risk. Only an implausibly
+                // large clean list (more indices than a genuine multi-
+                // document question would plausibly need) still gets
+                // rejected as likely-noise-anyway.
+                var isCleanList = distinctValidNumbers.Count == allNumbers.Count;
+
+                if (!isCleanList && allNumbers.Count > 3)
                 {
                     _logger.LogWarning(
-                        "Document router returned {Count} numbers (expected 1-2) — treating as failure, raw output: '{Raw}'",
+                        "Document router returned {Count} numbers with duplicates/out-of-range values (not a clean distinct list) — treating as failure, raw output: '{Raw}'",
                         allNumbers.Count, rawAnswer.Trim());
                     return new List<string>();
                 }
 
-                var indices = allNumbers
-    .Where(n => n >= 1 && n <= candidateDocs.Count)
-    .Distinct()
-    .Take(2)
-    .ToList();
+                if (distinctValidNumbers.Count > 12)
+                {
+                    _logger.LogWarning(
+                        "Document router returned {Count} distinct indices — implausibly broad even for a genuine multi-document question, treating as failure, raw output: '{Raw}'",
+                        distinctValidNumbers.Count, rawAnswer.Trim());
+                    return new List<string>();
+                }
+
+                var indices = distinctValidNumbers.Take(8).ToList();
 
                 var titles = indices.Select(i => candidateDocs[i - 1].Title).ToList();
 

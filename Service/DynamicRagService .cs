@@ -8645,14 +8645,76 @@ namespace MEAI_GPT_API.Services
 
             if (string.IsNullOrWhiteSpace(responseText))
             {
-                yield
-                return new StreamChunk
+                // ✅ CHANGED: was an immediate hard "error" event with no
+                // retry at all — a harsher failure mode than an ungrounded
+                // or incomplete answer gets (those retry with a stronger
+                // model first; this didn't retry at all). An empty
+                // generation is at least as recoverable as those cases —
+                // confirmed in production: a 10-source, broad-topic query
+                // (spanning Company Car, Mediclaim, Apprentice Scheme, GPA,
+                // health checkup, Trainee Scheme, Superannuation, Anti
+                // Trust, and two ISMS policies) produced zero output tokens
+                // from the primary model, most likely from being
+                // overwhelmed trying to synthesize too many unrelated
+                // documents in one pass — exactly the kind of case a
+                // stronger model is more likely to handle. Reusing the same
+                // GroundingRetryModel config and gate as the grounding/
+                // completeness retry above, rather than a hard failure the
+                // user has no way to recover from except retyping the
+                // question and hoping for a different result.
+                var retryModelName = _config.GroundingRetryModel;
+                var retriedEmpty = false;
+
+                if (!string.IsNullOrWhiteSpace(retryModelName) &&
+                  !string.Equals(retryModelName, genModel.Name, StringComparison.OrdinalIgnoreCase))
                 {
-                    Type = "error",
-                    Content = "Generated response was empty"
-                };
-                yield
-                break;
+                    _logger.LogWarning(
+                      "⚠️ Generation returned empty output from '{OriginalModel}' — retrying once with '{RetryModel}' before failing.",
+                      genModel.Name, retryModelName);
+
+                    var retryModelConfig = await _modelManager.GetModelAsync(retryModelName);
+
+                    if (retryModelConfig != null)
+                    {
+                        var (retryText, retryErrored, retryErrorContent) = await GenerateBufferedAsync(retryModelConfig.Name!);
+
+                        if (!retryErrored && !string.IsNullOrWhiteSpace(retryText))
+                        {
+                            responseText = retryText;
+                            genModel = retryModelConfig;
+                            _logger.LogInformation("✅ Retry with '{RetryModel}' produced a non-empty response.", retryModelName);
+                        }
+                        else
+                        {
+                            retriedEmpty = true;
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Empty-response retry model '{RetryModel}' not found — skipping retry.", retryModelName);
+                    }
+                }
+
+                // Only hard-fail if the retry either wasn't attempted (no
+                // retry model configured/found) or also came back empty —
+                // otherwise responseText now holds the successful retry's
+                // content and execution falls through to verification below
+                // as normal.
+                if (string.IsNullOrWhiteSpace(responseText))
+                {
+                    _logger.LogError(
+                      "❌ Generation returned empty output{RetrySuffix} for question: {Question}",
+                      retriedEmpty ? " even after retry" : "", question);
+
+                    yield
+                    return new StreamChunk
+                    {
+                        Type = "error",
+                        Content = "Generated response was empty"
+                    };
+                    yield
+                    break;
+                }
             }
 
             // ============================
