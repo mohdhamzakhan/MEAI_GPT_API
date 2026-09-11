@@ -130,6 +130,48 @@ namespace MEAI_GPT_API.Services
         // so this can never leak between concurrent requests. If that
         // registration ever changes to Singleton, this must be revisited.
         private EmployeeRecord? _currentRequester;
+
+        // ✅ NEW: rank of a grade/title EXPLICITLY NAMED IN THE QUESTION TEXT
+        // itself (e.g. "what are the benefits for AM" -> Assistant Manager's
+        // rank), as opposed to _currentRequester's own grade. Set once per
+        // request by ResolveQueryMentionedGradeRank(), read by
+        // BuildEligibilityClauses(). Null means no known title was found in
+        // the question — eligibility filtering then falls back to the
+        // requester's own grade exactly as before this existed.
+        private int? _queryMentionedGradeRank;
+
+        // Scans the question (after abbreviation expansion, so "AM" ->
+        // "Assistant Manager" is visible to the title matcher) for a
+        // mentioned grade/title and caches its rank on the instance for the
+        // rest of this request. Call once, early, right after _currentRequester
+        // is resolved. Fail-open: any problem here just leaves
+        // _queryMentionedGradeRank null, i.e. "couldn't detect a grade
+        // mention," never an error the caller needs to handle.
+        private void ResolveQueryMentionedGradeRank(string question)
+        {
+            _queryMentionedGradeRank = null;
+            try
+            {
+                if (string.IsNullOrWhiteSpace(question)) return;
+
+                // Reuse the same abbreviation map used for retrieval expansion
+                // (e.g. "AM" -> "Assistant Manager") so a bare abbreviation in
+                // the question is visible to the title matcher, which
+                // deliberately does NOT recognize raw 2-3 letter abbreviations
+                // on their own (too easy to false-positive).
+                var expanded = _abbreviationService.ExpandQuery(question);
+
+                var band = _gradeHierarchy.TryResolveGradeMentionedInText(expanded);
+                if (band != null)
+                {
+                    _queryMentionedGradeRank = _gradeHierarchy.RankOf(band);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to resolve grade mention in question — continuing without it");
+            }
+        }
         public DynamicRagService(
           IModelManager modelManager,
           DynamicCollectionManager collectionManager,
@@ -959,6 +1001,10 @@ namespace MEAI_GPT_API.Services
                 // filter applied" rather than a guessed default — see
                 // JsonFileEmployeeDirectoryService.GetEmployeeInfoAsync.
                 _currentRequester = await _employeeDirectory.GetEmployeeInfoAsync(actualUserId);
+
+                // ✅ NEW: see ResolveQueryMentionedGradeRank — does the
+                // question itself name a grade ("benefits for AM")?
+                ResolveQueryMentionedGradeRank(question);
 
                 var dbSession = await _conversationStorage.GetOrCreateSessionAsync(
                   sessionId ?? Guid.NewGuid().ToString(),
@@ -5298,9 +5344,27 @@ namespace MEAI_GPT_API.Services
             var clauses = new List<Dictionary<string,
               object>>();
             var requester = _currentRequester;
-            if (requester == null) return clauses;
 
-            if (!string.IsNullOrWhiteSpace(requester.Grade))
+            // ✅ NEW: a grade NAMED IN THE QUESTION ITSELF ("what are the
+            // benefits for AM") takes priority over the requester's own
+            // grade — the question is explicitly asking about a specific
+            // grade band's entitlements, which may not be the asker's own
+            // (an HR admin asking "benefits for AM" isn't asking about
+            // themselves). Falls back to the requester's own grade below
+            // when the question doesn't name one — that's the "what are my
+            // benefits" case, unchanged from before.
+            //
+            // Note this means we no longer early-return just because
+            // requester == null: an anonymous/system request whose QUESTION
+            // names a grade should still get eligibility-filtered, not
+            // silently fall through to unfiltered semantic-only search
+            // (which is what let grade-gated content like the Parking
+            // Policy's "AM & above" clause lose to unrelated higher-scoring
+            // chunks for a "benefits for AM" query — it never even entered
+            // the candidate pool).
+            var rank = _queryMentionedGradeRank;
+
+            if (!rank.HasValue && requester != null && !string.IsNullOrWhiteSpace(requester.Grade))
             {
                 // Grade on the employee record is a job title (e.g. "Deputy
                 // Manager"), not a band name. IMPORTANT: this must NOT reuse
@@ -5325,48 +5389,51 @@ namespace MEAI_GPT_API.Services
                 var resolvedBand = _gradeHierarchy.GetSelfServiceBandForTitle(requester.Grade) ??
                   _gradeHierarchy.ResolveTitleForMinBound(requester.Grade) ??
                   (_gradeHierarchy.RankOf(requester.Grade) != null ? requester.Grade : null);
-                var rank = resolvedBand != null ? _gradeHierarchy.RankOf(resolvedBand) : null;
+                rank = resolvedBand != null ? _gradeHierarchy.RankOf(resolvedBand) : null;
 
-                if (rank.HasValue)
-                {
-                    clauses.Add(new Dictionary<string, object> {
-            {
-              "$and",
-              new List < Dictionary < string,
-              object >> {
-                new() {
-                  {
-                    "grade_min_rank",
-                    new Dictionary < string,
-                    object > {
-                      {
-                        "$lte",
-                        rank.Value
-                      }
-                    }
-                  }
-                },
-                new() {
-                  {
-                    "grade_max_rank",
-                    new Dictionary < string,
-                    object > {
-                      {
-                        "$gte",
-                        rank.Value
-                      }
-                    }
-                  }
-                },
-              }
-            }
-          });
-                }
-                else
+                if (!rank.HasValue)
                 {
                     _logger.LogWarning($"⚠️ Could not resolve requester grade '{requester.Grade}' to a known band — grade filter skipped for this request, not defaulted");
                 }
             }
+
+            if (rank.HasValue)
+            {
+                clauses.Add(new Dictionary<string, object> {
+          {
+            "$and",
+            new List < Dictionary < string,
+            object >> {
+              new() {
+                {
+                  "grade_min_rank",
+                  new Dictionary < string,
+                  object > {
+                    {
+                      "$lte",
+                      rank.Value
+                    }
+                  }
+                }
+              },
+              new() {
+                {
+                  "grade_max_rank",
+                  new Dictionary < string,
+                  object > {
+                    {
+                      "$gte",
+                      rank.Value
+                    }
+                  }
+                }
+              },
+            }
+          }
+        });
+            }
+
+            if (requester == null) return clauses;
 
             if (!string.IsNullOrWhiteSpace(requester.EmployeeCategory))
             {
@@ -8157,6 +8224,12 @@ namespace MEAI_GPT_API.Services
             // that method's comment for why this is safe as instance state
             // (DynamicRagService is Scoped, one instance per HTTP request).
             _currentRequester = await _employeeDirectory.GetEmployeeInfoAsync(userId ?? "system");
+
+            // ✅ NEW: does the QUESTION ITSELF name a grade ("benefits for
+            // AM")? If so, that should drive eligibility filtering for this
+            // request regardless of who's actually asking — see
+            // BuildEligibilityClauses.
+            ResolveQueryMentionedGradeRank(question);
 
             // ✅ CRITICAL: AgentContext is rebuilt from scratch every request
             // by CreateAgentContextAsync (it reloads History from the DB but

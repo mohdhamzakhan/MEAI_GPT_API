@@ -243,6 +243,60 @@ namespace MEAI_GPT_API.Service.Models
         /// </summary>
         public string? ResolveTitleForMaxBound(string title) => ResolveTitle(title, preferMin: false);
 
+        // ✅ NEW: scans free text (a user's QUESTION, e.g. "what are the
+        // benefits for AM") for any known job title and resolves it to a
+        // band. This is distinct from ResolveTitleForMinBound (which takes
+        // an already-isolated title string extracted from POLICY text) and
+        // from an employee's own resolved grade (EmployeeDirectoryService) —
+        // this is for "the question itself names a grade," independent of
+        // who is actually asking. Callers are expected to run abbreviation
+        // expansion (e.g. "AM" -> "Assistant Manager") on the text BEFORE
+        // calling this, since abbreviations like "AM" are deliberately not
+        // in TitleToBand themselves (too easy to false-positive against
+        // ordinary English inside arbitrary questions).
+        //
+        // Matches the LONGEST known title found as a whole-word-ish
+        // substring (so "Deputy Manager" beats a coincidental "Manager"
+        // match in the same text), reusing ResolveTitleForMinBound's
+        // existing ambiguity handling once a title is found. Returns null
+        // if no known title is mentioned at all.
+        public string? TryResolveGradeMentionedInText(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return null;
+            var normalizedText = Normalize(text);
+
+            string? bestTitle = null;
+            var bestLength = 0;
+
+            foreach (var key in _titleLookup.Keys)
+            {
+                if (key.Length <= bestLength) continue; // can't beat current best, skip the regex
+
+                // Require a grade-referencing preposition immediately before
+                // the title ("benefits FOR am", "eligibility OF manager",
+                // "applicable TO deputy manager") — without this, an
+                // unrelated mention like "who is my manager" or "escalate to
+                // my manager" would incorrectly engage eligibility filtering
+                // and narrow the candidate pool for a question that was
+                // never asking about a grade at all.
+                var pattern = $@"\b(?:for|of|to)\s+{System.Text.RegularExpressions.Regex.Escape(key)}(?![a-z0-9])";
+                if (System.Text.RegularExpressions.Regex.IsMatch(normalizedText, pattern))
+                {
+                    bestTitle = key;
+                    bestLength = key.Length;
+                }
+            }
+
+            if (bestTitle == null) return null;
+
+            var band = ResolveTitleForMinBound(bestTitle);
+            if (band != null)
+            {
+                _logger.LogInformation($"🎯 Grade mention detected in question text: '{bestTitle}' -> band '{band}'");
+            }
+            return band;
+        }
+
         private string? ResolveTitle(string title, bool preferMin)
         {
             var key = Normalize(title);
