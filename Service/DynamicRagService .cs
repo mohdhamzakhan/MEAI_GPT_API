@@ -1236,21 +1236,21 @@ namespace MEAI_GPT_API.Services
                 var rankedChunks = relevantChunks.OrderByDescending(c => c.RerankScore ?? c.Similarity).ToList();
 
                 // 🔍 Rank top chunks
-                var scored = await Task.WhenAll(
-                  relevantChunks.OrderByDescending(x => x.Similarity)
-                  .Take(8)
-                  .Select(async chunk => {
-                      var emb = await GetPerRequestEmbeddingAsync(chunk.Text);
-                      var sim = CosineSimilarity(answerEmbedding, emb);
-                      chunk.Similarity = sim;
-                      return (chunk, sim);
-                  }));
+                //var scored = await Task.WhenAll(
+                //  relevantChunks.OrderByDescending(x => x.Similarity)
+                //  .Take(8)
+                //  .Select(async chunk => {
+                //      var emb = await GetPerRequestEmbeddingAsync(chunk.Text);
+                //      var sim = CosineSimilarity(answerEmbedding, emb);
+                //      chunk.Similarity = sim;
+                //      return (chunk, sim);
+                //  }));
 
                 // ── In ProcessQueryAsync — the confidence calculation ────────────────────────
                 // This MUST stay on raw Similarity, not RelevanceScore.
                 // It is already correct IF Similarity was never inflated. Double-check here:
 
-                var dynamicThreshold = scored.Any(s => s.sim > 0.6) ? 0.5 : 0.3;
+                var dynamicThreshold = rankedChunks.Any(s => s.Similarity > 0.6) ? 0.5 : 0.3;
                 var topChunks = rankedChunks.Where(c => c.Similarity > dynamicThreshold).Take(8).ToList();
 
                 // If thresholding filtered out everything (e.g. a section-specific query                // with few, weaker matches), fall back to the best few we actually                // retrieved rather than reporting zero sources/confidence.
@@ -12487,6 +12487,120 @@ namespace MEAI_GPT_API.Services
 
                 throw;
             }
+        }
+
+        public async Task<List<EligibilityRepairResult>> RepairEligibilityForFilesAsync(
+    List<string> sourceFiles, CancellationToken cancellationToken = default)
+        {
+            var results = new List<EligibilityRepairResult>();
+            var embeddingModels = await GetAvailableModelsAsync();
+
+            foreach (var sourceFile in sourceFiles)
+            {
+                var result = new EligibilityRepairResult { SourceFile = sourceFile };
+
+                foreach (var model in embeddingModels)
+                {
+                    var collectionId = await _collectionManager.GetOrCreateCollectionAsync(model);
+
+                    var getBody = new
+                    {
+                        where = new Dictionary<string, object>
+                        {
+                            ["source_file"] = new Dictionary<string, object> { ["$eq"] = sourceFile }
+                        },
+                        include = new[] { "metadatas", "documents" }
+                    };
+
+                    var getResp = await _chromaClient.PostAsJsonAsync(
+                        $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/get",
+                        getBody, cancellationToken);
+
+                    if (!getResp.IsSuccessStatusCode)
+                    {
+                        result.Errors.Add($"[{model.Name}] get failed: {getResp.StatusCode}");
+                        continue;
+                    }
+
+                    using var doc = JsonDocument.Parse(await getResp.Content.ReadAsStringAsync());
+                    if (!doc.RootElement.TryGetProperty("ids", out var idsEl)) continue;
+
+                    var ids = idsEl.EnumerateArray().Select(e => e.GetString()!).ToList();
+                    var docsEl = doc.RootElement.GetProperty("documents").EnumerateArray().ToList();
+                    var metasEl = doc.RootElement.GetProperty("metadatas").EnumerateArray().ToList();
+
+                    var updateIds = new List<string>();
+                    var updateMetadatas = new List<Dictionary<string, object>>();
+
+                    for (int i = 0; i < ids.Count; i++)
+                    {
+                        result.ChunksScanned++;
+                        var chunkText = docsEl[i].GetString() ?? "";
+
+                        // Rebuild the existing metadata dict so we only touch the
+                        // eligibility-derived fields and leave everything else
+                        // (section_id, plant, annexure_refs, etc.) untouched.
+                        var existingMeta = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                            metasEl[i].GetRawText())!;
+                        var mergedMeta = existingMeta.ToDictionary(
+                            kv => kv.Key,
+                            kv => (object)(kv.Value.ValueKind switch
+                            {
+                                JsonValueKind.String => kv.Value.GetString()!,
+                                JsonValueKind.Number => kv.Value.TryGetInt64(out var l) ? l : kv.Value.GetDouble(),
+                                JsonValueKind.True => true,
+                                JsonValueKind.False => false,
+                                _ => kv.Value.GetRawText()
+                            }));
+
+                        // Force a fresh extraction attempt. The JSON cache only skips
+                        // saving on timeout/failure, so a chunk that previously timed
+                        // out is a guaranteed cache miss here and gets retried for real.
+                        var (eligibility, _) = await _gradeEligibilityService.GetOrExtractAsync(
+                            sourceFile, chunkText, cancellationToken);
+
+                        var newMinRank = eligibility.MinGradeBand != null ? (_gradeHierarchy.RankOf(eligibility.MinGradeBand) ?? -1) : -1;
+                        var newMaxRank = eligibility.MaxGradeBand != null ? (_gradeHierarchy.RankOf(eligibility.MaxGradeBand) ?? int.MaxValue) : int.MaxValue;
+                        var newCategory = string.IsNullOrEmpty(eligibility.EmployeeCategory) ? "all" : eligibility.EmployeeCategory.ToLowerInvariant();
+                        var newSubtype = string.IsNullOrEmpty(eligibility.DirectSubtype) ? "all" : eligibility.DirectSubtype.ToLowerInvariant();
+
+                        var changed =
+                            !mergedMeta.TryGetValue("grade_min_rank", out var oldMin) || Convert.ToInt64(oldMin) != newMinRank ||
+                            !mergedMeta.TryGetValue("grade_max_rank", out var oldMax) || Convert.ToInt64(oldMax) != newMaxRank ||
+                            !mergedMeta.TryGetValue("employee_category", out var oldCat) || (string)oldCat != newCategory;
+
+                        if (eligibility.MinGradeBand == null && eligibility.MaxGradeBand == null && eligibility.EmployeeCategory == null)
+                            result.ChunksStillEmpty++;
+
+                        if (!changed) continue;
+
+                        mergedMeta["grade_min_rank"] = newMinRank;
+                        mergedMeta["grade_max_rank"] = newMaxRank;
+                        mergedMeta["employee_category"] = newCategory;
+                        mergedMeta["direct_subtype"] = newSubtype;
+
+                        updateIds.Add(ids[i]);
+                        updateMetadatas.Add(mergedMeta);
+                    }
+
+                    if (updateIds.Any())
+                    {
+                        var updateBody = new { ids = updateIds, metadatas = updateMetadatas };
+                        var updateResp = await _chromaClient.PostAsJsonAsync(
+                            $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/update",
+                            updateBody, cancellationToken);
+
+                        if (!updateResp.IsSuccessStatusCode)
+                            result.Errors.Add($"[{model.Name}] update failed: {updateResp.StatusCode}");
+                        else
+                            result.ChunksUpdated += updateIds.Count;
+                    }
+                }
+
+                results.Add(result);
+            }
+
+            return results;
         }
 
         // Added to support the regression suite's auto-discovery of every

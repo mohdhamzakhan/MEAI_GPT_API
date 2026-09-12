@@ -41,6 +41,24 @@ namespace MEAI_GPT_API.Service.Models
         public Dictionary<string, List<string>> TitlesByBand { get; set; } = new();
     }
 
+    public class AmbiguousTitleAudit
+    {
+        public string Title { get; set; } = "";
+        public List<string> Bands { get; set; } = new();
+        public bool HasExplicitOverride { get; set; }
+        public string DefaultsToMinBand { get; set; } = "";
+        public string DefaultsToMaxBand { get; set; } = "";
+    }
+
+    public class EligibilityRepairResult
+    {
+        public string SourceFile { get; set; } = "";
+        public int ChunksScanned { get; set; }
+        public int ChunksUpdated { get; set; }      // metadata actually changed
+        public int ChunksStillEmpty { get; set; }   // re-extraction still returned nothing
+        public List<string> Errors { get; set; } = new();
+    }
+
     /// <summary>
     /// Public DTO for the "Your position" picker — bands in seniority
     /// order, each with its curated single-band title list (empty list is
@@ -335,6 +353,39 @@ namespace MEAI_GPT_API.Service.Models
                 $"⚠️ Title '{title}' is ambiguous across bands [{string.Join(", ", bands)}] with no explicit override — defaulting to '{fallback}' ({(preferMin ? "lowest" : "highest")}, inclusive-by-default rule)");
 
             return fallback;
+        }
+
+        /// <summary>
+        /// Every title that spans more than one band, flagging which ones lack an
+        /// explicit AmbiguousTitles override and would silently fall back to the
+        /// inclusive-by-default rule.
+        /// </summary>
+        public List<AmbiguousTitleAudit> AuditAmbiguousTitles()
+        {
+            var overrides = _config.AmbiguousTitles.Keys
+                .Select(Normalize)
+                .ToHashSet();
+
+            return _titleLookup
+                .Where(kv => kv.Value.Count > 1)
+                .Select(kv =>
+                {
+                    var ranked = kv.Value
+                        .Select(b => (Band: b, Rank: RankOf(b) ?? int.MaxValue))
+                        .OrderBy(x => x.Rank)
+                        .ToList();
+
+                    return new AmbiguousTitleAudit
+                    {
+                        Title = kv.Key,
+                        Bands = kv.Value,
+                        HasExplicitOverride = overrides.Contains(kv.Key),
+                        DefaultsToMinBand = ranked.First().Band,
+                        DefaultsToMaxBand = ranked.Last().Band
+                    };
+                })
+                .OrderBy(a => a.HasExplicitOverride) // missing overrides first
+                .ToList();
         }
     }
 }

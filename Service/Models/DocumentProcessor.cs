@@ -158,6 +158,12 @@ public class DocumentProcessor : IDocumentProcessor, IDisposable
             // .Descendants<Paragraph>() walks the whole tree, including table cells.
             foreach (var paragraph in mainPart.Document.Body.Descendants<DocumentFormat.OpenXml.Wordprocessing.Paragraph>())
             {
+                // Skip paragraphs that live inside a table cell — Loop 2 below already
+                // emits table content, row-by-row with " | " separators, which preserves
+                // column structure. Including them here too duplicates every cell's text.
+                if (paragraph.Ancestors<DocumentFormat.OpenXml.Wordprocessing.TableCell>().Any())
+                    continue;
+
                 var paragraphText = paragraph.InnerText.Trim();
                 if (!string.IsNullOrEmpty(paragraphText))
                 {
@@ -166,8 +172,6 @@ public class DocumentProcessor : IDocumentProcessor, IDisposable
                 }
             }
 
-            // Optional but recommended: also walk tables explicitly so row/column
-            // structure isn't flattened into a meaningless run of cell text.
             foreach (var table in mainPart.Document.Body.Descendants<DocumentFormat.OpenXml.Wordprocessing.Table>())
             {
                 foreach (var row in table.Elements<DocumentFormat.OpenXml.Wordprocessing.TableRow>())

@@ -1,4 +1,5 @@
 ﻿using MEAI_GPT_API.Models;
+using MEAI_GPT_API.Service.Models;
 using MEAI_GPT_API.Services;
 using System.Runtime.CompilerServices;
 using static MEAI_GPT_API.Controller.RagController;
@@ -40,4 +41,6 @@ public interface IRAGService
     string model,
     int limit = 20000);
 
+    Task<List<EligibilityRepairResult>> RepairEligibilityForFilesAsync(
+    List<string> sourceFiles, CancellationToken cancellationToken = default);
 }

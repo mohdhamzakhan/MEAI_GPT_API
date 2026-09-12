@@ -41,6 +41,11 @@ namespace MEAI_GPT_API.Service.Models
 
         [JsonPropertyName("DirectSubtype")]
         public string? DirectSubtype { get; set; } // "Direct Worker" | "Administrative Staff" | null
+        [JsonPropertyName("ExtractionPath")]
+        public string ExtractionPath { get; set; } = "Unknown"; // "PreFilterSkip" | "Deterministic" | "LlmExtracted"
+
+        [JsonPropertyName("ChunkPreview")]
+        public string? ChunkPreview { get; set; } // first ~150 chars, for manual spot-checking
     }
 
     public class GradeEligibilityService
@@ -218,6 +223,8 @@ namespace MEAI_GPT_API.Service.Models
             var deterministic = TryDeterministicThresholdMatch(sourceFile, key, chunkText);
             if (deterministic != null)
             {
+                deterministic.ExtractionPath = "Deterministic";
+                deterministic.ChunkPreview = chunkText.Length > 150 ? chunkText[..150] : chunkText;
                 await SaveEntryAsync(deterministic);
                 _logger.LogInformation($"✅ Deterministic threshold match for chunk in {sourceFile}: category={deterministic.EmployeeCategory}, minGrade={deterministic.MinGradeBand}");
                 return (deterministic, false); // no LLM call made
@@ -225,7 +232,13 @@ namespace MEAI_GPT_API.Service.Models
 
             if (!MightContainEligibilityClause(chunkText))
             {
-                var none = new ChunkEligibility { SourceFile = sourceFile, ChunkKey = key };
+                var none = new ChunkEligibility
+                {
+                    SourceFile = sourceFile,
+                    ChunkKey = key,
+                    ExtractionPath = "PreFilterSkip",
+                    ChunkPreview = chunkText.Length > 150 ? chunkText[..150] : chunkText
+                };
                 await SaveEntryAsync(none);
                 return (none, false);
             }
@@ -248,25 +261,46 @@ namespace MEAI_GPT_API.Service.Models
                     stream = false
                 };
 
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                cts.CancelAfter(TimeSpan.FromSeconds(45)); // same rationale as PolicyTriggerService
-
-                var response = await _ollamaClient.PostAsJsonAsync("/api/chat", requestData, cts.Token);
-                if (!response.IsSuccessStatusCode)
+                const int maxAttempts = 3;
+                for (int attempt = 1; attempt <= maxAttempts; attempt++)
                 {
-                    _logger.LogWarning($"⚠️ Grade eligibility extraction call failed for a chunk in {sourceFile}: {response.StatusCode}");
-                    var failed = new ChunkEligibility { SourceFile = sourceFile, ChunkKey = key };
-                    return (failed, true); // NOT cached — retry next refresh, unlike the true-negative case above. Still a real call for throttling purposes.
+                    try
+                    {
+                        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                        cts.CancelAfter(TimeSpan.FromSeconds(60));
+
+                        var response = await _ollamaClient.PostAsJsonAsync("/api/chat", requestData, cts.Token);
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            _logger.LogWarning($"⚠️ Grade eligibility extraction call failed (attempt {attempt}/{maxAttempts}) for a chunk in {sourceFile}: {response.StatusCode}");
+                            if (attempt == maxAttempts)
+                                return (new ChunkEligibility { SourceFile = sourceFile, ChunkKey = key }, true);
+                            await Task.Delay(2000 * attempt);
+                            continue;
+                        }
+
+                        var raw = await response.Content.ReadAsStringAsync();
+                        var entry = ParseExtractionResponse(raw, sourceFile, key, chunkText);
+                        entry.ExtractionPath = "LlmExtracted";
+                        entry.ChunkPreview = chunkText.Length > 150 ? chunkText[..150] : chunkText;
+                        ApplyStructuralInferenceRules(entry);
+                        await SaveEntryAsync(entry);
+                        _logger.LogInformation($"✅ Extracted eligibility for chunk in {sourceFile}: min={entry.MinGradeBand}, max={entry.MaxGradeBand}, category={entry.EmployeeCategory}");
+                        return (entry, true);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        _logger.LogWarning($"⚠️ Grade eligibility extraction timed out (attempt {attempt}/{maxAttempts}) for a chunk in {sourceFile}");
+                        if (attempt == maxAttempts)
+                            return (new ChunkEligibility { SourceFile = sourceFile, ChunkKey = key }, true);
+                        await Task.Delay(2000 * attempt);
+                    }
                 }
 
-                var raw = await response.Content.ReadAsStringAsync();
-                var entry = ParseExtractionResponse(raw, sourceFile, key, chunkText);
-
-                ApplyStructuralInferenceRules(entry);
-
-                await SaveEntryAsync(entry);
-                _logger.LogInformation($"✅ Extracted eligibility for chunk in {sourceFile}: min={entry.MinGradeBand}, max={entry.MaxGradeBand}, category={entry.EmployeeCategory}");
-                return (entry, true);
+                // Unreachable in practice — every exit from the loop above returns
+                // explicitly on the final attempt. This satisfies the compiler's
+                // flow analysis, which can't prove that from the loop bounds alone.
+                return (new ChunkEligibility { SourceFile = sourceFile, ChunkKey = key }, true);
             }
             catch (OperationCanceledException)
             {
