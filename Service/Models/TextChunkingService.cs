@@ -246,6 +246,28 @@ namespace MEAI_GPT_API.Service.Models
                 // Normal line processing
                 int lineTokens = _stringProcessor.EstimateTokenCount(trimmed);
 
+                // Hard ceiling regardless of sentence/blank-line heuristics below,
+                // and regardless of the inListContext grace period a few lines down.
+                // ShouldSplitChunk's own conditions (blank line / trailing period /
+                // >1.2x maxTokens) can all fail to trigger on dense table rows or
+                // long list runs with no punctuation, letting a chunk grow
+                // unbounded (seen in practice: 18k+ char chunks silently truncated
+                // at embedding time, discarding most of the chunk's content).
+                // This check can't be bypassed by inListContext since it runs
+                // and splits BEFORE that branch is ever reached.
+                if (tokenCount > maxTokens * 1.5)
+                {
+                    var overflowContentType = DetectContentType(currentTitle, currentChunk.ToString());
+                    var overflowChunk = BuildComprehensiveChunk(
+                        currentSectionId, currentTitle, currentChunk.ToString(), overflowContentType);
+                    chunks.Add((overflowChunk, sourceFile, currentSectionId, currentTitle));
+
+                    currentChunk.Clear();
+                    currentChunk.AppendLine($"=== {currentSectionId}: {currentTitle} (continued) ===");
+                    tokenCount = _stringProcessor.EstimateTokenCount($"{currentSectionId}: {currentTitle} (continued)");
+                    inListContext = false;
+                }
+
                 // Smart splitting - avoid breaking lists
                 if (ShouldSplitChunk(currentChunk, trimmed, tokenCount + lineTokens, maxTokens))
                 {
