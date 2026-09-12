@@ -282,7 +282,7 @@ namespace MEAI_GPT_API.Service.Models
                         var raw = await response.Content.ReadAsStringAsync();
                         var entry = ParseExtractionResponse(raw, sourceFile, key, chunkText);
                         entry.ExtractionPath = "LlmExtracted";
-                        entry.ChunkPreview = chunkText.Length > 150 ? chunkText[..150] : chunkText;
+                        entry.ChunkPreview = chunkText.Length > 15000000 ? chunkText[..150] : chunkText;
                         ApplyStructuralInferenceRules(entry);
                         await SaveEntryAsync(entry);
                         _logger.LogInformation($"✅ Extracted eligibility for chunk in {sourceFile}: min={entry.MinGradeBand}, max={entry.MaxGradeBand}, category={entry.EmployeeCategory}");
