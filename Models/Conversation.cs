@@ -68,6 +68,17 @@ namespace MEAI_GPT_API.Models
             // gets one shot at asking the user a specific question that
             // might resolve the ambiguity (which policy, which plant,
             // which benefit type, etc.), then re-answers using their reply.
+            // 🆕 Title-band clarification -- separate from AwaitingGradeClarification
+            // (which is about the REQUESTER's own grade, fixed to the Supervisor
+            // and-above/below split). This is for a title NAMED IN THE QUESTION
+            // (e.g. "benefits for AM") that spans more than one band. Options are
+            // dynamic per-title, so unlike AwaitingGradeClarification's hardcoded
+            // two choices, the list has to travel with the context.
+            public bool AwaitingTitleBandClarification { get; set; } = false;
+            public string? PendingTitleBandClarificationQuestion { get; set; }
+            public List<string> PendingTitleBandOptions { get; set; } = new();
+            public string? PendingTitleBandTitle { get; set; }
+
             public bool AwaitingGeneralClarification { get; set; } = false;
             public string? PendingGeneralClarificationQuestion { get; set; }
             /// <summary>The original question being clarified, so the next

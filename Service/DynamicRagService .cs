@@ -140,6 +140,16 @@ namespace MEAI_GPT_API.Services
         // requester's own grade exactly as before this existed.
         private int? _queryMentionedGradeRank;
 
+        // Set alongside _queryMentionedGradeRank when the title found in the
+        // question spans more than one band (e.g. "AM" is both a ManagementStaff
+        // and a LowerManagement title). Non-null means "found a title, but can't
+        // safely pick a band for it" -- the caller turns this into a clarifying
+        // question rather than guessing, since guessing wrong silently drops
+        // genuinely-eligible grade-gated content (confirmed in production: the
+        // Parking Policy and Company Car Support Policy's "AM & above" clauses
+        // were matched against the wrong band's rank number and excluded).
+        private GradeHierarchyService.GradeMentionMatch? _pendingAmbiguousGradeMention;
+
         // Scans the question (after abbreviation expansion, so "AM" ->
         // "Assistant Manager" is visible to the title matcher) for a
         // mentioned grade/title and caches its rank on the instance for the
@@ -147,11 +157,20 @@ namespace MEAI_GPT_API.Services
         // is resolved. Fail-open: any problem here just leaves
         // _queryMentionedGradeRank null, i.e. "couldn't detect a grade
         // mention," never an error the caller needs to handle.
-        private void ResolveQueryMentionedGradeRank(string question)
+        private void ResolveQueryMentionedGradeRank(string question, string? forcedBand = null)
         {
             _queryMentionedGradeRank = null;
+            _pendingAmbiguousGradeMention = null;
             try
             {
+                // Called after a title-band clarification was just answered --
+                // skip re-detection entirely and use the band the user picked.
+                if (forcedBand != null)
+                {
+                    _queryMentionedGradeRank = _gradeHierarchy.RankOf(forcedBand);
+                    return;
+                }
+
                 if (string.IsNullOrWhiteSpace(question)) return;
 
                 // Reuse the same abbreviation map used for retrieval expansion
@@ -161,16 +180,47 @@ namespace MEAI_GPT_API.Services
                 // on their own (too easy to false-positive).
                 var expanded = _abbreviationService.ExpandQuery(question);
 
-                var band = _gradeHierarchy.TryResolveGradeMentionedInText(expanded);
-                if (band != null)
+                var match = _gradeHierarchy.FindGradeMentionedInText(expanded);
+                if (match == null) return;
+
+                if (match.IsAmbiguous)
                 {
-                    _queryMentionedGradeRank = _gradeHierarchy.RankOf(band);
+                    // Don't guess -- surface it so the caller can ask the user.
+                    _pendingAmbiguousGradeMention = match;
+                    return;
                 }
+
+                _queryMentionedGradeRank = _gradeHierarchy.RankOf(match.Bands[0]);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to resolve grade mention in question — continuing without it");
             }
+        }
+
+        private string? ResolveTitleBandAnswer(string answer, List<string> options)
+        {
+            if (string.IsNullOrWhiteSpace(answer) || options == null || options.Count == 0) return null;
+            var trimmed = answer.Trim();
+
+            var numberMatch = System.Text.RegularExpressions.Regex.Match(trimmed, @"^\s*(\d+)");
+            if (numberMatch.Success && int.TryParse(numberMatch.Groups[1].Value, out
+                var idx) &&
+              idx >= 1 && idx <= options.Count)
+            {
+                return options[idx - 1];
+            }
+
+            var normalized = trimmed.ToLowerInvariant().Replace(" ", "");
+            foreach (var band in options)
+            {
+                if (normalized.Contains(band.ToLowerInvariant()) ||
+                  GradeHierarchyService.DisplayName(band).ToLowerInvariant().Replace(" ", "") == normalized)
+                {
+                    return band;
+                }
+            }
+            return null;
         }
         public DynamicRagService(
           IModelManager modelManager,
@@ -1124,6 +1174,49 @@ namespace MEAI_GPT_API.Services
                 // ClearContext above's topic check -- EmployeeGrade is a fact about the
                 // person, not the conversation topic, so it should persist across topics
                 // within the same session.
+                // 🎯 Title-band clarification: a title NAMED IN THE QUESTION (e.g.
+                // "benefits for AM") spans more than one band. Resolve a pending
+                // answer, or ask one for the first time, before doing anything else.
+                if (context.AwaitingTitleBandClarification)
+                {
+                    var chosenBand = ResolveTitleBandAnswer(question, context.PendingTitleBandOptions);
+                    if (chosenBand != null)
+                    {
+                        _logger.LogInformation($"🎯 Title band clarified as '{chosenBand}' for session {context.SessionId}");
+                        context.AwaitingTitleBandClarification = false;
+                        question = context.PendingTitleBandClarificationQuestion ?? question;
+                        context.PendingTitleBandClarificationQuestion = null;
+                        context.PendingTitleBandOptions = new();
+                        ResolveQueryMentionedGradeRank(question, forcedBand: chosenBand);
+                    }
+                    else
+                    {
+                        var optionsText = string.Join("\n", context.PendingTitleBandOptions
+                          .Select((b, i) => $"{i + 1}. {GradeHierarchyService.DisplayName(b)}"));
+                        return CreateSuccessResponse(
+              $"Sorry, I didn't quite catch that. Which one did you mean?\n\n{optionsText}",
+                          "Clarification Needed", stopwatch.ElapsedMilliseconds, 1.0, dbSession.SessionId);
+                    }
+                }
+                else if (_pendingAmbiguousGradeMention != null)
+                {
+                    var title = _pendingAmbiguousGradeMention.Title;
+                    var options = _pendingAmbiguousGradeMention.Bands;
+                    _logger.LogInformation($"🎯 Ambiguous title '{title}' mentioned in question, spans bands [{string.Join(", ", options)}] — asking user to clarify");
+
+                    context.AwaitingTitleBandClarification = true;
+                    context.PendingTitleBandClarificationQuestion = question;
+                    context.PendingTitleBandOptions = options;
+                    context.PendingTitleBandTitle = title;
+
+                    var optionsText = string.Join("\n", options
+                      .Select((b, i) => $"{i + 1}. {GradeHierarchyService.DisplayName(b)}"));
+
+                    return CreateSuccessResponse(
+            $"'{title}' is used for two different grade bands here. Which one are you asking about?\n\n{optionsText}",
+                      "Clarification Needed", stopwatch.ElapsedMilliseconds, 1.0, dbSession.SessionId);
+                }
+
                 if (context.AwaitingGradeClarification)
                 {
                     var resolvedGrade = _policyAnalysis.TryResolveGradeAnswer(question, allowNumberedOptions: true);
@@ -8395,6 +8488,74 @@ namespace MEAI_GPT_API.Services
                 // before asking a second time rather than looping forever.
             }
 
+            // 🎯 Title-band clarification: a title NAMED IN THE QUESTION (e.g.
+            // "benefits for AM") spans more than one band (e.g. "AM" is both
+            // ManagementStaff and LowerManagement). Resolve a pending answer,
+            // or ask one for the first time, before doing anything else --
+            // same reachability caveat as the grade-clarification block below:
+            // this has to live here, not just in ProcessQueryAsync, or the
+            // live UI never actually triggers it.
+            bool awaitingTitleBandAnswer = false;
+            List<string> titleBandOptionsForPrompt = new();
+            string? titleBandTitleForPrompt = null;
+
+            if (conversationContext.AwaitingTitleBandClarification)
+            {
+                var chosenBand = ResolveTitleBandAnswer(question, conversationContext.PendingTitleBandOptions);
+                if (chosenBand != null)
+                {
+                    _logger.LogInformation($"🎯 Title band clarified as '{chosenBand}' for session {agentContext.SessionId}");
+                    conversationContext.AwaitingTitleBandClarification = false;
+                    question = conversationContext.PendingTitleBandClarificationQuestion ?? question;
+                    conversationContext.PendingTitleBandClarificationQuestion = null;
+                    conversationContext.PendingTitleBandOptions = new();
+                    ResolveQueryMentionedGradeRank(question, forcedBand: chosenBand);
+                }
+                else
+                {
+                    awaitingTitleBandAnswer = true;
+                    titleBandOptionsForPrompt = conversationContext.PendingTitleBandOptions;
+                }
+            }
+            else if (_pendingAmbiguousGradeMention != null)
+            {
+                var title = _pendingAmbiguousGradeMention.Title;
+                var options = _pendingAmbiguousGradeMention.Bands;
+                _logger.LogInformation($"🎯 Ambiguous title '{title}' mentioned in question, spans bands [{string.Join(", ", options)}] — asking user to clarify");
+
+                conversationContext.AwaitingTitleBandClarification = true;
+                conversationContext.PendingTitleBandClarificationQuestion = question;
+                conversationContext.PendingTitleBandOptions = options;
+                conversationContext.PendingTitleBandTitle = title;
+
+                awaitingTitleBandAnswer = true;
+                titleBandOptionsForPrompt = options;
+                titleBandTitleForPrompt = title;
+            }
+
+            if (awaitingTitleBandAnswer)
+            {
+                var titleBandOptionsText = string.Join("\n", titleBandOptionsForPrompt
+                  .Select((b, i) => $"{i + 1}. {GradeHierarchyService.DisplayName(b)}"));
+                var titleBandPromptText = titleBandTitleForPrompt != null ?
+                  $"'{System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(titleBandTitleForPrompt)}' is used for two different grade bands here. Which one are you asking about?\n\n{titleBandOptionsText}" :
+          $"Sorry, I didn't quite catch that. Which one did you mean?\n\n{titleBandOptionsText}";
+
+                await foreach (var chunk in StreamTextResponse(titleBandPromptText, cancellationToken))
+                {
+                    yield
+                    return chunk;
+                }
+                yield
+                return new StreamChunk
+                {
+                    Type = "complete",
+                    ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+                };
+                yield
+                break;
+            }
+
             // 🧑‍💼 Grade clarification — ported from ProcessQueryAsync, which
             // had this logic but was never actually reachable from the
             // streaming endpoint the live UI calls. Resolve an answer to a
@@ -12490,14 +12651,18 @@ namespace MEAI_GPT_API.Services
         }
 
         public async Task<List<EligibilityRepairResult>> RepairEligibilityForFilesAsync(
-    List<string> sourceFiles, CancellationToken cancellationToken = default)
+          List<string> sourceFiles, CancellationToken cancellationToken =
+          default)
         {
             var results = new List<EligibilityRepairResult>();
             var embeddingModels = await GetAvailableModelsAsync();
 
             foreach (var sourceFile in sourceFiles)
             {
-                var result = new EligibilityRepairResult { SourceFile = sourceFile };
+                var result = new EligibilityRepairResult
+                {
+                    SourceFile = sourceFile
+                };
 
                 foreach (var model in embeddingModels)
                 {
@@ -12507,14 +12672,21 @@ namespace MEAI_GPT_API.Services
                     {
                         where = new Dictionary<string, object>
                         {
-                            ["source_file"] = new Dictionary<string, object> { ["$eq"] = sourceFile }
+                            ["source_file"] = new Dictionary<string,
+                          object>
+                            {
+                                ["$eq"] = sourceFile
+                            }
                         },
-                        include = new[] { "metadatas", "documents" }
+                        include = new[] {
+                "metadatas",
+                "documents"
+              }
                     };
 
                     var getResp = await _chromaClient.PostAsJsonAsync(
-                        $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/get",
-                        getBody, cancellationToken);
+            $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/get",
+                      getBody, cancellationToken);
 
                     if (!getResp.IsSuccessStatusCode)
                     {
@@ -12522,15 +12694,18 @@ namespace MEAI_GPT_API.Services
                         continue;
                     }
 
-                    using var doc = JsonDocument.Parse(await getResp.Content.ReadAsStringAsync());
-                    if (!doc.RootElement.TryGetProperty("ids", out var idsEl)) continue;
+                    using
+                    var doc = JsonDocument.Parse(await getResp.Content.ReadAsStringAsync());
+                    if (!doc.RootElement.TryGetProperty("ids", out
+                        var idsEl)) continue;
 
                     var ids = idsEl.EnumerateArray().Select(e => e.GetString()!).ToList();
                     var docsEl = doc.RootElement.GetProperty("documents").EnumerateArray().ToList();
                     var metasEl = doc.RootElement.GetProperty("metadatas").EnumerateArray().ToList();
 
                     var updateIds = new List<string>();
-                    var updateMetadatas = new List<Dictionary<string, object>>();
+                    var updateMetadatas = new List<Dictionary<string,
+                      object>>();
 
                     for (int i = 0; i < ids.Count; i++)
                     {
@@ -12540,34 +12715,39 @@ namespace MEAI_GPT_API.Services
                         // Rebuild the existing metadata dict so we only touch the
                         // eligibility-derived fields and leave everything else
                         // (section_id, plant, annexure_refs, etc.) untouched.
-                        var existingMeta = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                        var existingMeta = JsonSerializer.Deserialize<Dictionary<string,
+                          JsonElement>>(
                             metasEl[i].GetRawText())!;
                         var mergedMeta = existingMeta.ToDictionary(
-                            kv => kv.Key,
-                            kv => (object)(kv.Value.ValueKind switch
-                            {
-                                JsonValueKind.String => kv.Value.GetString()!,
-                                JsonValueKind.Number => kv.Value.TryGetInt64(out var l) ? l : kv.Value.GetDouble(),
-                                JsonValueKind.True => true,
-                                JsonValueKind.False => false,
-                                _ => kv.Value.GetRawText()
-                            }));
+                          kv => kv.Key,
+                          kv => (object)(kv.Value.ValueKind
+                            switch
+                          {
+                              JsonValueKind.String => kv.Value.GetString()!,
+                              JsonValueKind.Number => kv.Value.TryGetInt64(out
+                    var l) ? l : kv.Value.GetDouble(),
+                              JsonValueKind.True => true,
+                              JsonValueKind.False => false,
+                              _ => kv.Value.GetRawText()
+                          }));
 
                         // Force a fresh extraction attempt. The JSON cache only skips
                         // saving on timeout/failure, so a chunk that previously timed
                         // out is a guaranteed cache miss here and gets retried for real.
                         var (eligibility, _) = await _gradeEligibilityService.GetOrExtractAsync(
-                            sourceFile, chunkText, cancellationToken);
+                          sourceFile, chunkText, cancellationToken);
 
                         var newMinRank = eligibility.MinGradeBand != null ? (_gradeHierarchy.RankOf(eligibility.MinGradeBand) ?? -1) : -1;
                         var newMaxRank = eligibility.MaxGradeBand != null ? (_gradeHierarchy.RankOf(eligibility.MaxGradeBand) ?? int.MaxValue) : int.MaxValue;
                         var newCategory = string.IsNullOrEmpty(eligibility.EmployeeCategory) ? "all" : eligibility.EmployeeCategory.ToLowerInvariant();
                         var newSubtype = string.IsNullOrEmpty(eligibility.DirectSubtype) ? "all" : eligibility.DirectSubtype.ToLowerInvariant();
 
-                        var changed =
-                            !mergedMeta.TryGetValue("grade_min_rank", out var oldMin) || Convert.ToInt64(oldMin) != newMinRank ||
-                            !mergedMeta.TryGetValue("grade_max_rank", out var oldMax) || Convert.ToInt64(oldMax) != newMaxRank ||
-                            !mergedMeta.TryGetValue("employee_category", out var oldCat) || (string)oldCat != newCategory;
+                        var changed = !mergedMeta.TryGetValue("grade_min_rank", out
+                            var oldMin) || Convert.ToInt64(oldMin) != newMinRank ||
+                          !mergedMeta.TryGetValue("grade_max_rank", out
+                            var oldMax) || Convert.ToInt64(oldMax) != newMaxRank ||
+                          !mergedMeta.TryGetValue("employee_category", out
+                            var oldCat) || (string)oldCat != newCategory;
 
                         if (eligibility.MinGradeBand == null && eligibility.MaxGradeBand == null && eligibility.EmployeeCategory == null)
                             result.ChunksStillEmpty++;
@@ -12585,10 +12765,14 @@ namespace MEAI_GPT_API.Services
 
                     if (updateIds.Any())
                     {
-                        var updateBody = new { ids = updateIds, metadatas = updateMetadatas };
+                        var updateBody = new
+                        {
+                            ids = updateIds,
+                            metadatas = updateMetadatas
+                        };
                         var updateResp = await _chromaClient.PostAsJsonAsync(
-                            $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/update",
-                            updateBody, cancellationToken);
+              $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/update",
+                          updateBody, cancellationToken);
 
                         if (!updateResp.IsSuccessStatusCode)
                             result.Errors.Add($"[{model.Name}] update failed: {updateResp.StatusCode}");

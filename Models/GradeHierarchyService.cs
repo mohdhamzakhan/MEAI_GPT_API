@@ -278,6 +278,52 @@ namespace MEAI_GPT_API.Service.Models
         // match in the same text), reusing ResolveTitleForMinBound's
         // existing ambiguity handling once a title is found. Returns null
         // if no known title is mentioned at all.
+        public class GradeMentionMatch
+        {
+            public string Title { get; set; } = "";
+            public List<string> Bands { get; set; } = new();
+            public bool IsAmbiguous => Bands.Count > 1;
+        }
+
+        /// <summary>
+        /// Finds a grade/title mentioned in QUESTION text and returns every band it
+        /// maps to, without collapsing multi-band titles to a single guess.
+        /// Deliberately separate from ResolveTitleForMinBound/MaxBound (used when
+        /// parsing "X and above"/"X and below" clauses inside POLICY TEXT, where an
+        /// AmbiguousTitles override is the right call) -- a QUESTION about a title
+        /// spanning bands should be disambiguated with the person asking, not
+        /// silently resolved to whichever band an unrelated config entry prefers.
+        /// </summary>
+        public GradeMentionMatch? FindGradeMentionedInText(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return null;
+            var normalizedText = Normalize(text);
+
+            string? bestTitle = null;
+            var bestLength = 0;
+
+            foreach (var key in _titleLookup.Keys)
+            {
+                if (key.Length <= bestLength) continue;
+
+                var pattern = $@"\b(?:for|of|to)\s+{System.Text.RegularExpressions.Regex.Escape(key)}(?![a-z0-9])";
+                if (System.Text.RegularExpressions.Regex.IsMatch(normalizedText, pattern))
+                {
+                    bestTitle = key;
+                    bestLength = key.Length;
+                }
+            }
+
+            if (bestTitle == null || !_titleLookup.TryGetValue(bestTitle, out var bands) || bands.Count == 0)
+                return null;
+
+            return new GradeMentionMatch { Title = bestTitle, Bands = bands };
+        }
+
+        /// <summary>Human-readable band label for clarification prompts only, e.g. "ManagementStaff" -> "Management Staff".</summary>
+        public static string DisplayName(string band) =>
+            System.Text.RegularExpressions.Regex.Replace(band, "(?<!^)([A-Z])", " $1");
+
         public string? TryResolveGradeMentionedInText(string text)
         {
             if (string.IsNullOrWhiteSpace(text)) return null;
