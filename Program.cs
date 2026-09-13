@@ -357,6 +357,42 @@ using (var scope = app.Services.CreateScope())
     context.Database.EnsureCreated();
 }
 
+// 🔥 Warm up the generation model on startup, in the background, so the
+// one-time cold-load-from-disk cost (D:\Model -> GPU) is paid here instead
+// of being risked against a real request's timeout budget later -- this is
+// what ate PolicyTriggerService's single-shot 45s attempt right after an
+// Ollama restart. With OLLAMA_KEEP_ALIVE=-1 set on the Ollama host, this
+// warmup keeps the model resident indefinitely afterward, so it should only
+// ever need to happen once per Ollama restart, not once per app restart.
+_ = Task.Run(async () =>
+{
+    try
+    {
+        var ollamaClient = app.Services.GetRequiredService<OllamaHttpClient>();
+        var generationModel = builder.Configuration["DynamicRAG:DefaultGenerationModel"] ?? "llama3.1:8b";
+        var logger = app.Services.GetRequiredService<ILogger<Program>>();
+
+        logger.LogInformation($"🔥 Warming up generation model '{generationModel}'...");
+        var warmupSw = System.Diagnostics.Stopwatch.StartNew();
+
+        await ollamaClient.PostAsJsonAsync("/api/chat", new
+        {
+            model = generationModel,
+            messages = new[] { new { role = "user", content = "hi" } },
+            stream = false
+        }, CancellationToken.None, maxRetries: 1, perAttemptTimeout: TimeSpan.FromMinutes(3));
+
+        logger.LogInformation($"✅ Model warmup complete in {warmupSw.ElapsedMilliseconds}ms");
+    }
+    catch (Exception ex)
+    {
+        // Non-fatal -- if this fails, the model just cold-loads on its first
+        // real request instead, same as before this warmup existed.
+        var logger = app.Services.GetRequiredService<ILogger<Program>>();
+        logger.LogWarning(ex, "⚠️ Startup model warmup failed — first real request will pay the cold-load cost instead");
+    }
+});
+
 try
 {
     var logger = app.Services.GetRequiredService<ILogger<Program>>();

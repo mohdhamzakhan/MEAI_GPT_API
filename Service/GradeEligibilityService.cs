@@ -269,7 +269,14 @@ namespace MEAI_GPT_API.Service.Models
                         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                         cts.CancelAfter(TimeSpan.FromSeconds(60));
 
-                        var response = await _ollamaClient.PostAsJsonAsync("/api/chat", requestData, cts.Token);
+                        // maxRetries: 1 -- this call already sits inside its own
+                        // 3-attempt outer loop (see the `for (attempt...)` above),
+                        // each with a fresh 60s cts. Without this, OllamaHttpClient's
+                        // own default 3 internal retries would ALSO fire per outer
+                        // attempt, sharing that same 60s non-fresh -- so one outer
+                        // "attempt" was silently doing up to 3 near-duplicate calls,
+                        // wasting the budget instead of really retrying.
+                        var response = await _ollamaClient.PostAsJsonAsync("/api/chat", requestData, cts.Token, maxRetries: 1);
                         if (!response.IsSuccessStatusCode)
                         {
                             _logger.LogWarning($"⚠️ Grade eligibility extraction call failed (attempt {attempt}/{maxAttempts}) for a chunk in {sourceFile}: {response.StatusCode}");
@@ -282,7 +289,7 @@ namespace MEAI_GPT_API.Service.Models
                         var raw = await response.Content.ReadAsStringAsync();
                         var entry = ParseExtractionResponse(raw, sourceFile, key, chunkText);
                         entry.ExtractionPath = "LlmExtracted";
-                        entry.ChunkPreview = chunkText.Length > 15000000 ? chunkText[..150] : chunkText;
+                        entry.ChunkPreview = chunkText.Length > 150 ? chunkText[..150] : chunkText;
                         ApplyStructuralInferenceRules(entry);
                         await SaveEntryAsync(entry);
                         _logger.LogInformation($"✅ Extracted eligibility for chunk in {sourceFile}: min={entry.MinGradeBand}, max={entry.MaxGradeBand}, category={entry.EmployeeCategory}");

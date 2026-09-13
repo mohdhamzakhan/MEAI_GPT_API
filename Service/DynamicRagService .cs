@@ -2813,7 +2813,9 @@ namespace MEAI_GPT_API.Services
         private async Task<string> GenerateDirectAnswerAsync(
           string question,
           string modelName,
-          List<ConversationTurn> history)
+          List<ConversationTurn> history,
+          CancellationToken cancellationToken =
+          default)
         {
             var messages = new List<object>();
 
@@ -2886,9 +2888,21 @@ namespace MEAI_GPT_API.Services
 
             try
             {
-                using
-                var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                var response = await _ollamaClient.PostAsJsonAsync("/api/chat", requestData, cts.Token);
+                // ⏱️ CHANGED: was a flat 30s CancellationTokenSource passed
+                // straight into PostAsJsonAsync with no maxRetries/perAttemptTimeout
+                // -- meaning OllamaHttpClient's own internal 3-retry loop shared
+                // that same 30s non-fresh, so a slow first attempt burned the
+                // whole budget and the remaining "retries" failed instantly.
+                // This is the exact anti-pattern OllamaHttpClient's own retry
+                // logic was built to replace (see its ExecuteWithFailoverAsync
+                // comment) -- this call site just hadn't been migrated yet.
+                // 45s per attempt (up from a de-facto ~30s/3 ≈ 10s effective),
+                // 3 real fresh attempts, and honors the caller's real
+                // cancellationToken instead of an unrelated fixed token.
+                var response = await _ollamaClient.PostAsJsonAsync(
+                  "/api/chat", requestData, cancellationToken,
+                  maxRetries: 3,
+                  perAttemptTimeout: TimeSpan.FromSeconds(45));
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -6318,9 +6332,16 @@ namespace MEAI_GPT_API.Services
                             ["num_batch"] = model.MaxContextLength
                         }
                     };
-                    using
-                    var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
-                    var response = await _ollamaClient.PostAsJsonAsync("/api/embeddings", request, cts.Token);
+                    // ⏱️ CHANGED: was a flat 90s CancellationTokenSource with no
+                    // maxRetries/perAttemptTimeout -- same non-fresh-shared-deadline
+                    // issue as the chat generation call above. This one matters most:
+                    // every single query has to embed the question here before Chroma
+                    // search can run at all, so a slow/overloaded Ollama killed
+                    // retrieval outright rather than getting a real retry.
+                    var response = await _ollamaClient.PostAsJsonAsync(
+                      "/api/embeddings", request, CancellationToken.None,
+                      maxRetries: 3,
+                      perAttemptTimeout: TimeSpan.FromSeconds(45));
                     if (response.IsSuccessStatusCode)
                     {
                         var json = await response.Content.ReadAsStringAsync();
@@ -9970,11 +9991,21 @@ namespace MEAI_GPT_API.Services
                     stream = false
                 };
 
-                using
-                var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                cts.CancelAfter(TimeSpan.FromSeconds(30));
-
-                var response = await _ollamaClient.PostAsJsonAsync("/api/chat", requestData, cts.Token);
+                // ⏱️ CHANGED: was CreateLinkedTokenSource(cancellationToken) +
+                // CancelAfter(30s) passed as a single token -- OllamaHttpClient's
+                // own internal 3-retry loop then shared that one 30s deadline
+                // non-fresh, so a slow first attempt burned the whole budget and
+                // any "retries" failed near-instantly. This call already runs
+                // after two full generation+verification rounds, so keep the cap
+                // at 30s (don't make a slow request even slower) but give each of
+                // up to 2 attempts a genuinely fresh 30s window instead of 1 real
+                // attempt + 1 wasted instant one. cancellationToken is passed
+                // through directly so a real client disconnect still stops this
+                // immediately rather than waiting out the full budget.
+                var response = await _ollamaClient.PostAsJsonAsync(
+                  "/api/chat", requestData, cancellationToken,
+                  maxRetries: 2,
+                  perAttemptTimeout: TimeSpan.FromSeconds(30));
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning($"⚠️ Clarifying-question generation call failed: {response.StatusCode}");
