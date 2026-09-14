@@ -170,7 +170,14 @@ namespace MEAI_GPT_API.Service.Models
                 var response = await _ollamaClient.PostAsJsonAsync(
                     "/api/chat", requestData, cancellationToken,
                     maxRetries: 1,
-                    perAttemptTimeout: TimeSpan.FromSeconds(45));
+                    perAttemptTimeout: TimeSpan.FromSeconds(45),
+                    // 🆕 Trigger generation is pure background indexing work --
+                    // gate it against the shared background-concurrency limit
+                    // so a bulk refresh can't pile up more concurrent Ollama
+                    // load than the box can actually sustain, which is what
+                    // was turning genuinely-slow-but-working responses into
+                    // timeouts under real concurrent load.
+                    isBackgroundTask: true);
                 if (!response.IsSuccessStatusCode)
                 {
                     var err = await response.Content.ReadAsStringAsync();

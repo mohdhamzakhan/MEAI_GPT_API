@@ -14,6 +14,32 @@ namespace MEAIGPTAPI.Services
         private readonly int _healthCheckInterval;
         private readonly Timer _healthCheckTimer;
 
+        // 🆕 Concurrency gate for BACKGROUND work only (indexing: trigger
+        // generation, eligibility extraction, document embeddings). Live
+        // request-path calls (chat generation, query embeddings) never pass
+        // isBackgroundTask: true, so they're never throttled by this — their
+        // concurrency is naturally bounded by real simultaneous users, not
+        // something we need to artificially cap.
+        //
+        // This exists because retries and fresh per-attempt timeouts (see
+        // ExecuteWithFailoverAsync) only help a slow response fail faster and
+        // recover — they can't create GPU throughput that isn't there. A
+        // bulk refresh firing trigger-gen + eligibility-extraction +
+        // embedding calls for many documents concurrently, especially
+        // alongside live traffic, can genuinely exceed real usable
+        // concurrency even with OLLAMA_NUM_PARALLEL configured generously —
+        // the requests don't fail, they just all get slower at once, and
+        // enough of them slow down past a 45-60s budget to look like
+        // failures. Capping background concurrency app-side means indexing
+        // self-limits to a rate the box can actually sustain without ever
+        // degrading live query latency, instead of hoping Ollama's own
+        // queueing sorts out fairness after the fact.
+        //
+        // 2 is a starting point, not a measured optimum -- raise it if
+        // indexing feels too slow and headroom checks (nvidia-smi, /api/ps)
+        // during a real bulk refresh confirm the box can sustain more.
+        private static readonly SemaphoreSlim _backgroundConcurrencyGate = new SemaphoreSlim(2, 2);
+
         public OllamaHttpClient(
             IHttpClientFactory httpClientFactory,
             ILogger<OllamaHttpClient> logger,
@@ -106,6 +132,31 @@ namespace MEAIGPTAPI.Services
         // attempt via its own linked CancellationTokenSource, so a slow attempt
         // failing doesn't poison the budget for the next one.
         private async Task<HttpResponseMessage> ExecuteWithFailoverAsync(
+            Func<string, CancellationToken, Task<HttpResponseMessage>> action,
+            int maxRetries = 3,
+            TimeSpan? perAttemptTimeout = null,
+            CancellationToken outerCancellationToken = default,
+            bool isBackgroundTask = false)
+        {
+            if (isBackgroundTask)
+            {
+                await _backgroundConcurrencyGate.WaitAsync(outerCancellationToken);
+            }
+
+            try
+            {
+                return await ExecuteWithFailoverCoreAsync(action, maxRetries, perAttemptTimeout, outerCancellationToken);
+            }
+            finally
+            {
+                if (isBackgroundTask)
+                {
+                    _backgroundConcurrencyGate.Release();
+                }
+            }
+        }
+
+        private async Task<HttpResponseMessage> ExecuteWithFailoverCoreAsync(
             Func<string, CancellationToken, Task<HttpResponseMessage>> action,
             int maxRetries = 3,
             TimeSpan? perAttemptTimeout = null,
@@ -228,7 +279,8 @@ namespace MEAIGPTAPI.Services
             HttpCompletionOption completionOption = HttpCompletionOption.ResponseContentRead,
             CancellationToken cancellationToken = default,
             int maxRetries = 3,
-            TimeSpan? perAttemptTimeout = null)
+            TimeSpan? perAttemptTimeout = null,
+            bool isBackgroundTask = false)
         {
             return await ExecuteWithFailoverAsync(async (endpointUrl, attemptToken) =>
             {
@@ -241,7 +293,7 @@ namespace MEAIGPTAPI.Services
                 _logger.LogDebug($"SendAsync {clonedRequest.Method} {fullUrl}");
 
                 return await client.SendAsync(clonedRequest, completionOption, attemptToken);
-            }, maxRetries, perAttemptTimeout, cancellationToken);
+            }, maxRetries, perAttemptTimeout, cancellationToken, isBackgroundTask);
         }
 
         public async Task<HttpResponseMessage> PostAsJsonAsync<T>(
@@ -249,7 +301,8 @@ namespace MEAIGPTAPI.Services
             T content,
             CancellationToken cancellationToken = default,
             int maxRetries = 3,
-            TimeSpan? perAttemptTimeout = null)
+            TimeSpan? perAttemptTimeout = null,
+            bool isBackgroundTask = false)
         {
             return await ExecuteWithFailoverAsync(async (endpointUrl, attemptToken) =>
             {
@@ -258,7 +311,7 @@ namespace MEAIGPTAPI.Services
                 _logger.LogDebug($"POST {fullUrl}");
 
                 return await client.PostAsJsonAsync(fullUrl, content, attemptToken);
-            }, maxRetries, perAttemptTimeout, cancellationToken);
+            }, maxRetries, perAttemptTimeout, cancellationToken, isBackgroundTask);
         }
 
         public async Task<HttpResponseMessage> GetAsync(

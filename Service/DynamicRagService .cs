@@ -6341,7 +6341,14 @@ namespace MEAI_GPT_API.Services
                     var response = await _ollamaClient.PostAsJsonAsync(
                       "/api/embeddings", request, CancellationToken.None,
                       maxRetries: 3,
-                      perAttemptTimeout: TimeSpan.FromSeconds(45));
+                      perAttemptTimeout: TimeSpan.FromSeconds(45),
+                      // 🆕 Only gate DOCUMENT embeddings (indexing-time,
+                      // isQuery: false) against the background-concurrency
+                      // limit. Query embeddings (isQuery: true) are on the
+                      // live request path -- a real user is waiting on this
+                      // response, so it must never be throttled behind
+                      // whatever a bulk refresh happens to be doing.
+                      isBackgroundTask: !isQuery);
                     if (response.IsSuccessStatusCode)
                     {
                         var json = await response.Content.ReadAsStringAsync();
@@ -9925,8 +9932,7 @@ namespace MEAI_GPT_API.Services
                     if (budgetedChunks.Count > 0 && chunkTokens > chunkTokenBudget)
                     {
                         _logger.LogInformation(
-              $"📎 Kept {budgetedChunks.Count}/{diversified.Count} diversified chunks " +
-                          $"(context budget of {(int)(contextWindow * 0.6)} tokens for '{genModel?.Name ?? "unknown model "}' reached)");
+              $"📎 Kept {budgetedChunks.Count}/{diversified.Count} diversified chunks " + $"(context budget of {(int)(contextWindow * 0.6)} tokens for '{genModel?.Name ?? "                 unknown model "}' reached)");
                         break;
                     }
                     budgetedChunks.Add(chunk);

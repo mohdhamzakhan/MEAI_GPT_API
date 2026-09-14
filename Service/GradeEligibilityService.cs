@@ -224,7 +224,7 @@ namespace MEAI_GPT_API.Service.Models
             if (deterministic != null)
             {
                 deterministic.ExtractionPath = "Deterministic";
-                deterministic.ChunkPreview = chunkText.Length > 15000000 ? chunkText[..150] : chunkText;
+                deterministic.ChunkPreview = chunkText.Length > 150 ? chunkText[..150] : chunkText;
                 await SaveEntryAsync(deterministic);
                 _logger.LogInformation($"✅ Deterministic threshold match for chunk in {sourceFile}: category={deterministic.EmployeeCategory}, minGrade={deterministic.MinGradeBand}");
                 return (deterministic, false); // no LLM call made
@@ -237,7 +237,7 @@ namespace MEAI_GPT_API.Service.Models
                     SourceFile = sourceFile,
                     ChunkKey = key,
                     ExtractionPath = "PreFilterSkip",
-                    ChunkPreview = chunkText.Length > 15000000 ? chunkText[..150] : chunkText
+                    ChunkPreview = chunkText.Length > 150 ? chunkText[..150] : chunkText
                 };
                 await SaveEntryAsync(none);
                 return (none, false);
@@ -276,7 +276,7 @@ namespace MEAI_GPT_API.Service.Models
                         // attempt, sharing that same 60s non-fresh -- so one outer
                         // "attempt" was silently doing up to 3 near-duplicate calls,
                         // wasting the budget instead of really retrying.
-                        var response = await _ollamaClient.PostAsJsonAsync("/api/chat", requestData, cts.Token, maxRetries: 1);
+                        var response = await _ollamaClient.PostAsJsonAsync("/api/chat", requestData, cts.Token, maxRetries: 1, isBackgroundTask: true);
                         if (!response.IsSuccessStatusCode)
                         {
                             _logger.LogWarning($"⚠️ Grade eligibility extraction call failed (attempt {attempt}/{maxAttempts}) for a chunk in {sourceFile}: {response.StatusCode}");
@@ -289,7 +289,7 @@ namespace MEAI_GPT_API.Service.Models
                         var raw = await response.Content.ReadAsStringAsync();
                         var entry = ParseExtractionResponse(raw, sourceFile, key, chunkText);
                         entry.ExtractionPath = "LlmExtracted";
-                        entry.ChunkPreview = chunkText.Length > 15000000 ? chunkText[..150] : chunkText;
+                        entry.ChunkPreview = chunkText.Length > 150 ? chunkText[..150] : chunkText;
                         ApplyStructuralInferenceRules(entry);
                         await SaveEntryAsync(entry);
                         _logger.LogInformation($"✅ Extracted eligibility for chunk in {sourceFile}: min={entry.MinGradeBand}, max={entry.MaxGradeBand}, category={entry.EmployeeCategory}");
