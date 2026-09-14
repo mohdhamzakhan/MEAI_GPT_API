@@ -399,14 +399,42 @@ try
 
     logger.LogInformation("🚀 Initializing RAG Service at startup...");
 
-    using (var scope = app.Services.CreateScope())
+    // ⏱️ CHANGED: was `await ragService.InitializeAsync()` directly in this
+    // try block, BLOCKING app startup (and therefore Kestrel binding/
+    // listening) until every one of ~130 policy documents finished
+    // chunking + trigger generation (throttled at TriggerGenerationDelayMs,
+    // 2s default -- 130 docs x 2s = 260s alone) + eligibility extraction +
+    // embedding. That's what caused IIS's "500.37 - failed to start within
+    // startup time limit (120000ms)": Kestrel never got a chance to start
+    // listening because this awaited call hadn't finished yet.
+    //
+    // This matches the ALREADY-DOCUMENTED intended design elsewhere in this
+    // codebase (see the comment on the trigger-generation throttle in
+    // DynamicRagService .cs, which explicitly says indexing is meant to run
+    // "as a background task... concurrently WITH live traffic, not before
+    // it") -- RagInitializationService : BackgroundService was written for
+    // exactly this, but was never actually registered via AddHostedService,
+    // so this blocking call never got replaced.
+    //
+    // Fire-and-forget here so app.Run() reaches Kestrel immediately and IIS
+    // gets its ready signal right away, while indexing continues in the
+    // background exactly as originally intended.
+    _ = Task.Run(async () =>
     {
-        var ragService = scope.ServiceProvider.GetRequiredService<IRAGService>();
+        try
+        {
+            using var scope = app.Services.CreateScope();
+            var ragService = scope.ServiceProvider.GetRequiredService<IRAGService>();
+            await ragService.InitializeAsync();
+            logger.LogInformation("✅ Background RAG initialization complete");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "❌ Background RAG initialization failed");
+        }
+    });
 
-        await ragService.InitializeAsync();
-    }
-
-    logger.LogInformation("✅ RAG Service initialization completed successfully");
+    logger.LogInformation("✅ RAG Service initialization started in background — app is accepting requests now");
 }
 catch (Exception ex)
 {

@@ -8299,7 +8299,12 @@ namespace MEAI_GPT_API.Services
           string plant,
           string? generationModel = null,
           string? embeddingModel = null,
-          int maxResults = 20,
+          // ⏱️ CHANGED: was 20 -- raised so the pipeline has enough real
+          // candidates to work with before reranking/diversification/budget
+          // trimming narrow it down for real. 20 was capping the field
+          // before DiversifyBySource's more generous ceiling (raised
+          // separately) ever got a chance to matter.
+          int maxResults = 40,
           bool meaiInfo = true,
           string? sessionId = null,
           bool useReRanking = true,
@@ -8750,7 +8755,7 @@ namespace MEAI_GPT_API.Services
             };
 
             var retrievalResult = await ExecuteRetrievalAsync(
-              question, embModel, maxResults, plant, agentContext, useReRanking, plan);
+              question, embModel, maxResults, plant, agentContext, useReRanking, plan, genModel);
 
             var finalChunks = retrievalResult.Chunks;
             var topicChanged = retrievalResult.TopicChanged;
@@ -9504,6 +9509,24 @@ namespace MEAI_GPT_API.Services
         {
             try
             {
+                // 🆕 Now that RAG initialization runs in the background (see
+                // Program.cs) instead of blocking app startup, a request can
+                // arrive before indexing has finished -- previously this was
+                // impossible since the app wouldn't accept traffic until
+                // InitializeAsync() had fully completed. Without this check,
+                // an early request would silently get empty/partial retrieval
+                // results (a mostly-empty or not-yet-created Chroma
+                // collection) and look like a real "no policy found" answer
+                // rather than a clear "still starting up" one.
+                if (!_systemInitialized)
+                {
+                    return new ValidationResult
+                    {
+                        Success = false,
+                        ErrorMessage = "The system is still starting up and indexing policy documents. Please try again in a few minutes."
+                    };
+                }
+
                 if (string.IsNullOrWhiteSpace(question))
                 {
                     return new ValidationResult
@@ -9725,7 +9748,13 @@ namespace MEAI_GPT_API.Services
           string plant,
           AgentContext context,
           bool useReRanking,
-          ExecutionPlan plan)
+          ExecutionPlan plan,
+          // 🆕 The generation model's real context window, used to trim the
+          // final chunk set by an actual token budget rather than a flat
+          // headcount. Optional so existing/other callers that don't have a
+          // generation model handy still compile; falls back to the
+          // smallest configured model's window (conservative) if omitted.
+          ModelConfiguration? genModel = null)
         {
             var result = new RetrievalResult
             {
@@ -9840,15 +9869,12 @@ namespace MEAI_GPT_API.Services
                 {
                     try
                     {
-                        // ✅ CHANGED: was topK: 8 — raised so enough candidates
-                        // survive reranking for DiversifyBySource below to
-                        // actually have material from more than 2-3 sources
-                        // to choose from. Cutting to 8 here BEFORE
-                        // diversifying meant the diversity step below had
-                        // nothing left to diversify — most candidates from
-                        // less-dominant policies were already discarded.
+                        // ⏱️ CHANGED: was topK: 20 -- raised alongside
+                        // maxResults so reranking doesn't discard candidates
+                        // before DiversifyBySource's raised ceiling (30) and
+                        // the token-budget trim below get a chance to use them.
                         hybridChunks = await _rerankerService.RerankAsync(
-                          question, hybridChunks, "qllama/bge-reranker-v2-m3:f16", topK: 20);
+                          question, hybridChunks, "qllama/bge-reranker-v2-m3:f16", topK: 40);
                     }
                     catch (Exception ex)
                     {
@@ -9864,7 +9890,50 @@ namespace MEAI_GPT_API.Services
                 // policies on a broad question while still letting a
                 // genuinely narrow single-policy question use more of its
                 // budget on that one document via the backfill step.
-                result.Chunks = DiversifyBySource(hybridChunks, maxTotal: 14, maxPerSource: 3);
+                // ⏱️ CHANGED: was DiversifyBySource(hybridChunks, maxTotal: 14,
+                // maxPerSource: 3) -- raised further per an explicit request to
+                // prioritize completeness over speed. Raising the headcount
+                // alone would just move the truncation problem downstream
+                // though: SystemPromptBuilder's chunk loops have no token-
+                // budget check of their own (plain `foreach` over every
+                // chunk), so a generous-but-unbounded chunk count here could
+                // overflow the model's actual context window instead of
+                // being silently dropped -- same failure mode as the
+                // embedding-truncation bug fixed earlier, just relocated.
+                // So: raise the ceiling generously (30 total, 5 per source --
+                // enough for ~6 distinct policies on a broad question), then
+                // immediately trim by a REAL token budget below, which is the
+                // actual safety net.
+                var diversified = DiversifyBySource(hybridChunks, maxTotal: 30, maxPerSource: 5);
+
+                // 🆕 Token-budget trim: keep chunks (already ordered by
+                // relevance from DiversifyBySource) until the model's real
+                // context window would be exceeded, rather than an arbitrary
+                // count. Reserves ~40% of the window for the system prompt,
+                // conversation history, the question, and the model's own
+                // output -- this is the single place that governs "how much
+                // retrieved content can this specific model actually use",
+                // so SystemPromptBuilder's per-query-type branches don't each
+                // need their own copy of this logic.
+                var contextWindow = genModel?.MaxContextLength ?? 4096;
+                var chunkTokenBudget = (int)(contextWindow * 0.6);
+                var budgetedChunks = new List<RelevantChunk>();
+
+                foreach (var chunk in diversified)
+                {
+                    var chunkTokens = _stringProcessor.EstimateTokenCount(chunk.Text);
+                    if (budgetedChunks.Count > 0 && chunkTokens > chunkTokenBudget)
+                    {
+                        _logger.LogInformation(
+              $"📎 Kept {budgetedChunks.Count}/{diversified.Count} diversified chunks " +
+                          $"(context budget of {(int)(contextWindow * 0.6)} tokens for '{genModel?.Name ?? "unknown model "}' reached)");
+                        break;
+                    }
+                    budgetedChunks.Add(chunk);
+                    chunkTokenBudget -= chunkTokens;
+                }
+
+                result.Chunks = budgetedChunks;
 
                 // Added for hallucination debugging: the earlier log lines
                 // (raw=/boosted= scores) only show similarity numbers, not
@@ -10805,7 +10874,16 @@ namespace MEAI_GPT_API.Services
           [EnumeratorCancellation] CancellationToken cancellationToken =
           default)
         {
-            var prompt = BuildEnhancedPrompt(question, relevantChunks, context, meaiInfo, plant, questionType);
+            // Give the prompt builder the model's real context window instead
+            // of an unrelated default, so the chunk budget reflects what this
+            // specific model can actually hold. Reserve ~40% of the window for
+            // system instructions, conversation history, the question itself,
+            // and the model's own output -- the rest is genuinely available
+            // for retrieved chunks.
+            var genModelInfo = await _modelManager.GetModelAsync(model);
+            var maxContextTokensForChunks = (int)((genModelInfo?.MaxContextLength ?? 4096) * 0.6);
+
+            var prompt = BuildEnhancedPrompt(question, relevantChunks, context, meaiInfo, plant, questionType, maxContextTokensForChunks);
 
             _logger.LogInformation("Streaming response from model: {Model}", model);
 
@@ -12127,7 +12205,15 @@ namespace MEAI_GPT_API.Services
           ConversationContext context,
           bool meaiInfo,
           string plant,
-          QuestionType questionType = QuestionType.NewTopic) // ✅ Add parameter
+          QuestionType questionType = QuestionType.NewTopic,
+          // 🆕 Was a flat .Take(8) regardless of how many chunks retrieval
+          // actually found or how much of the model's context window was
+          // free -- a real "good result over performance" request means
+          // this should be a genuine budget, not an arbitrary headcount.
+          // Defaults conservatively (matches the smallest configured model,
+          // 4096 tokens) if the caller doesn't know the real model's window;
+          // callers that do know the real value should pass it.
+          int maxContextTokensForChunks = 3000)
         {
             var promptBuilder = new StringBuilder();
 
@@ -12210,16 +12296,47 @@ namespace MEAI_GPT_API.Services
                 promptBuilder.AppendLine();
             }
 
-            // Add retrieved context (unchanged)
+            // Add retrieved context
             if (relevantChunks.Any())
             {
                 promptBuilder.AppendLine("Relevant information from company documents:");
-                foreach (var chunk in relevantChunks.Take(8))
+
+                // ⏱️ CHANGED: was `.Take(8)` -- an arbitrary headcount that
+                // ignored both how many genuinely relevant chunks retrieval
+                // found and how much context room was actually available.
+                // Since correctness matters more than speed here, include
+                // every retrieved chunk (already ordered by relevance/rerank
+                // score upstream) until the real token budget for this
+                // model's context window is used up, not until an arbitrary
+                // count is hit. A chunk ranked #9 that would've been silently
+                // dropped before now gets included as long as there's room.
+                var chunkTokenBudget = maxContextTokensForChunks;
+                var includedChunkCount = 0;
+
+                foreach (var chunk in relevantChunks)
                 {
+                    var chunkText = $"Source: {chunk.Source}\n{chunk.Text}\n";
+                    var chunkTokens = _stringProcessor.EstimateTokenCount(chunkText);
+
+                    if (includedChunkCount > 0 && chunkTokens > chunkTokenBudget)
+                    {
+                        // Budget exhausted -- stop here rather than truncating
+                        // a chunk mid-way, which would risk cutting off a
+                        // clause before the figure/answer it contains.
+                        _logger.LogInformation(
+              $"📎 Included {includedChunkCount}/{relevantChunks.Count} retrieved chunks in prompt " +
+                          $"(context budget of {maxContextTokensForChunks} tokens reached)");
+                        break;
+                    }
+
                     promptBuilder.AppendLine($"Source: {chunk.Source}");
                     promptBuilder.AppendLine(chunk.Text);
                     promptBuilder.AppendLine();
+
+                    chunkTokenBudget -= chunkTokens;
+                    includedChunkCount++;
                 }
+
             }
 
             // Add the actual question

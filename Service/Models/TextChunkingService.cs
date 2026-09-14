@@ -268,6 +268,44 @@ namespace MEAI_GPT_API.Service.Models
                     inListContext = false;
                 }
 
+                // 🆕 Labeled sub-clause splitting: many policies bundle several
+                // distinct topics under one section header, each introduced by
+                // an inline "Label: ..." lead-in (e.g. "Kit Allowance: ...",
+                // "Flight Travel Allowance: ...", "Daily Allowance (DA): ...").
+                // Splitting only at SECTION boundaries means one chunk's
+                // embedding gets diluted across every sub-topic in that
+                // section, making it a weaker semantic match for any single
+                // one of them (a "kit allowance" query has to compete against
+                // passport rules, family-travel conditions, etc. baked into
+                // the same vector). Detected sub-clause labels get their own
+                // chunk instead, keeping the parent section/title as context.
+                //
+                // Guarded by a minimum size so this doesn't fragment
+                // labeled-but-short content (e.g. a form with many short
+                // "Field:" prompts close together) into near-empty chunks --
+                // only splits once the current chunk already has a
+                // reasonable amount of unrelated content behind it.
+                var subClauseMatch = System.Text.RegularExpressions.Regex.Match(
+                    trimmed, @"^([A-Z][A-Za-z0-9&()/\-\s]{2,50}):\s+\S");
+                const int minTokensBeforeSubClauseSplit = 40;
+
+                if (subClauseMatch.Success && tokenCount > minTokensBeforeSubClauseSplit)
+                {
+                    var subClauseLabel = subClauseMatch.Groups[1].Value.Trim();
+
+                    var subClauseContentType = DetectContentType(currentTitle, currentChunk.ToString());
+                    var subClauseChunk = BuildComprehensiveChunk(
+                        currentSectionId, currentTitle, currentChunk.ToString(), subClauseContentType);
+                    chunks.Add((subClauseChunk, sourceFile, currentSectionId, currentTitle));
+
+                    currentChunk.Clear();
+                    currentChunk.AppendLine($"=== {currentSectionId}: {currentTitle} - {subClauseLabel} ===");
+                    tokenCount = _stringProcessor.EstimateTokenCount($"{currentSectionId}: {currentTitle} - {subClauseLabel}");
+                    inListContext = false;
+
+                    _logger.LogDebug($"Sub-clause split: {currentSectionId} - {currentTitle} - {subClauseLabel}");
+                }
+
                 // Smart splitting - avoid breaking lists
                 if (ShouldSplitChunk(currentChunk, trimmed, tokenCount + lineTokens, maxTokens))
                 {
