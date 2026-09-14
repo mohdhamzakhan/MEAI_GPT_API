@@ -224,7 +224,7 @@ namespace MEAI_GPT_API.Service.Models
             if (deterministic != null)
             {
                 deterministic.ExtractionPath = "Deterministic";
-                deterministic.ChunkPreview = chunkText.Length > 150 ? chunkText[..150] : chunkText;
+                deterministic.ChunkPreview = chunkText.Length > 15000000 ? chunkText[..150] : chunkText;
                 await SaveEntryAsync(deterministic);
                 _logger.LogInformation($"✅ Deterministic threshold match for chunk in {sourceFile}: category={deterministic.EmployeeCategory}, minGrade={deterministic.MinGradeBand}");
                 return (deterministic, false); // no LLM call made
@@ -237,7 +237,7 @@ namespace MEAI_GPT_API.Service.Models
                     SourceFile = sourceFile,
                     ChunkKey = key,
                     ExtractionPath = "PreFilterSkip",
-                    ChunkPreview = chunkText.Length > 150 ? chunkText[..150] : chunkText
+                    ChunkPreview = chunkText.Length > 15000000 ? chunkText[..150] : chunkText
                 };
                 await SaveEntryAsync(none);
                 return (none, false);
