@@ -38,7 +38,6 @@ using UglyToad.PdfPig.Fonts.Standard14Fonts;
 using static MEAI_GPT_API.Controller.RagController;
 using static MEAI_GPT_API.Models.Conversation;
 using static NPOI.HSSF.Util.HSSFColor;
-using static StackExchange.Redis.Role;
 using static System.Runtime.InteropServices.JavaScript.JSType;
 using static UglyToad.PdfPig.DocumentLayoutAnalysis.TextExtractor.ContentOrderTextExtractor;
 using Path = System.IO.Path;
@@ -183,6 +182,14 @@ namespace MEAI_GPT_API.Services
                 var expanded = _abbreviationService.ExpandQuery(question);
 
                 var match = _gradeHierarchy.FindGradeMentionedInText(expanded);
+                // 🆕 Temporary diagnostic logging -- an "AM"-style query that
+                // should be ambiguous wasn't triggering the clarification in
+                // practice, and this makes the actual detection outcome
+                // visible in logs instead of having to infer it. Safe to
+                // remove once confirmed working.
+                _logger.LogInformation(
+                  "🔎 Grade-mention check: question='{Question}' expanded='{Expanded}' match={Match}",
+                  question, expanded, match == null ? "none" : $"title='{match.Title}' bands=[{string.Join(", ", match.Bands)}] ambiguous={match.IsAmbiguous}");
                 if (match == null) return;
 
                 if (match.IsAmbiguous)
