@@ -38,6 +38,7 @@ using UglyToad.PdfPig.Fonts.Standard14Fonts;
 using static MEAI_GPT_API.Controller.RagController;
 using static MEAI_GPT_API.Models.Conversation;
 using static NPOI.HSSF.Util.HSSFColor;
+using static StackExchange.Redis.Role;
 using static System.Runtime.InteropServices.JavaScript.JSType;
 using static UglyToad.PdfPig.DocumentLayoutAnalysis.TextExtractor.ContentOrderTextExtractor;
 using Path = System.IO.Path;
@@ -83,6 +84,7 @@ namespace MEAI_GPT_API.Services
 
         //new code by Hamza
         private readonly StringProcessingService _stringProcessor;
+        private readonly RagInitializationState _initState;
         private readonly PolicyAnalysisService _policyAnalysis;
         private readonly TextChunkingService _textChunking;
         private readonly ConversationAnalysisService _conversationAnalysis;
@@ -262,7 +264,8 @@ namespace MEAI_GPT_API.Services
           LearnedTriggerService learnedTriggerService,
           GradeHierarchyService gradeHierarchy,
           GradeEligibilityService gradeEligibilityService,
-          IEmployeeDirectoryService employeeDirectory)
+          IEmployeeDirectoryService employeeDirectory,
+          RagInitializationState initState)
         {
             _modelManager = modelManager;
             _collectionManager = collectionManager;
@@ -284,6 +287,7 @@ namespace MEAI_GPT_API.Services
               TimeSpan.FromMinutes(15), TimeSpan.FromMinutes(15));
 
             _stringProcessor = stringProcessor;
+            _initState = initState;
             _policyAnalysis = policyAnalysis;
             _textChunking = textChunking;
             _conversationAnalysis = conversationAnalysis;
@@ -6006,6 +6010,14 @@ namespace MEAI_GPT_API.Services
                 {
                     _systemInitialized = true;
                 }
+                // 🆕 Also mark the SINGLETON readiness flag -- _systemInitialized
+                // above only affects this scoped instance, which is discarded
+                // after this call returns (whether it's the background startup
+                // init or a manual /refresh-embeddings call). Every query
+                // request gets its own new DynamicRagService instance and
+                // would never see this instance's _systemInitialized, hence
+                // the singleton.
+                _initState.MarkInitialized();
 
                 _logger.LogInformation("✅ RAG initialization complete");
             }
@@ -6177,6 +6189,7 @@ namespace MEAI_GPT_API.Services
                 {
                     _systemInitialized = true;
                 }
+                _initState.MarkInitialized(); // 🆕 see other call site for why
 
                 // Mark all configured plants as initialized
                 foreach (var plant in _plants.Plants.Keys)
@@ -9525,7 +9538,17 @@ namespace MEAI_GPT_API.Services
                 // results (a mostly-empty or not-yet-created Chroma
                 // collection) and look like a real "no policy found" answer
                 // rather than a clear "still starting up" one.
-                if (!_systemInitialized)
+                // 🆕 CHANGED: was `if (!_systemInitialized)` -- that field is
+                // per-instance on a Scoped service (see RagInitializationState
+                // for the full explanation), so it could never be true here:
+                // this method runs in a NEW instance created for THIS request,
+                // completely separate from whichever instance actually ran
+                // InitializeAsync(). That bug made every single query
+                // permanently fail with "still starting up", forever,
+                // regardless of how many times indexing genuinely completed.
+                // _initState is a singleton, so it's the same object no
+                // matter which scoped instance is asking.
+                if (!_initState.IsInitialized)
                 {
                     return new ValidationResult
                     {
@@ -9932,7 +9955,7 @@ namespace MEAI_GPT_API.Services
                     if (budgetedChunks.Count > 0 && chunkTokens > chunkTokenBudget)
                     {
                         _logger.LogInformation(
-              $"📎 Kept {budgetedChunks.Count}/{diversified.Count} diversified chunks " + $"(context budget of {(int)(contextWindow * 0.6)} tokens for '{genModel?.Name ?? "                 unknown model "}' reached)");
+              $"📎 Kept {budgetedChunks.Count}/{diversified.Count} diversified chunks " + $"(context budget of {(int)(contextWindow * 0.6)} tokens for '{genModel?.Name ?? "unknown model "}' reached)");
                         break;
                     }
                     budgetedChunks.Add(chunk);

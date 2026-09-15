@@ -163,6 +163,9 @@ builder.Services.AddSingleton<IMetricsCollector, MetricsCollector>();
 builder.Services.AddSingleton<RagStateManager>();
 
 // FIXED: Keep RAGService as scoped
+// 🆕 Singleton readiness flag, separate from DynamicRagService's own
+// per-request instance state -- see RagInitializationState.cs for why.
+builder.Services.AddSingleton<RagInitializationState>();
 builder.Services.AddScoped<IRAGService, DynamicRagService>();
 builder.Services.Configure<DynamicRAGConfiguration>(
     builder.Configuration.GetSection("DynamicRAG"));
