@@ -38,6 +38,7 @@ using UglyToad.PdfPig.Fonts.Standard14Fonts;
 using static MEAI_GPT_API.Controller.RagController;
 using static MEAI_GPT_API.Models.Conversation;
 using static NPOI.HSSF.Util.HSSFColor;
+using static StackExchange.Redis.Role;
 using static System.Runtime.InteropServices.JavaScript.JSType;
 using static UglyToad.PdfPig.DocumentLayoutAnalysis.TextExtractor.ContentOrderTextExtractor;
 using Path = System.IO.Path;
@@ -9943,6 +9944,19 @@ namespace MEAI_GPT_API.Services
                 // actual safety net.
                 var diversified = DiversifyBySource(hybridChunks, maxTotal: 30, maxPerSource: 5);
 
+                // 🆕 Temporary diagnostic: list every chunk that survived
+                // diversification, before the token-budget trim below decides
+                // which of them actually reach generation. This is what tells
+                // us whether a chunk that's missing from the final answer
+                // (e.g. a specific policy the person expected to see) never
+                // entered the pool at all (a Router/embedding recall problem)
+                // versus entered but got cut by the budget (a context-size
+                // problem). Safe to remove once this is confirmed either way.
+                _logger.LogInformation(
+                  "📋 Diversified pool ({Count} chunks, pre-budget-cut): {Sources}",
+                  diversified.Count,
+                  string.Join(", ", diversified.Select((c, i) => $"[{i + 1}] {c.Source} (sim={c.Similarity:F3})")));
+
                 // 🆕 Token-budget trim: keep chunks (already ordered by
                 // relevance from DiversifyBySource) until the model's real
                 // context window would be exceeded, rather than an arbitrary
@@ -9962,7 +9976,7 @@ namespace MEAI_GPT_API.Services
                     if (budgetedChunks.Count > 0 && chunkTokens > chunkTokenBudget)
                     {
                         _logger.LogInformation(
-              $"📎 Kept {budgetedChunks.Count}/{diversified.Count} diversified chunks " + $"(context budget of {(int)(contextWindow * 0.6)} tokens for '{genModel?.Name ?? "unknown model "}' reached)");
+              $"📎 Kept {budgetedChunks.Count}/{diversified.Count} diversified chunks " + $"(context budget of {(int)(contextWindow * 0.6)} tokens for '{genModel?.Name ?? " unknown model "}' reached)");
                         break;
                     }
                     budgetedChunks.Add(chunk);
