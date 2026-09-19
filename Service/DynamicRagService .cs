@@ -382,8 +382,8 @@ namespace MEAI_GPT_API.Services
 
         These abbreviations are standard across all MEAI HR policies and should be interpreted consistently.
               ";
-      
-        File.WriteAllText(abbreviationsPath, abbreviationContent);
+
+                File.WriteAllText(abbreviationsPath, abbreviationContent);
                 _logger.LogInformation("Created abbreviations context file");
             }
         }
@@ -402,13 +402,11 @@ namespace MEAI_GPT_API.Services
                     var plantOrgContent = $@"MEAI {plant} Plant - Organization Details
         
           These are the fixed organizational details
-          for {
-                            plant
-          }
+          for {plant}
                     plant.
                   ";
-        
-          File.WriteAllText(plantOrgPath, plantOrgContent);
+
+                    File.WriteAllText(plantOrgPath, plantOrgContent);
                     _logger.LogInformation($"Created organization context file for {plant}");
                 }
             }
@@ -8773,6 +8771,29 @@ namespace MEAI_GPT_API.Services
             var plan = planResult.Plan!;
 
             // ============================
+            // QUESTION REWRITE (display-only)
+            // ============================
+            // What people actually type is often terse/blunt ("AM parking?",
+            // "where park car") -- fine for retrieval, but gives the user no way
+            // to visually confirm it was understood correctly. Show a clean,
+            // complete, plain-English restatement before the answer arrives.
+            // Purely cosmetic: `question` itself still flows unchanged into
+            // retrieval, generation and history everywhere below.
+            var rewrittenQuestion = await RewriteQuestionPlainEnglishAsync(
+              question, agentContext.History, genModel.Name!);
+
+            if (!string.IsNullOrWhiteSpace(rewrittenQuestion) &&
+              !string.Equals(rewrittenQuestion.Trim(), question.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                yield
+                return new StreamChunk
+                {
+                    Type = "rewritten_question",
+                    Content = rewrittenQuestion
+                };
+            }
+
+            // ============================
             // RETRIEVAL
             // ============================
             yield
@@ -9031,6 +9052,14 @@ namespace MEAI_GPT_API.Services
             // extra `!IsGrounded` requirement meant this exact failure mode never
             // reached the retry logic at all and shipped straight to the user.
             bool usedRetryModel = false;
+            // Was silently invisible before: `retried:false` in the client-facing
+            // metadata could mean "retry fixed nothing" OR "retry never actually
+            // ran" (model not configured, not found on the Ollama host, or the
+            // retry call itself errored/returned empty) — three very different
+            // failure modes with the same visible symptom. This makes the
+            // distinction diagnosable from the metadata event itself instead of
+            // requiring server log access every time.
+            string? retrySkippedReason = null;
 
             if (verification != null && verification.NeedsReprocessing &&
               (!verification.IsGrounded || !verification.IsComplete))
@@ -9079,16 +9108,31 @@ namespace MEAI_GPT_API.Services
                             }
                             else
                             {
+                                retrySkippedReason = $"retry_still_ungrounded:{retryModelName}";
                                 _logger.LogWarning(
                                   "⚠️ Retry with '{RetryModel}' still failed grounding check (confidence {Confidence:P0}) — falling back to refusal.",
                                   retryModelName, retryVerification.OverallConfidence);
                             }
                         }
+                        else
+                        {
+                            retrySkippedReason = $"retry_call_errored_or_empty:{retryModelName}";
+                            _logger.LogWarning(
+                              "⚠️ Grounding retry call to '{RetryModel}' errored or returned empty — falling back to refusal.",
+                              retryModelName);
+                        }
                     }
                     else
                     {
+                        retrySkippedReason = $"retry_model_not_found:{retryModelName}";
                         _logger.LogWarning("Grounding retry model '{RetryModel}' not found — skipping retry.", retryModelName);
                     }
+                }
+                else
+                {
+                    retrySkippedReason = string.IsNullOrWhiteSpace(retryModelName)
+                        ? "no_retry_model_configured"
+                        : "retry_model_same_as_primary";
                 }
             }
 
@@ -9103,6 +9147,13 @@ namespace MEAI_GPT_API.Services
                         verified = !verification.NeedsReprocessing,
                         confidence = verification.OverallConfidence,
                         retried = usedRetryModel,
+                        // See retrySkippedReason above: null whenever a retry
+                        // wasn't needed or succeeded; otherwise one of
+                        // no_retry_model_configured / retry_model_same_as_primary /
+                        // retry_model_not_found:<name> / retry_call_errored_or_empty:<name> /
+                        // retry_still_ungrounded:<name>, so `retried:false` is
+                        // diagnosable from this event alone.
+                        retry_skipped_reason = retrySkippedReason,
                         quality_checks = new
                         {
                             complete = verification.IsComplete,
@@ -9779,6 +9830,77 @@ namespace MEAI_GPT_API.Services
             return selected;
         }
 
+        /// <summary>
+        /// Rewrites a raw, often terse/blunt user message ("AM parking?", "where
+        /// park car") into a single complete, grammatically correct, plain-English
+        /// question -- for DISPLAY ONLY, so the user can see how their question was
+        /// understood before the answer arrives. Does not feed retrieval or
+        /// generation; `question` continues to flow unchanged everywhere else.
+        /// Best-effort: any failure here must never block the main pipeline.
+        /// </summary>
+        private async Task<string?> RewriteQuestionPlainEnglishAsync(
+          string rawQuestion,
+          IEnumerable<ConversationTurn>? recentHistory,
+          string modelName)
+        {
+            if (string.IsNullOrWhiteSpace(rawQuestion))
+                return null;
+
+            try
+            {
+                var lastTurn = recentHistory?.LastOrDefault();
+                var historyNote = lastTurn != null
+                  ? $"\nFor reference only (do NOT answer it, do NOT fold its content into the rewrite unless the new message is clearly a fragment continuing it): the previous question in this conversation was \"{lastTurn.Question}\""
+                  : "";
+
+                var prompt = $@"Rewrite the user's message below as ONE complete, grammatically correct question in plain English.
+
+Rules:
+- Do NOT answer the question.
+- Do NOT add facts, assumptions, or specific policy/document names that the original wording doesn't already imply.
+- Preserve the original meaning and scope exactly -- only fix grammar/spelling and fill in an implied subject or verb if the original is a sloppy fragment.
+- If the original is already a clear, complete question, return it unchanged aside from obvious typos.
+- Output ONLY the rewritten question -- no quotes, no preamble, no explanation.{historyNote}
+
+User's message: ""{rawQuestion}""
+
+Rewritten question:";
+
+                var requestData = new
+                {
+                    model = modelName,
+                    prompt,
+                    stream = false,
+                    think = false, // see SelfVerifier.CallLLMAsync -- skips the reasoning pass on Qwen3-family models
+                    options = new { temperature = 0.0, num_predict = 80 }
+                };
+
+                var response = await _ollamaClient.PostAsJsonAsync("/api/generate", requestData);
+                if (!response.IsSuccessStatusCode)
+                    return null;
+
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+                var rawText = doc.RootElement.GetProperty("response").GetString() ?? "";
+
+                // Belt-and-braces <think> strip, same as SelfVerifier, in case the
+                // model ignores `think:false`.
+                var closeTag = "</think>";
+                var closeIdx = rawText.IndexOf(closeTag, StringComparison.OrdinalIgnoreCase);
+                if (closeIdx >= 0)
+                    rawText = rawText[(closeIdx + closeTag.Length)..];
+
+                var rewritten = rawText.Trim().Trim('"', '\'', '\n', '\r', ' ');
+
+                return string.IsNullOrWhiteSpace(rewritten) ? null : rewritten;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Question rewrite failed for '{Question}' — skipping, not fatal.", rawQuestion);
+                return null;
+            }
+        }
+
         private async Task<RetrievalResult> ExecuteRetrievalAsync(
           string question,
           ModelConfiguration embModel,
@@ -10065,14 +10187,10 @@ namespace MEAI_GPT_API.Services
           (their grade, which plant they 're at, Direct vs Indirect status, which
             specific policy variant applies, a date / timeframe, etc.).
 
-        Question: "" {
-                    question
-        }
+        Question: "" {question}
                 ""
       
-        Retrieved excerpts: {
-                    string.Join("\n", excerpts)
-        }
+        Retrieved excerpts: {string.Join("\n", excerpts)}
 
                 Is there ONE specific, useful question you could ask the employee that
                 would likely
@@ -10090,10 +10208,10 @@ namespace MEAI_GPT_API.Services
                       question "": "" < a single, specific, employee - facing question, or null > ""
                     }}
                 ";
-      
-        var modelName = !string.IsNullOrWhiteSpace(_config.GroundingRetryModel) ?
-          _config.GroundingRetryModel :
-          genModel.Name;
+
+                var modelName = !string.IsNullOrWhiteSpace(_config.GroundingRetryModel) ?
+                  _config.GroundingRetryModel :
+                  genModel.Name;
 
                 var requestData = new
                 {

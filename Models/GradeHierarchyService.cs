@@ -95,12 +95,72 @@ namespace MEAI_GPT_API.Service.Models
             _config = LoadConfig(configuration);
             _titleLookup = BuildTitleLookup(_config);
             _selfServiceConfig = LoadSelfServiceConfig(configuration);
-            _selfServiceTitleToBand = _selfServiceConfig.TitlesByBand
-                .SelectMany(kv => kv.Value.Select(title => (title, band: kv.Key)))
-                .ToDictionary(x => x.title, x => x.band, StringComparer.OrdinalIgnoreCase);
+            _selfServiceTitleToBand = BuildSelfServiceTitleToBand(_selfServiceConfig, _config);
 
             _logger.LogInformation(
                 $"📊 Grade hierarchy loaded: {_config.Bands.Count} bands, {_titleLookup.Count} distinct titles, {_config.AmbiguousTitles.Count} flagged as ambiguous");
+        }
+
+        /// <summary>
+        /// Builds the reverse title -> band lookup used only to pre-select the
+        /// "Your position" picker's Level dropdown for an already-saved title.
+        /// The class comment above assumes EmployeeSelfService.TitlesByBand is
+        /// single-band-per-title "by construction" — grade-hierarchy.json
+        /// currently violates that (e.g. "Assistant Manager", "Deputy Manager"
+        /// and "Manager" are each listed under both ManagementStaff and
+        /// LowerManagement), which crashed the plain .ToDictionary() call this
+        /// replaced (System.ArgumentException: An item with the same key has
+        /// already been added) and took down every request that resolves this
+        /// service via DI.
+        ///
+        /// That duplication is actually harmless for the PICKER itself — the
+        /// user picks their Level (band) first, then a title from that band's
+        /// own list, so which other band the same title also appears under
+        /// never matters there. It only matters for this REVERSE lookup, which
+        /// has to collapse to one band per title. Same convention as
+        /// AmbiguousTitles elsewhere in this file (PreferForMinBound): pick the
+        /// most junior band the title appears in, and log so the duplication is
+        /// visible instead of silently picking whichever the framework felt
+        /// like on any given run.
+        /// </summary>
+        private Dictionary<string, string> BuildSelfServiceTitleToBand(
+          EmployeeSelfServiceConfig selfServiceConfig,
+          GradeHierarchyConfig config)
+        {
+            var titleBandPairs = selfServiceConfig.TitlesByBand
+                .SelectMany(kv => kv.Value.Select(title => (title, band: kv.Key)))
+                .ToList();
+
+            var grouped = titleBandPairs.GroupBy(x => x.title, StringComparer.OrdinalIgnoreCase);
+
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var group in grouped)
+            {
+                var bandsForTitle = group.Select(x => x.band).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+                if (bandsForTitle.Count > 1)
+                {
+                    _logger.LogWarning(
+                      "⚠️ Self-service title '{Title}' appears under multiple bands in " +
+                      "grade-hierarchy.json ({Bands}) — defaulting the picker's pre-select " +
+                      "to the most junior one. Harmless for picking a NEW position (band is " +
+                      "chosen before title there); only affects re-opening the picker for a " +
+                      "previously-saved title with this exact wording.",
+                      group.Key, string.Join(", ", bandsForTitle));
+                }
+
+                var chosenBand = bandsForTitle
+                    .OrderBy(band =>
+                    {
+                        var idx = config.Bands.IndexOf(band);
+                        return idx >= 0 ? idx : int.MaxValue;
+                    })
+                    .First();
+
+                result[group.Key] = chosenBand;
+            }
+
+            return result;
         }
 
         /// <summary>

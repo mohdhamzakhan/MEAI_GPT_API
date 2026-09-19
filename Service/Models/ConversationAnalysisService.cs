@@ -413,15 +413,53 @@ namespace MEAI_GPT_API.Service.Models
         }
         public bool IsFollowUpQuestion(string question, ConversationContext context)
         {
-            var followUpIndicators = new[]
+            if (string.IsNullOrWhiteSpace(question) || context.History.Count == 0)
+                return false;
+
+            // Same split as IsTopicChanged/BuildContextualQuery above: multi-word
+            // phrases are a strong enough signal on their own, bare single words
+            // are NOT — this used to be a plain `.Contains(indicator)` with no
+            // word boundaries at all, so e.g. "where" matched "he" and "her"
+            // ("w-HE-r-E", "w-HER-e"), and "another" matched "other", making
+            // almost any question with those words in it register as a
+            // follow-up regardless of topic. Bringing this in line with the
+            // fix already applied to the two sibling methods above.
+            var followUpPhrases = new[]
             {
-        "what about", "how about", "also", "and", "additionally", "furthermore",
-        "he", "she", "it", "they", "this", "that", "same", "similar",
-        "phir", "aur", "bhi", "uske", "uska", "iske", "agar"
-    };
+                "what about", "how about", "additionally", "furthermore"
+            };
+            var followUpWords = new[]
+            {
+                "also", "and", "he", "she", "it", "they", "this", "that", "same", "similar",
+                "phir", "aur", "bhi", "uske", "uska", "iske", "agar"
+            };
 
             var lowerQuestion = question.ToLowerInvariant();
-            return followUpIndicators.Any(indicator => lowerQuestion.Contains(indicator));
+
+            if (followUpPhrases.Any(p => lowerQuestion.Contains(p)))
+                return true;
+
+            var hasWordHit = followUpWords.Any(w =>
+                Regex.IsMatch(lowerQuestion, $@"(?<!\w){Regex.Escape(w)}(?!\w)"));
+
+            if (!hasWordHit)
+                return false;
+
+            // A bare word alone isn't trusted — require corroboration via topic
+            // overlap or text similarity with the last turn, same gate as
+            // IsTopicChanged, so "where can I park my car" right after an
+            // AM-benefits question doesn't count just because "where" is in
+            // the sentence.
+            var lastQuestion = context.History.Last().Question;
+            var currentTopics = ExtractKeyTopics(question);
+            var lastTopics = ExtractKeyTopics(lastQuestion);
+            var commonTopics = currentTopics.Intersect(lastTopics, StringComparer.OrdinalIgnoreCase).Count();
+            var overlapRatio = commonTopics > 0
+                ? (double)commonTopics / Math.Max(currentTopics.Count, lastTopics.Count)
+                : 0;
+            var similarity = TextUtils.CalculateAdvancedSimilarity(question, lastQuestion);
+
+            return overlapRatio > 0.1 || similarity >= 0.15;
         }
         public bool IsQuestionPatternContinuation(string question, ConversationContext context)
         {

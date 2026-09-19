@@ -207,6 +207,12 @@ namespace MEAI_GPT_API.Service
             return sb.ToString();
         }
 
+        // 🆕 Public wrapper for diagnostics -- lets us check whether a
+        // specific document is even offered as a candidate to the router
+        // model, separate from whether the model actually picked it.
+        public async Task<List<(string SourceFile, string Title)>> GetCandidateDocumentsForDiagnosticsAsync(string plant, string embeddingModelName)
+            => await GetCachedDocumentsAsync(plant, embeddingModelName);
+
         private async Task<List<(string SourceFile, string Title)>> GetCachedDocumentsAsync(string plant, string embeddingModelName)
         {
             var cacheKey = $"{plant}::{embeddingModelName}";
