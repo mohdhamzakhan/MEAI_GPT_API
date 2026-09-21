@@ -507,7 +507,8 @@ namespace MEAI_GPT_API.Services
                 //await Task.Delay(triggerGenDelayMs);
             }
 
-            var tasks = embeddingModels.Select(async model => {
+            var tasks = embeddingModels.Select(async model =>
+            {
                 _logger.LogInformation($"🔄 Processing documents for model: {model.Name}");
 
                 var collectionId = await _collectionManager.GetOrCreateCollectionAsync(model);
@@ -3372,7 +3373,8 @@ namespace MEAI_GPT_API.Services
                 // Filter and prepare chunks
                 var validChunks = chunks
                   .Where(chunk => !string.IsNullOrWhiteSpace(chunk.Text))
-                  .Select(chunk => new {
+                  .Select(chunk => new
+                  {
                       Text = _stringProcessor.CleanText(chunk.Text),
                       SourceFile = chunk.SourceFile,
                       ChunkId = GenerateChunkId(chunk.SourceFile, chunk.Text, lastModified, model.Name),
@@ -3687,7 +3689,8 @@ namespace MEAI_GPT_API.Services
         private readonly ConcurrentDictionary<string, (List<RelevantChunk> Results, DateTime Timestamp)> _searchCache = new();
         public static void ConfigureOptimizedHttpClient(IServiceCollection services)
         {
-            services.AddHttpClient("OllamaAPI", client => {
+            services.AddHttpClient("OllamaAPI", client =>
+            {
                 client.Timeout = TimeSpan.FromSeconds(60);
                 client.DefaultRequestHeaders.Add("Connection", "keep-alive");
             })
@@ -3697,7 +3700,8 @@ namespace MEAI_GPT_API.Services
                   UseCookies = false
               });
 
-            services.AddHttpClient("ChromaDB", client => {
+            services.AddHttpClient("ChromaDB", client =>
+            {
                 client.Timeout = TimeSpan.FromSeconds(15); // Reduced from 30
                 client.DefaultRequestHeaders.Add("Connection", "keep-alive");
                 client.DefaultRequestHeaders.Add("Keep-Alive", "timeout=30, max=100");
@@ -3724,7 +3728,8 @@ namespace MEAI_GPT_API.Services
           "HR policy warm-up text"
         };
 
-                var tasks = embeddingModels.Select(async model => {
+                var tasks = embeddingModels.Select(async model =>
+                {
                     try
                     {
                         foreach (var text in warmUpTexts)
@@ -4358,7 +4363,8 @@ namespace MEAI_GPT_API.Services
         private bool IsExactSectionMatch(string lowerText, string sectionNumber)
         {
             if (string.IsNullOrWhiteSpace(sectionNumber)) return false;
-            var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num => {
+            var pattern = _sectionPatternCache.GetOrAdd(sectionNumber, num =>
+            {
                 var escaped = Regex.Escape(num);
                 return new Regex($@"\b(?:section|clause|part)\.?\s*{escaped}(?:\.\d+)*\b" + $@"|(?:^|\n)\s*{escaped}\.(?:\d+\.?)*\s", RegexOptions.IgnoreCase | RegexOptions.Compiled);
             });
@@ -8925,7 +8931,7 @@ namespace MEAI_GPT_API.Services
               question :
               $"{question}\n\n(For context: I am {conversationContext.EmployeeGrade}. Only use the policy provisions that apply to this grade; ignore provisions written for the other grade.)";
 
-            async Task<(string Text, bool Errored, string? ErrorContent)> GenerateBufferedAsync(string modelName)
+            async Task<(string Text, bool Errored, string? ErrorContent)> GenerateBufferedAsync(string modelName, string? questionOverride = null)
             {
                 var sb = new StringBuilder();
                 await foreach (var token in GenerateResponseFromContext(
@@ -9061,115 +9067,167 @@ namespace MEAI_GPT_API.Services
             // requiring server log access every time.
             string? retrySkippedReason = null;
 
-            if (verification != null && verification.NeedsReprocessing &&
-              (!verification.IsGrounded || !verification.IsComplete))
+            bool resolvedConflict = false;
+
+            if (verification != null && verification.IsSourceConflict)
             {
-                var retryModelName = _config.GroundingRetryModel;
+                var conflictNote = verification.Metadata.TryGetValue("grounding_reason", out var cr)
+                    ? cr?.ToString()
+                    : null;
 
-                if (!string.IsNullOrWhiteSpace(retryModelName) &&
-                  !string.Equals(retryModelName, genModel.Name, StringComparison.OrdinalIgnoreCase))
+                _logger.LogWarning(
+                  "⚠️ Grounding check detected a source CONFLICT (not a hallucination) for '{OriginalModel}' — " +
+                  "regenerating with the same model but explicit instructions to present both sides. Reason: {Reason}",
+                  genModel.Name, conflictNote ?? "(no reason given)");
+
+                var conflictQuestion = $"{questionForModel}\n\n" +
+                  "(Note: a verification pass found that the source material may contain CONFLICTING policy " +
+                  $"provisions on this exact point{(conflictNote != null ? $" — specifically: {conflictNote}" : "")}. " +
+                  "Do not silently pick one side. Present BOTH provisions explicitly, stating which policy/document " +
+                  "each comes from, and note which one is more specific to the situation if that's clear from the " +
+                  "text. If they genuinely conflict for the same person, say so plainly rather than resolving it yourself.)";
+
+                var (conflictText, conflictErrored, _) = await GenerateBufferedAsync(genModel.Name!, conflictQuestion);
+
+                if (!conflictErrored && !string.IsNullOrWhiteSpace(conflictText))
                 {
-                    _logger.LogWarning(
-                      "⚠️ Grounding check failed on '{OriginalModel}' (confidence {Confidence:P0}) — " +
-                      "retrying once with '{RetryModel}' before falling back to refusal.",
-                      genModel.Name, verification.OverallConfidence, retryModelName);
+                    var conflictVerification = await VerifyResponseSafelyAsync(question, conflictText, finalChunks, meaiInfo);
 
-                    var retryModelConfig = await _modelManager.GetModelAsync(retryModelName);
-
-                    if (retryModelConfig != null)
+                    if (conflictVerification == null ||
+                      !conflictVerification.NeedsReprocessing ||
+                      (!conflictVerification.IsSourceConflict && conflictVerification.IsGrounded && conflictVerification.IsComplete))
                     {
-                        var (retryText, retryErrored, _) = await GenerateBufferedAsync(retryModelConfig.Name!);
-
-                        if (!retryErrored && !string.IsNullOrWhiteSpace(retryText))
-                        {
-                            var retryVerification = await VerifyResponseSafelyAsync(question, retryText, finalChunks, meaiInfo);
-
-                            // Accept the retry if it's no longer flagged as an ungrounded
-                            // hallucination AND is now complete — including the case where
-                            // the stronger model honestly says "I don't have that specific
-                            // information" rather than fabricating, since that's still
-                            // strictly better than the original answer and will itself be
-                            // caught downstream if needed. Checking IsComplete here too,
-                            // not just IsGrounded — otherwise a retry that's grounded but
-                            // still incomplete (e.g. still only partially synthesizes the
-                            // retrieved content) would be silently accepted as if the
-                            // original problem were fixed.
-                            if (retryVerification == null ||
-                              !retryVerification.NeedsReprocessing ||
-                              (retryVerification.IsGrounded && retryVerification.IsComplete))
-                            {
-                                responseText = retryText;
-                                verification = retryVerification;
-                                usedRetryModel = true;
-
-                                _logger.LogInformation(
-                                  "✅ Retry with '{RetryModel}' resolved the grounding issue (confidence {Confidence:P0})",
-                                  retryModelName, retryVerification?.OverallConfidence ?? 0.0);
-                            }
-                            else
-                            {
-                                retrySkippedReason = $"retry_still_ungrounded:{retryModelName}";
-                                _logger.LogWarning(
-                                  "⚠️ Retry with '{RetryModel}' still failed grounding check (confidence {Confidence:P0}) — falling back to refusal.",
-                                  retryModelName, retryVerification.OverallConfidence);
-                            }
-                        }
-                        else
-                        {
-                            retrySkippedReason = $"retry_call_errored_or_empty:{retryModelName}";
-                            _logger.LogWarning(
-                              "⚠️ Grounding retry call to '{RetryModel}' errored or returned empty — falling back to refusal.",
-                              retryModelName);
-                        }
+                        responseText = conflictText;
+                        verification = conflictVerification ?? verification;
+                        resolvedConflict = true;
+                        _logger.LogInformation("✅ Conflict-aware regeneration resolved the issue — both sides now presented explicitly.");
                     }
                     else
                     {
-                        retrySkippedReason = $"retry_model_not_found:{retryModelName}";
-                        _logger.LogWarning("Grounding retry model '{RetryModel}' not found — skipping retry.", retryModelName);
+                        retrySkippedReason = "conflict_retry_still_conflicted";
                     }
                 }
                 else
                 {
-                    retrySkippedReason = string.IsNullOrWhiteSpace(retryModelName)
-                        ? "no_retry_model_configured"
-                        : "retry_model_same_as_primary";
+                    retrySkippedReason = "conflict_retry_call_errored_or_empty";
                 }
             }
 
-            if (verification != null)
+            if (!resolvedConflict && verification != null && verification.NeedsReprocessing &&
+              (!verification.IsGrounded || !verification.IsComplete))
             {
-                yield
-                return new StreamChunk
+
+                if (verification != null && verification.NeedsReprocessing &&
+              (!verification.IsGrounded || !verification.IsComplete))
                 {
-                    Type = "metadata",
-                    Content = JsonSerializer.Serialize(new
+                    var retryModelName = _config.GroundingRetryModel;
+
+                    if (!string.IsNullOrWhiteSpace(retryModelName) &&
+                      !string.Equals(retryModelName, genModel.Name, StringComparison.OrdinalIgnoreCase))
                     {
-                        verified = !verification.NeedsReprocessing,
-                        confidence = verification.OverallConfidence,
-                        retried = usedRetryModel,
-                        // See retrySkippedReason above: null whenever a retry
-                        // wasn't needed or succeeded; otherwise one of
-                        // no_retry_model_configured / retry_model_same_as_primary /
-                        // retry_model_not_found:<name> / retry_call_errored_or_empty:<name> /
-                        // retry_still_ungrounded:<name>, so `retried:false` is
-                        // diagnosable from this event alone.
-                        retry_skipped_reason = retrySkippedReason,
-                        quality_checks = new
+                        _logger.LogWarning(
+                          "⚠️ Grounding check failed on '{OriginalModel}' (confidence {Confidence:P0}) — " +
+                          "retrying once with '{RetryModel}' before falling back to refusal.",
+                          genModel.Name, verification.OverallConfidence, retryModelName);
+
+                        var retryModelConfig = await _modelManager.GetModelAsync(retryModelName);
+
+                        if (retryModelConfig != null)
                         {
-                            complete = verification.IsComplete,
-                            grounded = verification.IsGrounded,
-                            hallucination_free = !verification.HasHallucinations
-                        },
-                        // Surfaces SelfVerifier's one-line explanation for a
-                        // "not grounded" verdict (added alongside the wider
-                        // source window / VerifierModel config change) so a
-                        // false-negative grounding check is diagnosable from
-                        // the browser console instead of requiring server
-                        // log access every time.
-                        grounding_reason = verification.Metadata.TryGetValue("grounding_reason", out
-                          var gr) ? gr : null
-                    })
-                };
+                            var (retryText, retryErrored, _) = await GenerateBufferedAsync(retryModelConfig.Name!);
+
+                            if (!retryErrored && !string.IsNullOrWhiteSpace(retryText))
+                            {
+                                var retryVerification = await VerifyResponseSafelyAsync(question, retryText, finalChunks, meaiInfo);
+
+                                // Accept the retry if it's no longer flagged as an ungrounded
+                                // hallucination AND is now complete — including the case where
+                                // the stronger model honestly says "I don't have that specific
+                                // information" rather than fabricating, since that's still
+                                // strictly better than the original answer and will itself be
+                                // caught downstream if needed. Checking IsComplete here too,
+                                // not just IsGrounded — otherwise a retry that's grounded but
+                                // still incomplete (e.g. still only partially synthesizes the
+                                // retrieved content) would be silently accepted as if the
+                                // original problem were fixed.
+                                if (retryVerification == null ||
+                                  !retryVerification.NeedsReprocessing ||
+                                  (retryVerification.IsGrounded && retryVerification.IsComplete))
+                                {
+                                    responseText = retryText;
+                                    verification = retryVerification;
+                                    usedRetryModel = true;
+
+                                    _logger.LogInformation(
+                                      "✅ Retry with '{RetryModel}' resolved the grounding issue (confidence {Confidence:P0})",
+                                      retryModelName, retryVerification?.OverallConfidence ?? 0.0);
+                                }
+                                else
+                                {
+                                    retrySkippedReason = $"retry_still_ungrounded:{retryModelName}";
+                                    _logger.LogWarning(
+                                      "⚠️ Retry with '{RetryModel}' still failed grounding check (confidence {Confidence:P0}) — falling back to refusal.",
+                                      retryModelName, retryVerification.OverallConfidence);
+                                }
+                            }
+                            else
+                            {
+                                retrySkippedReason = $"retry_call_errored_or_empty:{retryModelName}";
+                                _logger.LogWarning(
+                                  "⚠️ Grounding retry call to '{RetryModel}' errored or returned empty — falling back to refusal.",
+                                  retryModelName);
+                            }
+                        }
+                        else
+                        {
+                            retrySkippedReason = $"retry_model_not_found:{retryModelName}";
+                            _logger.LogWarning("Grounding retry model '{RetryModel}' not found — skipping retry.", retryModelName);
+                        }
+                    }
+                    else
+                    {
+                        retrySkippedReason = string.IsNullOrWhiteSpace(retryModelName)
+                            ? "no_retry_model_configured"
+                            : "retry_model_same_as_primary";
+                    }
+                }
+
+                if (verification != null)
+                {
+                    yield
+                    return new StreamChunk
+                    {
+                        Type = "metadata",
+                        Content = JsonSerializer.Serialize(new
+                        {
+                            verified = !verification.NeedsReprocessing,
+                            confidence = verification.OverallConfidence,
+                            retried = usedRetryModel,
+                            // See retrySkippedReason above: null whenever a retry
+                            // wasn't needed or succeeded; otherwise one of
+                            // no_retry_model_configured / retry_model_same_as_primary /
+                            // retry_model_not_found:<name> / retry_call_errored_or_empty:<name> /
+                            // retry_still_ungrounded:<name>, so `retried:false` is
+                            // diagnosable from this event alone.
+                            retry_skipped_reason = retrySkippedReason,
+                            quality_checks = new
+                            {
+                                complete = verification.IsComplete,
+                                grounded = verification.IsGrounded,
+                                hallucination_free = !verification.HasHallucinations
+                            },
+                            // Surfaces SelfVerifier's one-line explanation for a
+                            // "not grounded" verdict (added alongside the wider
+                            // source window / VerifierModel config change) so a
+                            // false-negative grounding check is diagnosable from
+                            // the browser console instead of requiring server
+                            // log access every time.
+                            grounding_reason = verification.Metadata.TryGetValue("grounding_reason", out
+                                var gr) ? gr : null,
+                            is_conflict = verification.IsSourceConflict
+                        })
+                    };
+                }
             }
 
             string finalAnswer = responseText;
