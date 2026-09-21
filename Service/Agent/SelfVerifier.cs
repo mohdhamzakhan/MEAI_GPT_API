@@ -60,8 +60,9 @@ namespace MEAI_GPT_API.Services.Agent
                 // 2. Check factual grounding (for MEAI queries)
                 if (checkFactuality && sources.Any())
                 {
-                    var (isGrounded, reason) = await CheckGroundingAsync(response, sources);
+                    var (isGrounded, reason, isConflict) = await CheckGroundingAsync(response, sources);
                     result.IsGrounded = isGrounded;
+                    result.IsSourceConflict = isConflict;
                     if (!isGrounded && reason != null)
                     {
                         // Stashed on Metadata (rather than a new top-level
@@ -150,7 +151,7 @@ Answer with ONLY 'yes' or 'no'.";
             }
         }
 
-        private async Task<(bool IsGrounded, string? Reason)> CheckGroundingAsync(string response, List<RelevantChunk> sources)
+        private async Task<(bool IsGrounded, string? Reason, bool IsConflict)> CheckGroundingAsync(string response, List<RelevantChunk> sources)
         {
             // Previously only the top 3 chunks were shown to the verifier
             // (sources.Take(3)), while generation itself sees the full
@@ -161,10 +162,21 @@ Answer with ONLY 'yes' or 'no'.";
             // still keeping the prompt bounded.
             var sourceText = string.Join("\n\n", sources.Take(6).Select(s => s.Text));
 
-            // Ask for one short reason alongside the verdict so failures are
-            // debuggable from logs instead of being an opaque yes/no. The
-            // reason is parsed out for logging only — the verdict is still
-            // just the leading yes/no token.
+            // 🆕 CHANGED: was a plain yes/no. Real case: Parking Policy says
+            // "AM & above get allotted parking slots"; Company Car Support
+            // Policy separately says employees on the car loan scheme must
+            // park outside due to space constraints. The response asserted
+            // the Parking Policy's rule, which genuinely IS in the sources —
+            // this isn't a hallucination, it's two real policies disagreeing
+            // and the model silently picking one side. A plain yes/no can't
+            // tell these apart, so both got flagged identically as "no,
+            // ungrounded" and handled with a same-prompt model-swap retry,
+            // which can't fix a conflict the ORIGINAL prompt never asked the
+            // model to look for. Now asks for a third verdict specifically
+            // for this case, handled differently in the retry logic (see
+            // ProcessQueryStreamAsync) — regenerated with the SAME model but
+            // explicitly instructed to surface both sides, not swapped to a
+            // "smarter" model hoping it magically knows to do that unprompted.
             var prompt = $@"Is the following response factually grounded in the source material?
 
 Source Material:
@@ -173,9 +185,14 @@ Source Material:
 Response:
 {response}
 
-Reply on the first line with ONLY 'yes' or 'no'. On the second line, give one short sentence explaining why. The response should not make claims, entities, or figures that aren't supported by the sources.
+Reply on the FIRST line with exactly one of: 'yes', 'no-hallucination', or 'no-conflict'.
+- 'yes': every claim in the response is supported by the source material, with no contradiction between different parts of the source material on this point.
+- 'no-hallucination': the response includes a claim, entity, or figure that is NOT supported by ANY part of the source material — it was invented.
+- 'no-conflict': the response's claim DOES appear in the source material, but a DIFFERENT part of the source material states something that contradicts it on the same point, and the response picked one side without acknowledging the other.
 
-IMPORTANT EXCEPTION: if the response performs a CALCULATION using a rate, ratio, or formula that IS stated in the source material (e.g. the source says ""one day of leave per 10.73 days worked"" and the response computes the result of dividing a number the user gave by 10.73), that computed number counts as grounded even though the exact figure doesn't appear verbatim in the source — the underlying rate does, and the arithmetic is standard math anyone could verify. Only say 'no' for a calculation if the stated rate/formula itself isn't in the source, or if the arithmetic is wrong given that rate.";
+On the second line, give one short sentence explaining why — if it's a conflict, briefly name what each conflicting part says.
+
+IMPORTANT EXCEPTION: if the response performs a CALCULATION using a rate, ratio, or formula that IS stated in the source material (e.g. the source says ""one day of leave per 10.73 days worked"" and the response computes the result of dividing a number the user gave by 10.73), that computed number counts as grounded ('yes') even though the exact figure doesn't appear verbatim in the source — the underlying rate does, and the arithmetic is standard math anyone could verify. Only use 'no-hallucination' for a calculation if the stated rate/formula itself isn't in the source, or if the arithmetic is wrong given that rate.";
 
             try
             {
@@ -190,28 +207,29 @@ IMPORTANT EXCEPTION: if the response performs a CALCULATION using a rate, ratio,
                     // reasoning as CheckCompletenessAsync: don't let a
                     // verifier hiccup register as "ungrounded".
                     _logger.LogWarning("Grounding check returned no usable verdict (model '{Model}'); conservatively assuming grounded", _verifierModel);
-                    return (true, null);
+                    return (true, null, false);
                 }
 
                 var lines = llmResponse.Split('\n', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                var firstLine = lines.Length > 0 ? lines[0] : "";
-                var isGrounded = firstLine.ToLowerInvariant().Contains("yes");
+                var firstLine = lines.Length > 0 ? lines[0].ToLowerInvariant() : "";
+                var isConflict = firstLine.Contains("no-conflict") || firstLine.Contains("conflict");
+                var isGrounded = firstLine.Contains("yes") && !isConflict;
                 var reason = lines.Length > 1 ? lines[1] : null;
 
                 if (!isGrounded)
                 {
                     _logger.LogWarning(
-                        "Grounding check returned 'no' (model '{Model}'). Verifier reasoning: {Reasoning}",
-                        _verifierModel, llmResponse);
+                        "Grounding check returned '{Verdict}' (model '{Model}'). Verifier reasoning: {Reasoning}",
+                        isConflict ? "no-conflict" : "no-hallucination", _verifierModel, llmResponse);
                 }
 
-                return (isGrounded, reason);
+                return (isGrounded, reason, isConflict);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Grounding check failed (model '{Model}'); conservatively assuming grounded — this means hallucination checking did NOT run for this response", _verifierModel);
                 // Conservative: assume it's grounded if we can't verify
-                return (true, null);
+                return (true, null, false);
             }
         }
 
@@ -329,6 +347,17 @@ IMPORTANT EXCEPTION: if the response performs a CALCULATION using a rate, ratio,
         public bool HasHallucinations { get; set; }
         public double OverallConfidence { get; set; }
         public bool NeedsReprocessing { get; set; }
+        // 🆕 Distinguishes "the response invented something not in any
+        // source" (a real hallucination) from "the response's claim IS in
+        // the sources, but a DIFFERENT part of the sources contradicts it"
+        // (the sources themselves disagree, and the response silently
+        // picked one side without saying so). These need different fixes:
+        // a hallucination needs a better/different generation; a conflict
+        // needs the SAME generation but instructed to surface both sides
+        // instead of picking one. See CheckGroundingAsync for how this is
+        // detected, and ProcessQueryStreamAsync's retry block for how it's
+        // used.
+        public bool IsSourceConflict { get; set; }
         public string? VerificationError { get; set; }
         public Dictionary<string, object> Metadata { get; set; } = new();
     }
