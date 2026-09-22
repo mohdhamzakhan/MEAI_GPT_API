@@ -9277,7 +9277,7 @@ namespace MEAI_GPT_API.Services
                     $"I want to make sure I give you accurate information, but I'm not confident " +
                     $"the answer I generated is fully grounded in {plant}'s policy documents. " +
                     $"Please contact your supervisor or HR department for clarification on this matter." :
-            $"I found some relevant information, but I'm not confident this answer covers " +
+                    $"I found some relevant information, but I'm not confident this answer covers " +
                     $"everything {plant}'s policy documents say on this — it may be missing details from " +
                     $"one or more of the retrieved sections. Please contact your supervisor or HR department " +
                     $"to confirm the complete picture, or try rephrasing your question to be more specific.";
