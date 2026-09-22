@@ -8785,19 +8785,19 @@ namespace MEAI_GPT_API.Services
             // complete, plain-English restatement before the answer arrives.
             // Purely cosmetic: `question` itself still flows unchanged into
             // retrieval, generation and history everywhere below.
-            var rewrittenQuestion = await RewriteQuestionPlainEnglishAsync(
-              question, agentContext.History, genModel.Name!);
+            //var rewrittenQuestion = await RewriteQuestionPlainEnglishAsync(
+            //  question, agentContext.History, genModel.Name!);
 
-            if (!string.IsNullOrWhiteSpace(rewrittenQuestion) &&
-              !string.Equals(rewrittenQuestion.Trim(), question.Trim(), StringComparison.OrdinalIgnoreCase))
-            {
-                yield
-                return new StreamChunk
-                {
-                    Type = "rewritten_question",
-                    Content = rewrittenQuestion
-                };
-            }
+            //if (!string.IsNullOrWhiteSpace(rewrittenQuestion) &&
+            //  !string.Equals(rewrittenQuestion.Trim(), question.Trim(), StringComparison.OrdinalIgnoreCase))
+            //{
+            //    yield
+            //    return new StreamChunk
+            //    {
+            //        Type = "rewritten_question",
+            //        Content = rewrittenQuestion
+            //    };
+            //}
 
             // ============================
             // RETRIEVAL
@@ -8935,7 +8935,7 @@ namespace MEAI_GPT_API.Services
             {
                 var sb = new StringBuilder();
                 await foreach (var token in GenerateResponseFromContext(
-                  questionForModel, modelName, agentContext, finalChunks, meaiInfo, plant, persona, temperature, topicChanged, cancellationToken))
+                  questionOverride ?? questionForModel, modelName, agentContext, finalChunks, meaiInfo, plant, persona, temperature, topicChanged, cancellationToken))
                 {
                     if (token.StartsWith("__ERROR__:"))
                         return (sb.ToString(), true, token[10..]);
