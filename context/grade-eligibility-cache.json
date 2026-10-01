@@ -5,7 +5,9 @@
     "MinGradeBand": null,
     "MaxGradeBand": null,
     "EmployeeCategory": null,
-    "DirectSubtype": null
+    "DirectSubtype": null,
+    "ExtractionPath": "Unknown",
+    "ChunkPreview": null
   },
   {
     "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc",
@@ -13,7 +15,9 @@
     "MinGradeBand": null,
     "MaxGradeBand": null,
     "EmployeeCategory": null,
-    "DirectSubtype": null
+    "DirectSubtype": null,
+    "ExtractionPath": "Unknown",
+    "ChunkPreview": null
   },
   {
     "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc",
@@ -21,7 +25,9 @@
     "MinGradeBand": null,
     "MaxGradeBand": null,
     "EmployeeCategory": null,
-    "DirectSubtype": null
+    "DirectSubtype": null,
+    "ExtractionPath": "Unknown",
+    "ChunkPreview": null
   },
   {
     "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc",
@@ -29,7 +35,9 @@
     "MinGradeBand": null,
     "MaxGradeBand": null,
     "EmployeeCategory": null,
-    "DirectSubtype": null
+    "DirectSubtype": null,
+    "ExtractionPath": "Unknown",
+    "ChunkPreview": null
   },
   {
     "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc",
@@ -37,7 +45,9 @@
     "MinGradeBand": null,
     "MaxGradeBand": null,
     "EmployeeCategory": null,
-    "DirectSubtype": null
+    "DirectSubtype": null,
+    "ExtractionPath": "Unknown",
+    "ChunkPreview": null
   },
   {
     "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc",
@@ -45,7 +55,9 @@
     "MinGradeBand": null,
     "MaxGradeBand": null,
     "EmployeeCategory": null,
-    "DirectSubtype": null
+    "DirectSubtype": null,
+    "ExtractionPath": "Unknown",
+    "ChunkPreview": null
   },
   {
     "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc",
@@ -53,7 +65,9 @@
     "MinGradeBand": null,
     "MaxGradeBand": null,
     "EmployeeCategory": null,
-    "DirectSubtype": null
+    "DirectSubtype": null,
+    "ExtractionPath": "Unknown",
+    "ChunkPreview": null
   },
   {
     "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc",
@@ -61,7 +75,9 @@
     "MinGradeBand": null,
     "MaxGradeBand": null,
     "EmployeeCategory": null,
-    "DirectSubtype": null
+    "DirectSubtype": null,
+    "ExtractionPath": "Unknown",
+    "ChunkPreview": null
   },
   {
     "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc",
@@ -69,7 +85,9 @@
     "MinGradeBand": null,
     "MaxGradeBand": null,
     "EmployeeCategory": null,
-    "DirectSubtype": null
+    "DirectSubtype": null,
+    "ExtractionPath": "Unknown",
+    "ChunkPreview": null
   },
   {
     "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc",
@@ -77,7 +95,9 @@
     "MinGradeBand": null,
     "MaxGradeBand": null,
     "EmployeeCategory": null,
-    "DirectSubtype": null
+    "DirectSubtype": null,
+    "ExtractionPath": "Unknown",
+    "ChunkPreview": null
   },
   {
     "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc",
@@ -85,7 +105,9 @@
     "MinGradeBand": null,
     "MaxGradeBand": null,
     "EmployeeCategory": null,
-    "DirectSubtype": null
+    "DirectSubtype": null,
+    "ExtractionPath": "Unknown",
+    "ChunkPreview": null
   },
   {
     "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc",
@@ -93,7 +115,9 @@
     "MinGradeBand": null,
     "MaxGradeBand": null,
     "EmployeeCategory": null,
-    "DirectSubtype": null
+    "DirectSubtype": null,
+    "ExtractionPath": "Unknown",
+    "ChunkPreview": null
   },
   {
     "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc",
@@ -101,7 +125,9 @@
     "MinGradeBand": null,
     "MaxGradeBand": null,
     "EmployeeCategory": null,
-    "DirectSubtype": null
+    "DirectSubtype": null,
+    "ExtractionPath": "Unknown",
+    "ChunkPreview": null
   },
   {
     "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc",
@@ -109,6 +135,28 @@
     "MinGradeBand": null,
     "MaxGradeBand": null,
     "EmployeeCategory": null,
-    "DirectSubtype": null
+    "DirectSubtype": null,
+    "ExtractionPath": "Unknown",
+    "ChunkPreview": null
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc",
+    "ChunkKey": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc::A1D260634E461F8C",
+    "MinGradeBand": null,
+    "MaxGradeBand": "LowerManagement",
+    "EmployeeCategory": "indirect",
+    "DirectSubtype": null,
+    "ExtractionPath": "LlmExtracted",
+    "ChunkPreview": "DOCUMENT SECTION: Special Section\r\nSECTION TITLE: EFFECTIVE DATE\r\nDOCUMENT TYPE: Policy Document\r\nCONTENT TYPE: TEXT\r\n===== CONTENT =====\r\n=== Special"
+  },
+  {
+    "SourceFile": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc",
+    "ChunkKey": "./policies\\Sanand\\03SP_LTA Policy (Sanand Plant).doc::69BA318547EC5A3B",
+    "MinGradeBand": null,
+    "MaxGradeBand": "LowerManagement",
+    "EmployeeCategory": "indirect",
+    "DirectSubtype": null,
+    "ExtractionPath": "LlmExtracted",
+    "ChunkPreview": "DOCUMENT SECTION: Special Section\nSECTION TITLE: EFFECTIVE DATE\nDOCUMENT TYPE: Policy Document\nCONTENT TYPE: TEXT\n===== CONTENT =====\n=== Special Sect"
   }
 ]

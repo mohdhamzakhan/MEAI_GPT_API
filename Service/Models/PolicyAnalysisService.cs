@@ -542,6 +542,176 @@ namespace MEAI_GPT_API.Service.Models
             return kept;
         }
 
+        // ─────────────────────────────────────────────────────────────────
+        // POLICY-VARIANT CLARIFICATION (generic, scales across all policies)
+        //
+        // Several policy pairs are "siblings" covering the same topic for two
+        // different qualifiers -- e.g. "Foreign Travel Policy" vs "Domestic
+        // Travel Scheme". A question like "what procedure for traveling in
+        // India" doesn't unambiguously pick one (an expat's trip to India
+        // could fall under either, depending on who's asking), and retrieval
+        // can legitimately surface both as candidates. Rather than have the
+        // model guess/blend (what item 7 in the system prompt currently asks
+        // it to do, unreliably), detect this deterministically and ask the
+        // user which policy applies -- same pattern as the grade
+        // clarification, generalized to policy selection instead of a
+        // provision choice within one policy.
+        //
+        // Generic by design: QualifierPairs is a flat word-pair list (not
+        // one entry per policy pair), and matching works by stripping those
+        // qualifier words plus generic suffixes ("policy", "scheme", plant
+        // names) from both titles and checking the REMAINING words overlap
+        // -- so "Foreign Travel Policy" and "Domestic Travel Scheme" match
+        // via their shared "travel" even though the suffix word differs.
+        // ─────────────────────────────────────────────────────────────────
+
+        public class PolicyClarificationOption
+        {
+            public string Label = "";       // e.g. "Domestic" -- shown to the user
+            public string SourceFile = "";  // the chunk Source this option corresponds to
+        }
+
+        // Qualifier antonym pairs commonly used to name sibling policies.
+        // Add a pair here to cover another split (e.g. a future "male"/
+        // "female" or "permanent"/"contract" policy pair) -- no other code
+        // needs to change.
+        private static readonly (string A, string B)[] QualifierPairs = new[]
+        {
+            ("domestic", "foreign"),
+            ("domestic", "international"),
+            ("india", "abroad"),
+            ("india", "overseas"),
+            ("local", "overseas"),
+        };
+
+        // Generic words stripped when comparing two titles for "are these
+        // actually the same underlying topic" -- document-type suffixes and
+        // known plant names, not policy-specific vocabulary.
+        private static readonly HashSet<string> TitleGenericWords = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "policy", "policies", "scheme", "schemes", "plant", "the", "of",
+            "and", "for", "rev", "v1", "v2", "version", "sanand", "manesar",
+        };
+
+        private static HashSet<string> NormalizeTitleWords(string sourceFile, IEnumerable<string> qualifiersToStrip)
+        {
+            var name = System.IO.Path.GetFileNameWithoutExtension(sourceFile);
+            // Strip a numeric/alpha prefix like "01SP_" or "39_" and any
+            // "(Plant Name)" suffix before splitting into words.
+            name = Regex.Replace(name, @"^[A-Za-z0-9]+_", "");
+            name = Regex.Replace(name, @"\([^)]*\)", " ");
+
+            var words = Regex.Matches(name.ToLowerInvariant(), @"[a-z]+")
+                .Select(m => m.Value)
+                .Where(w => w.Length > 1
+                    && !TitleGenericWords.Contains(w)
+                    && !qualifiersToStrip.Contains(w, StringComparer.OrdinalIgnoreCase))
+                .ToHashSet();
+
+            return words;
+        }
+
+        /// <summary>
+        /// Detects whether the retrieved chunks span two sibling policy
+        /// documents differing only by a known qualifier (domestic/foreign,
+        /// india/abroad, etc.) and sharing the same underlying topic once
+        /// that qualifier and generic suffix words are stripped. Returns the
+        /// two (or more) options to offer the user, or null if no such
+        /// ambiguity is present.
+        /// </summary>
+        public List<PolicyClarificationOption>? DetectPolicyVariantAmbiguity(List<RelevantChunk> chunks)
+        {
+            if (chunks == null || chunks.Count < 2) return null;
+
+            // Only compare the most relevant few distinct documents -- not
+            // every document retrieval happened to touch -- to avoid
+            // accidentally pairing two unrelated documents that both merely
+            // contain the word "India" somewhere deep in a low-ranked chunk.
+            var topSources = chunks
+                .OrderByDescending(c => c.RerankScore ?? c.RelevanceScore)
+                .Select(c => c.Source)
+                .Distinct()
+                .Take(6)
+                .ToList();
+
+            foreach (var (qualifierA, qualifierB) in QualifierPairs)
+            {
+                var sourcesWithA = topSources.Where(s => s.ToLowerInvariant().Contains(qualifierA)).ToList();
+                var sourcesWithB = topSources.Where(s => s.ToLowerInvariant().Contains(qualifierB)).ToList();
+
+                foreach (var sourceA in sourcesWithA)
+                {
+                    foreach (var sourceB in sourcesWithB)
+                    {
+                        var qualifiers = new[] { qualifierA, qualifierB };
+                        var wordsA = NormalizeTitleWords(sourceA, qualifiers);
+                        var wordsB = NormalizeTitleWords(sourceB, qualifiers);
+                        if (wordsA.Count == 0 || wordsB.Count == 0) continue;
+
+                        var overlap = wordsA.Intersect(wordsB).Count();
+                        var union = wordsA.Union(wordsB).Count();
+                        var similarity = (double)overlap / union;
+
+                        // Same underlying topic (e.g. both about "travel")
+                        // once the qualifier itself is stripped out.
+                        if (similarity >= 0.4)
+                        {
+                            _logger.LogInformation(
+                                "🧭 Policy-variant ambiguity detected: '{SourceA}' ({QualifierA}) vs '{SourceB}' ({QualifierB}), title overlap {Similarity:P0}",
+                                sourceA, qualifierA, sourceB, qualifierB, similarity);
+
+                            return new List<PolicyClarificationOption>
+                            {
+                                new() { Label = Capitalize(qualifierA), SourceFile = sourceA },
+                                new() { Label = Capitalize(qualifierB), SourceFile = sourceB },
+                            };
+                        }
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static string Capitalize(string s) => string.IsNullOrEmpty(s) ? s : char.ToUpperInvariant(s[0]) + s[1..];
+
+        /// <summary>
+        /// Parses the user's reply to a policy-variant clarification question
+        /// -- a numbered option ("1", "2") or a reply naming the qualifier
+        /// itself ("domestic", "it's a foreign trip"). Returns the matching
+        /// option, or null if the reply doesn't clearly pick one.
+        /// </summary>
+        public PolicyClarificationOption? TryResolvePolicyVariantAnswer(string text, List<PolicyClarificationOption> options)
+        {
+            if (string.IsNullOrWhiteSpace(text) || options == null || options.Count == 0) return null;
+            var trimmed = text.Trim();
+
+            for (int i = 0; i < options.Count; i++)
+            {
+                if (Regex.IsMatch(trimmed, $@"^\s*{i + 1}\b")) return options[i];
+            }
+
+            var lower = trimmed.ToLowerInvariant();
+            foreach (var option in options)
+            {
+                if (lower.Contains(option.Label.ToLowerInvariant())) return option;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Removes chunks belonging to the rejected policy-variant source(s)
+        /// once the user has picked one, so the deselected policy's content
+        /// never reaches generation -- deterministic, not prompt-reliant.
+        /// </summary>
+        public List<RelevantChunk> FilterToSelectedPolicyVariant(List<RelevantChunk> chunks, IEnumerable<string> rejectedSources)
+        {
+            var rejected = new HashSet<string>(rejectedSources, StringComparer.OrdinalIgnoreCase);
+            if (rejected.Count == 0) return chunks;
+            return chunks.Where(c => !rejected.Contains(c.Source)).ToList();
+        }
+
         public bool CheckPolicyCoverage(List<RelevantChunk> chunks, string question)
         {
             if (!chunks.Any())

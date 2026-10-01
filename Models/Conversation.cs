@@ -61,6 +61,16 @@ namespace MEAI_GPT_API.Models
             /// </summary>
             public string? EmployeeGrade { get; set; }
 
+            // 🆕 Policy-variant clarification flow (e.g. Domestic vs. Foreign
+            // Travel Policy). Unlike EmployeeGrade, this is intentionally NOT
+            // cached long-term on the context -- which policy applies can
+            // change from one question to the next (a person might ask about
+            // a domestic trip now and a foreign one later), so it's cleared
+            // as soon as this one question is resolved.
+            public bool AwaitingPolicyClarification { get; set; } = false;
+            public string? PendingPolicyClarificationQuestion { get; set; }
+            public List<Service.Models.PolicyAnalysisService.PolicyClarificationOption>? PendingPolicyClarificationOptions { get; set; }
+
             // 🆕 General-purpose clarification flow, not restricted to grade.
             // Triggered when the self-verification pipeline can't ground an
             // answer confidently even after retrying with a stronger model —

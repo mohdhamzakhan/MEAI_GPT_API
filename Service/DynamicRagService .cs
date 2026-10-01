@@ -8664,6 +8664,53 @@ namespace MEAI_GPT_API.Services
                 break;
             }
 
+            // 🧭 Policy-variant clarification (e.g. Domestic vs. Foreign Travel) —
+            // resolve a pending answer BEFORE retrieval runs again, so retrieval
+            // below operates on the resumed original question, not the user's
+            // short reply ("1" / "domestic"). rejectedPolicySources carries the
+            // deselected document(s) forward to the post-retrieval filter.
+            bool awaitingPolicyVariantAnswer = false;
+            List<string> rejectedPolicySources = new();
+            if (conversationContext.AwaitingPolicyClarification)
+            {
+                var options = conversationContext.PendingPolicyClarificationOptions ?? new();
+                var chosen = _policyAnalysis.TryResolvePolicyVariantAnswer(question, options);
+                if (chosen != null)
+                {
+                    _logger.LogInformation($"🧭 Policy variant clarified as '{chosen.Label}' ({chosen.SourceFile}) for session {agentContext.SessionId}");
+                    rejectedPolicySources = options.Where(o => o.SourceFile != chosen.SourceFile).Select(o => o.SourceFile).ToList();
+                    conversationContext.AwaitingPolicyClarification = false;
+                    question = conversationContext.PendingPolicyClarificationQuestion ?? question;
+                    conversationContext.PendingPolicyClarificationQuestion = null;
+                    conversationContext.PendingPolicyClarificationOptions = null;
+                }
+                else
+                {
+                    awaitingPolicyVariantAnswer = true;
+                }
+            }
+
+            if (awaitingPolicyVariantAnswer)
+            {
+                var retryOptions = conversationContext.PendingPolicyClarificationOptions ?? new();
+                var retryOptionsText = string.Join("\n", retryOptions.Select((o, i) => $"{i + 1}. {o.Label}"));
+                await foreach (var chunk in StreamTextResponse(
+                  $"Sorry, I didn't quite catch that. Which one did you mean?\n\n{retryOptionsText}",
+                  cancellationToken))
+                {
+                    yield
+                    return chunk;
+                }
+                yield
+                return new StreamChunk
+                {
+                    Type = "complete",
+                    ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+                };
+                yield
+                break;
+            }
+
             _logger.LogInformation($"📝 Session {agentContext.SessionId} has {agentContext.History.Count} history items");
 
             if (agentContext.History.Any())
@@ -8821,6 +8868,47 @@ namespace MEAI_GPT_API.Services
             // a prompt instruction, so a mismatched chunk can't reach the
             // model at all.
             finalChunks = _policyAnalysis.FilterScenarioMismatchedChunks(finalChunks, question);
+
+            // If we just resumed from a resolved policy-variant clarification,
+            // strip the deselected policy's chunks out of this fresh retrieval
+            // before anything downstream (grade check, generation) sees them.
+            if (rejectedPolicySources.Any())
+            {
+                finalChunks = _policyAnalysis.FilterToSelectedPolicyVariant(finalChunks, rejectedPolicySources);
+            }
+            // Otherwise, check whether THIS retrieval freshly surfaced two
+            // sibling policy documents (e.g. Domestic vs. Foreign Travel) that
+            // the question doesn't disambiguate — same idea as the grade
+            // check below, but for picking the right POLICY rather than the
+            // right PROVISION within one policy.
+            else
+            {
+                var policyOptions = _policyAnalysis.DetectPolicyVariantAmbiguity(finalChunks);
+                if (policyOptions != null)
+                {
+                    _logger.LogInformation($"🧭 Policy-variant ambiguity detected for session {agentContext.SessionId} — asking user to pick one");
+                    conversationContext.AwaitingPolicyClarification = true;
+                    conversationContext.PendingPolicyClarificationQuestion = question;
+                    conversationContext.PendingPolicyClarificationOptions = policyOptions;
+
+                    var optionsText = string.Join("\n", policyOptions.Select((o, i) => $"{i + 1}. {o.Label}"));
+                    await foreach (var chunk in StreamTextResponse(
+                      $"This question could fall under more than one policy. Which one applies to you?\n\n{optionsText}",
+                      cancellationToken))
+                    {
+                        yield
+                        return chunk;
+                    }
+                    yield
+                    return new StreamChunk
+                    {
+                        Type = "complete",
+                        ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+                    };
+                    yield
+                    break;
+                }
+            }
 
             // 🧑‍💼 If retrieved content spans both grade tiers and we still
             // don't know the employee's grade, pause and ask rather than
