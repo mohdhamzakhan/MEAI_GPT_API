@@ -179,6 +179,7 @@ builder.Services.AddScoped<DynamicRAGInitializationService>();
 builder.Services.AddScoped<CodingDetectionResult>();
 builder.Services.AddScoped<DynamicCodingAssistanceService>();
 builder.Services.AddSingleton<CodingDetectionService>();
+builder.Services.AddScoped<AttachmentProcessor>();
 
 builder.Services.AddScoped<DynamicRAGInitializationService>();
 

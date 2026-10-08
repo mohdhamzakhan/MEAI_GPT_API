@@ -2483,19 +2483,20 @@ namespace MEAI_GPT_API.Services
         }
 
         public async IAsyncEnumerable<string> StreamGenerateWithHistoryAsync(
-          string model,
-          string systemPrompt,
-          List<ConversationTurn> history,
-          string userQuestion,
-          // ✅ NEW: applied as the final override after BuildGenerationOptionsAsync
-          // returns, so an explicit user choice wins over both these defaults
-          // and any per-model Temperature configured in appsettings.json.
-          double? temperatureOverride = null,
-          [EnumeratorCancellation] CancellationToken ct =
-          default)
+        string model,
+        string systemPrompt,
+        List<ConversationTurn> history,
+        string userQuestion,
+        // ✅ NEW: applied as the final override after BuildGenerationOptionsAsync
+        // returns, so an explicit user choice wins over both these defaults
+        // and any per-model Temperature configured in appsettings.json.
+        double? temperatureOverride = null,
+        [EnumeratorCancellation] CancellationToken ct =
+        default,
+        List<string>? images = null)
         {
             // FIX 5 — Build full message list WITH history
-            var messages = BuildMessageList(systemPrompt, history, userQuestion);
+            var messages = BuildMessageList(systemPrompt, history, userQuestion, images);
 
             // ✅ NEW: merge per-model config (Temperature / ModelOptions from
             // appsettings.json) over these defaults, so selecting a different
@@ -2524,15 +2525,44 @@ namespace MEAI_GPT_API.Services
                 options
             };
 
+            var json = JsonSerializer.Serialize(requestBody);
+
+            using var jsonDoc = JsonDocument.Parse(json);
+
+            var lastMessage = jsonDoc.RootElement
+                .GetProperty("messages")
+                .EnumerateArray()
+                .Last();
+
+            var hasImages =
+                lastMessage.TryGetProperty("images", out var imageElement) &&
+                imageElement.ValueKind == JsonValueKind.Array &&
+                imageElement.GetArrayLength() > 0;
+
+            _logger.LogInformation(
+                "Ollama JSON: Model={Model}, Messages={MessageCount}, HasImages={HasImages}, ImageCount={ImageCount}, JSONLength={JsonLength}",
+                model,
+                jsonDoc.RootElement.GetProperty("messages").GetArrayLength(),
+                hasImages,
+                hasImages ? imageElement.GetArrayLength() : 0,
+                json.Length
+            );
+
+            _logger.LogInformation(
+    "Sending to Ollama: Model={Model}, Images={ImageCount}, ImageSizes={ImageSizes}",
+    model,
+    images?.Count ?? 0,
+    images?.Select(x => x?.Length ?? 0).ToArray()
+);
+
             // FIX 3 — 'using' keeps response alive until the iterator is done
-            using
-            var response = await _ollamaClient.SendAsync(
-              new HttpRequestMessage(HttpMethod.Post, "/api/chat")
-              {
-                  Content = JsonContent.Create(requestBody)
-              },
-              HttpCompletionOption.ResponseHeadersRead,
-              ct);
+            using var response = await _ollamaClient.SendAsync(
+    new HttpRequestMessage(HttpMethod.Post, "/api/chat")
+    {
+        Content = JsonContent.Create(requestBody)
+    },
+    HttpCompletionOption.ResponseHeadersRead,
+    ct);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -2552,6 +2582,11 @@ namespace MEAI_GPT_API.Services
             {
                 var line = await reader.ReadLineAsync();
                 if (string.IsNullOrWhiteSpace(line)) continue;
+
+                // TEMPORARY DEBUG LOG
+                _logger.LogInformation("Ollama raw chunk: {Chunk}", line);
+
+
 
                 OllamaStreamResponse? chunk;
                 try
@@ -2573,36 +2608,38 @@ namespace MEAI_GPT_API.Services
         }
 
         private static List<object> BuildMessageList(
-          string systemPrompt,
-          List<ConversationTurn> history,
-          string userQuestion)
+    string systemPrompt,
+    List<ConversationTurn> history,
+    string userQuestion,
+    List<string>? imagesBase64 = null)
         {
-            var messages = new List<object> {
-        new {
-          role = "system", content = systemPrompt
-        }
-      };
+            var messages = new List<object>
+    {
+        new { role = "system", content = systemPrompt }
+    };
 
             // Include last 8 turns (4 Q+A pairs) for context window safety
             foreach (var turn in history.TakeLast(8))
             {
+                messages.Add(new { role = "user", content = turn.Question });
+                messages.Add(new { role = "assistant", content = turn.Answer });
+            }
+
+            // Images attach only to the CURRENT user message, never to history
+            if (imagesBase64 is { Count: > 0 })
+            {
                 messages.Add(new
                 {
                     role = "user",
-                    content = turn.Question
-                });
-                messages.Add(new
-                {
-                    role = "assistant",
-                    content = turn.Answer
+                    content = userQuestion,
+                    images = imagesBase64   // raw base64 strings, no "data:image/...;base64," prefix
                 });
             }
-
-            messages.Add(new
+            else
             {
-                role = "user",
-                content = userQuestion
-            });
+                messages.Add(new { role = "user", content = userQuestion });
+            }
+
             return messages;
         }
 
@@ -9424,6 +9461,269 @@ namespace MEAI_GPT_API.Services
                 Type = "complete",
                 ProcessingTimeMs = stopwatch.ElapsedMilliseconds
             };
+        }
+
+        public async IAsyncEnumerable<StreamChunk> ProcessQueryStreamWithAttachmentsAsync(
+    string question,
+    string plant,
+    List<ChatAttachment> attachments,
+    string? sessionId,
+    string? userId,
+    bool meaiInfo,
+    int maxResults,
+    [EnumeratorCancellation] CancellationToken ct = default)
+        {
+            var sw = Stopwatch.StartNew();
+            var images = attachments.Where(a => a.IsImage).Select(a => a.Base64Image!).ToList();
+
+            // Vision-capable model when images are present (move the name to config)
+            var generationModel = images.Any() ? "nemotron3:33b" : null;
+
+            var validation = await ValidateAndInitializeAsync(
+                question, plant, sessionId, userId, generationModel, null, ct);
+
+            if (!validation.Success)
+            {
+                yield return new StreamChunk { Type = "error", Content = validation.ErrorMessage };
+                yield break;
+            }
+
+            var agentContext = validation.Context!;
+            var genModel = validation.GenerationModel!;
+            var embModel = validation.EmbeddingModel!;
+
+            await EnsureHistorySeededAsync(agentContext.SessionId);
+
+            // Optional secondary context from the policy KB (strong matches only)
+            var policyChunks = new List<RelevantChunk>();
+            if (meaiInfo)
+            {
+                yield return new StreamChunk { Type = "status", Content = "Checking policies..." };
+                var retrieval = await ExecuteRetrievalAsync(
+                    question, embModel, maxResults, plant, agentContext, false, null!);
+                policyChunks = retrieval.Chunks.Where(c => c.Similarity >= 0.45).ToList();
+            }
+
+            // Build prompts
+            var systemPrompt = new StringBuilder();
+
+            systemPrompt.AppendLine($"You are the MEAI Assistant for the {plant} plant.");
+            systemPrompt.AppendLine();
+
+            systemPrompt.AppendLine("## ROLE");
+            systemPrompt.AppendLine(
+                "You are an enterprise document understanding, extraction, translation, and question-answering assistant."
+            );
+            systemPrompt.AppendLine(
+                "Your primary responsibility is to understand and work with the files, documents, images, tables, and other attachments provided by the user."
+            );
+            systemPrompt.AppendLine();
+
+            systemPrompt.AppendLine("## ATTACHMENT-FIRST POLICY");
+            systemPrompt.AppendLine(
+                "The user's attached files and images are the primary source of truth for document-related questions."
+            );
+            systemPrompt.AppendLine(
+                "Always inspect and use the relevant attachment content before answering."
+            );
+            systemPrompt.AppendLine(
+                "If multiple attachments are provided, consider all relevant attachments and cross-reference them when necessary."
+            );
+            systemPrompt.AppendLine(
+                "Do not invent, assume, or fabricate information that is not supported by the attachments or by information explicitly provided by the user."
+            );
+            systemPrompt.AppendLine();
+
+            systemPrompt.AppendLine("## INFORMATION EXTRACTION");
+            systemPrompt.AppendLine(
+                "Extract all relevant information from attachments when requested."
+            );
+            systemPrompt.AppendLine(
+                "This includes paragraphs, headings, labels, tables, lists, numbers, dates, units, identifiers, names, codes, formulas, captions, notes, and other meaningful content."
+            );
+            systemPrompt.AppendLine(
+                "When information is contained in an image, use the visible text and visual context to understand it."
+            );
+            systemPrompt.AppendLine(
+                "Do not silently omit relevant information merely because it appears in a table, image, header, footer, or formatted section."
+            );
+            systemPrompt.AppendLine();
+
+            systemPrompt.AppendLine("## DOCUMENT STRUCTURE");
+            systemPrompt.AppendLine(
+                "Preserve the logical structure of the source document whenever extracting or transforming content."
+            );
+            systemPrompt.AppendLine(
+                "Preserve headings, paragraphs, numbering, bullet points, tables, column relationships, labels, line breaks, and section ordering whenever reasonably possible."
+            );
+            systemPrompt.AppendLine(
+                "Do not unnecessarily convert structured content into plain paragraphs."
+            );
+            systemPrompt.AppendLine();
+
+            systemPrompt.AppendLine("## QUESTION ANSWERING");
+            systemPrompt.AppendLine(
+                "Answer questions using the most relevant information available in the attachments."
+            );
+            systemPrompt.AppendLine(
+                "When the requested information is not present, clearly state that it was not found in the provided attachments."
+            );
+            systemPrompt.AppendLine(
+                "Do not fill missing information with guesses."
+            );
+            systemPrompt.AppendLine(
+                "If the attachment contains conflicting information, identify the conflict instead of choosing an unsupported value."
+            );
+            systemPrompt.AppendLine();
+
+            systemPrompt.AppendLine("## TRANSLATION");
+            systemPrompt.AppendLine(
+                "When the user asks to translate attachment content, translate the requested content accurately while preserving the original meaning."
+            );
+            systemPrompt.AppendLine(
+                "Preserve the original document structure and formatting as closely as possible."
+            );
+            systemPrompt.AppendLine(
+                "Preserve headings, numbering, bullet points, tables, labels, field names, paragraphs, and section order."
+            );
+            systemPrompt.AppendLine(
+                "Do not summarize, rewrite, or omit content unless the user explicitly asks for it."
+            );
+            systemPrompt.AppendLine(
+                "Keep numbers, dates, units, codes, identifiers, formulas, and technical terms unchanged unless they should legitimately be translated."
+            );
+            systemPrompt.AppendLine(
+                "For tables, preserve the same rows, columns, and relationships between values."
+            );
+            systemPrompt.AppendLine();
+
+            systemPrompt.AppendLine("## FORMAT PRESERVATION");
+            systemPrompt.AppendLine(
+                "When transforming or translating content, reproduce the output in the same or an equivalent structure as the source."
+            );
+            systemPrompt.AppendLine(
+                "If the source contains a table, return a table."
+            );
+            systemPrompt.AppendLine(
+                "If the source contains numbered steps, preserve the numbering."
+            );
+            systemPrompt.AppendLine(
+                "If the source contains bullet points, preserve the bullets."
+            );
+            systemPrompt.AppendLine(
+                "If the source contains headings and sections, preserve the hierarchy."
+            );
+            systemPrompt.AppendLine(
+                "Do not add unnecessary explanations before or after translated or extracted content."
+            );
+            systemPrompt.AppendLine();
+
+            systemPrompt.AppendLine("## TECHNICAL CONTENT");
+            systemPrompt.AppendLine(
+                "Preserve technical terminology, equipment names, part numbers, material codes, database identifiers, system names, error codes, measurements, and engineering terminology accurately."
+            );
+            systemPrompt.AppendLine(
+                "Do not translate identifiers, codes, SQL statements, programming code, formulas, URLs, or machine-readable values unless the user explicitly requests it."
+            );
+            systemPrompt.AppendLine();
+
+            systemPrompt.AppendLine("## OCR AND UNCERTAINTY");
+            systemPrompt.AppendLine(
+                "When extracting text from images or scanned documents, distinguish clearly between text that is readable and text that is uncertain."
+            );
+            systemPrompt.AppendLine(
+                "If a value cannot be read reliably, do not guess it. Mark it as unclear or ask the user for a clearer image when necessary."
+            );
+            systemPrompt.AppendLine();
+
+            systemPrompt.AppendLine("## MULTIPLE DOCUMENTS");
+            systemPrompt.AppendLine(
+                "When multiple attachments are provided, determine which document or image contains the relevant information."
+            );
+            systemPrompt.AppendLine(
+                "Use information from multiple attachments when the user's question requires comparison, reconciliation, or cross-referencing."
+            );
+            systemPrompt.AppendLine(
+                "Do not merge information from different documents unless the relationship is supported by the documents or the user's request."
+            );
+            systemPrompt.AppendLine();
+
+            systemPrompt.AppendLine("## RESPONSE RULES");
+            systemPrompt.AppendLine(
+                "Be precise, factual, and concise while providing all information necessary to answer the user's request."
+            );
+            systemPrompt.AppendLine(
+                "Do not claim to have read, extracted, or verified information that is not actually available in the provided attachments."
+            );
+            systemPrompt.AppendLine(
+                "If the requested operation cannot be completed because required information is missing or unreadable, explain exactly what is missing."
+            );
+            systemPrompt.AppendLine(
+                "Follow the user's requested output language and format."
+            );
+            if (policyChunks.Any())
+            {
+                systemPrompt.AppendLine("\nSecondary reference - company policy excerpts (use only if relevant):");
+                foreach (var c in policyChunks)
+                {
+                    systemPrompt.AppendLine($"[Source: {c.Source}]");
+                    systemPrompt.AppendLine(c.Text);
+                    systemPrompt.AppendLine("---");
+                }
+            }
+
+            var fullQuestion = BuildQuestionWithAttachments(question, attachments);
+
+            if (policyChunks.Any())
+                yield return new StreamChunk { Type = "sources", Sources = policyChunks.Select(c => c.Source).Distinct().ToList() };
+
+            yield return new StreamChunk { Type = "status", Content = "Analyzing attachments..." };
+
+            var history = _historyService.GetHistory(agentContext.SessionId);
+            var full = new StringBuilder();
+
+            await foreach (var token in StreamGenerateWithHistoryAsync(
+                genModel.Name!, systemPrompt.ToString(), history, fullQuestion, ct: ct, images: images))
+            {
+                if (token.StartsWith("__ERROR__:"))
+                {
+                    yield return new StreamChunk { Type = "error", Content = token[10..] };
+                    yield break;
+                }
+                full.Append(token);
+                yield return new StreamChunk { Type = "response", Content = token };
+            }
+
+            var answer = full.ToString();
+            if (string.IsNullOrWhiteSpace(answer))
+            {
+                yield return new StreamChunk { Type = "error", Content = "The model returned an empty response." };
+                yield break;
+            }
+
+            // Save a short label, never the base64 or the full document text
+            var label = string.Join(", ", attachments.Select(a => a.FileName));
+            _ = SaveConversationSafelyAsync(
+                agentContext, $"{question} [Attached: {label}]", answer, policyChunks,
+                genModel, embModel, plant, null, sw.ElapsedMilliseconds);
+
+            yield return new StreamChunk { Type = "complete", ProcessingTimeMs = sw.ElapsedMilliseconds };
+        }
+
+        private static string BuildQuestionWithAttachments(string question, List<ChatAttachment> atts)
+        {
+            var docs = atts.Where(a => !a.IsImage).ToList();
+            if (!docs.Any()) return question;
+
+            var sb = new StringBuilder();
+            foreach (var d in docs)
+            {
+                sb.AppendLine($"===== ATTACHED FILE: {d.FileName} =====");
+                sb.AppendLine(d.ExtractedText);
+                sb.AppendLine("===== END OF FILE =====\n");
+            }
+            sb.AppendLine($"USER QUESTION: {question}");
+            return sb.ToString();
         }
 
         private async Task EnsureHistorySeededAsync(string sessionId)

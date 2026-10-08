@@ -4,12 +4,14 @@ using MEAI_GPT_API.Service.Interface;
 using MEAI_GPT_API.Service.Models;
 using MEAI_GPT_API.Services;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using System.Collections.Concurrent;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using static MEAI_GPT_API.Services.DynamicRagService;
 
@@ -30,7 +32,11 @@ namespace MEAI_GPT_API.Controller
         private readonly AccessControlOptions _accessControl;
         private readonly IEmployeeDirectoryService _employeeDirectory;
         private readonly GradeHierarchyService _gradeHierarchy;
-
+        private readonly AttachmentProcessor _attachmentProcessor;
+        private static readonly JsonSerializerOptions SseJson = new(JsonSerializerDefaults.Web)
+        {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        };
 
         [ActivatorUtilitiesConstructor]
         public RagController(
@@ -43,7 +49,8 @@ namespace MEAI_GPT_API.Controller
         ILogger<RagController> logger,
         Microsoft.Extensions.Options.IOptions<AccessControlOptions> accessControl,
         IEmployeeDirectoryService employeeDirectory,
-        GradeHierarchyService gradeHierarchy)
+        GradeHierarchyService gradeHierarchy,
+        AttachmentProcessor attachmentProcessor)
         {
             _ragService = ragService;
             _codingService = codingService;
@@ -55,6 +62,7 @@ namespace MEAI_GPT_API.Controller
             _accessControl = accessControl.Value;
             _employeeDirectory = employeeDirectory;
             _gradeHierarchy = gradeHierarchy;
+            _attachmentProcessor = attachmentProcessor;
         }
         [HttpPost("query")]
         //public async Task<IActionResult> Query([FromBody] QueryRequest request, [FromServices] IBackgroundTaskQueue taskQueue)
@@ -690,6 +698,87 @@ namespace MEAI_GPT_API.Controller
                     Message = "Serialization error"
                 }, options);
             }
+        }
+
+        [HttpPost("query-stream-with-files")]
+        [Consumes("multipart/form-data")]
+        [RequestSizeLimit(60_000_000)]
+        [RequestFormLimits(MultipartBodyLengthLimit = 60_000_000)]
+        public async Task StreamWithFiles([FromForm] StreamWithFilesRequest request, CancellationToken ct)
+        {
+            // ---------- 1. Validate BEFORE the stream starts, so errors are real HTTP 400s ----------
+            if (string.IsNullOrWhiteSpace(request.Question))
+            {
+                await WriteBadRequestAsync("Question is required.", ct);
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(request.Plant))
+            {
+                await WriteBadRequestAsync("Plant is required.", ct);
+                return;
+            }
+
+            List<ChatAttachment> attachments;
+            try
+            {
+                attachments = request.Files is { Count: > 0 }
+                    ? await _attachmentProcessor.ProcessAsync(request.Files)
+                    : new List<ChatAttachment>();
+            }
+            catch (ArgumentException ex)
+            {
+                await WriteBadRequestAsync(ex.Message, ct);
+                return;
+            }
+
+            // ---------- 2. Open the SSE stream ----------
+            Response.StatusCode = StatusCodes.Status200OK;
+            Response.ContentType = "text/event-stream";
+            Response.Headers["Cache-Control"] = "no-cache";
+            Response.Headers["X-Accel-Buffering"] = "no"; // stops nginx from buffering
+            HttpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+
+            var userId = User.Identity?.Name ?? "system";
+
+            try
+            {
+                await foreach (var chunk in _ragService.ProcessQueryStreamWithAttachmentsAsync(
+                    request.Question,
+                    request.Plant,
+                    attachments,
+                    request.SessionId,
+                    userId,
+                    request.MeaiInfo,
+                    request.MaxResults,
+                    ct))
+                {
+                    await WriteSseAsync(chunk, ct);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Client disconnected during stream-with-files");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "stream-with-files failed");
+                if (!ct.IsCancellationRequested)
+                    await WriteSseAsync(new StreamChunk { Type = "error", Content = "Something went wrong while processing your request." }, CancellationToken.None);
+            }
+        }
+
+        private async Task WriteSseAsync(StreamChunk chunk, CancellationToken ct)
+        {
+            var json = JsonSerializer.Serialize(chunk, SseJson);
+            await Response.WriteAsync($"data: {json}\n\n", ct);
+            await Response.Body.FlushAsync(ct);
+        }
+
+        private async Task WriteBadRequestAsync(string message, CancellationToken ct)
+        {
+            Response.StatusCode = StatusCodes.Status400BadRequest;
+            Response.ContentType = "application/json";
+            await Response.WriteAsync(JsonSerializer.Serialize(new { error = message }, SseJson), ct);
         }
 
         // ✅ ADD: DTO classes at the end of your RagController.cs file (before the closing brace)
