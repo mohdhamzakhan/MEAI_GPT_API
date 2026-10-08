@@ -2615,30 +2615,44 @@ namespace MEAI_GPT_API.Services
         {
             var messages = new List<object>
     {
-        new { role = "system", content = systemPrompt }
+        new
+        {
+            role = "system",
+            content = systemPrompt
+        }
     };
 
-            // Include last 8 turns (4 Q+A pairs) for context window safety
-            foreach (var turn in history.TakeLast(8))
+            // Don't send old conversation when processing images.
+            if (imagesBase64 is not { Count: > 0 })
             {
-                messages.Add(new { role = "user", content = turn.Question });
-                messages.Add(new { role = "assistant", content = turn.Answer });
+                foreach (var turn in history.TakeLast(8))
+                {
+                    messages.Add(new
+                    {
+                        role = "user",
+                        content = turn.Question
+                    });
+
+                    messages.Add(new
+                    {
+                        role = "assistant",
+                        content = turn.Answer
+                    });
+                }
             }
 
-            // Images attach only to the CURRENT user message, never to history
+            var currentMessage = new Dictionary<string, object>
+            {
+                ["role"] = "user",
+                ["content"] = userQuestion
+            };
+
             if (imagesBase64 is { Count: > 0 })
             {
-                messages.Add(new
-                {
-                    role = "user",
-                    content = userQuestion,
-                    images = imagesBase64   // raw base64 strings, no "data:image/...;base64," prefix
-                });
+                currentMessage["images"] = imagesBase64;
             }
-            else
-            {
-                messages.Add(new { role = "user", content = userQuestion });
-            }
+
+            messages.Add(currentMessage);
 
             return messages;
         }
@@ -9499,9 +9513,13 @@ namespace MEAI_GPT_API.Services
             if (meaiInfo)
             {
                 yield return new StreamChunk { Type = "status", Content = "Checking policies..." };
+
                 var retrieval = await ExecuteRetrievalAsync(
                     question, embModel, maxResults, plant, agentContext, false, null!);
-                policyChunks = retrieval.Chunks.Where(c => c.Similarity >= 0.45).ToList();
+
+                policyChunks = retrieval.Chunks
+                    .Where(c => c.Similarity >= 0.45)
+                    .ToList();
             }
 
             // Build prompts
@@ -9534,10 +9552,60 @@ namespace MEAI_GPT_API.Services
             );
             systemPrompt.AppendLine();
 
+            systemPrompt.AppendLine("## STRICT IMAGE GROUNDING");
+
+            systemPrompt.AppendLine(
+                "When an image is attached, the image is the primary and authoritative source for image-related information."
+            );
+
+            systemPrompt.AppendLine(
+                "Use ONLY information that is actually visible and readable in the image."
+            );
+
+            systemPrompt.AppendLine(
+                "Never invent, infer, predict, complete, reconstruct, or assume information that is not visible."
+            );
+
+            systemPrompt.AppendLine(
+                "Do not use common business, ERP, purchase-order, inventory, manufacturing, or database patterns to fill missing information."
+            );
+
+            systemPrompt.AppendLine(
+                "Do not assume that content exists outside the visible boundaries of the image."
+            );
+
+            systemPrompt.AppendLine(
+                "If the image shows only part of a document or table, analyze ONLY the visible portion."
+            );
+
+            systemPrompt.AppendLine(
+                "Do not assume that additional rows, columns, values, or sections exist outside the visible image."
+            );
+
+            systemPrompt.AppendLine(
+                "If information is not visible, explicitly state that it is not visible."
+            );
+
+            systemPrompt.AppendLine(
+                "If text is visible but cannot be read reliably, use [UNCLEAR]."
+            );
+
+            systemPrompt.AppendLine(
+                "Never replace missing information with example values."
+            );
+
+            systemPrompt.AppendLine(
+                "Never create sample rows, sample values, dates, quantities, statuses, prices, item numbers, or descriptions."
+            );
+
+            systemPrompt.AppendLine(
+                "When extracting text, reproduce only text that is actually visible."
+            );
+
             systemPrompt.AppendLine("## INFORMATION EXTRACTION");
             systemPrompt.AppendLine(
-                "Extract all relevant information from attachments when requested."
-            );
+                 "Extract all relevant information that is actually available and visible in the attachments when requested. Never compensate for missing information by guessing."
+             );
             systemPrompt.AppendLine(
                 "This includes paragraphs, headings, labels, tables, lists, numbers, dates, units, identifiers, names, codes, formulas, captions, notes, and other meaningful content."
             );
@@ -9636,6 +9704,159 @@ namespace MEAI_GPT_API.Services
             );
             systemPrompt.AppendLine();
 
+            systemPrompt.AppendLine("## TABLE EXTRACTION MODE");
+            systemPrompt.AppendLine("When the user asks about a table visible in an image, the image is the ONLY authoritative source for the table.");
+            systemPrompt.AppendLine("You MUST inspect the actual visible table before generating the answer.");
+            systemPrompt.AppendLine("");
+            systemPrompt.AppendLine("CRITICAL RULES:");
+            systemPrompt.AppendLine("1. NEVER create a generic table schema.");
+            systemPrompt.AppendLine("2. NEVER use common columns such as No., Item, Description, Qty, UOM, Rate, Amount, Date, Time, Remarks unless those exact columns are actually visible in the image.");
+            systemPrompt.AppendLine("3. The visible table header determines the output columns.");
+            systemPrompt.AppendLine("4. Reproduce the visible column names exactly and in the same left-to-right order.");
+            systemPrompt.AppendLine("5. Count only the actual data rows visible in the image.");
+            systemPrompt.AppendLine("6. Do NOT assume a fixed number of rows.");
+            systemPrompt.AppendLine("7. Each output row must correspond to one actual visible row.");
+            systemPrompt.AppendLine("8. NEVER duplicate rows.");
+            systemPrompt.AppendLine("9. NEVER invent values.");
+            systemPrompt.AppendLine("10. NEVER copy a value from another row.");
+            systemPrompt.AppendLine("11. If a cell is blacked out, covered, unreadable, or cannot be confidently read, output [UNCLEAR].");
+            systemPrompt.AppendLine("12. NEVER replace [UNCLEAR] with a plausible value.");
+            systemPrompt.AppendLine("13. NEVER calculate missing values.");
+            systemPrompt.AppendLine("14. NEVER derive missing values from other columns.");
+            systemPrompt.AppendLine("15. NEVER infer values from common PO, ERP, purchasing, inventory, invoice, or business data patterns.");
+            systemPrompt.AppendLine("16. Do NOT add columns that are not visible in the image.");
+            systemPrompt.AppendLine("17. If a visible column contains unreadable values, keep the column and use [UNCLEAR] for those cells.");
+            systemPrompt.AppendLine("18. If a grouped header exists, preserve the visible child columns.");
+            systemPrompt.AppendLine("19. Do NOT create example rows or placeholder rows.");
+            systemPrompt.AppendLine("20. If the table contains fewer rows than expected, return only those rows.");
+            systemPrompt.AppendLine("21. Before producing the final answer, verify column names, column order, column count, actual row count, row-to-row values, no duplicated rows, and no invented values.");
+            systemPrompt.AppendLine("If the table structure cannot be reliably determined from the image, say so instead of creating a generic table.");
+
+            systemPrompt.AppendLine("## EXACT TABLE EXTRACTION");
+
+            systemPrompt.AppendLine(
+                "When a table is visible in an image, inspect the table before generating the answer."
+            );
+
+            systemPrompt.AppendLine(
+                "First identify the complete visible table header from left to right."
+            );
+
+            systemPrompt.AppendLine(
+                "The output must preserve the exact visible column names and their left-to-right order."
+            );
+
+            systemPrompt.AppendLine(
+                "Do not create, rename, substitute, simplify, or invent column headers."
+            );
+
+            systemPrompt.AppendLine(
+                "Include every visible column, even if some columns are difficult to read."
+            );
+
+            systemPrompt.AppendLine(
+                "If a column header is visible but unreadable, use [UNCLEAR]."
+            );
+
+            systemPrompt.AppendLine(
+                "Determine whether actual data rows are visible before creating any table rows."
+            );
+
+            systemPrompt.AppendLine(
+                "If no data rows are visible, output ZERO data rows."
+            );
+
+            systemPrompt.AppendLine(
+                "If only the header is visible, return only the header and clearly state that no data rows are visible."
+            );
+
+            systemPrompt.AppendLine(
+                "The number of output rows must NEVER exceed the number of data rows actually visible in the image."
+            );
+
+            systemPrompt.AppendLine(
+                "Never generate rows based on what a typical purchase-order, inventory, ERP, or business table would normally contain."
+            );
+
+            systemPrompt.AppendLine(
+                "Never create example or placeholder rows unless the user explicitly asks for examples."
+            );
+
+            systemPrompt.AppendLine(
+                "For each visible row, extract only values that are actually visible in that row."
+            );
+
+            systemPrompt.AppendLine(
+                "If a cell is visible but unreadable, use [UNCLEAR]."
+            );
+
+            systemPrompt.AppendLine(
+                "If a cell or row is not visible, do not create it."
+            );
+
+            systemPrompt.AppendLine(
+                "Preserve grouped headers such as PO Information and Invoice Information when they are visible."
+            );
+
+            systemPrompt.AppendLine(
+                "Do not merge separate columns into one column."
+            );
+
+            systemPrompt.AppendLine(
+                "Do not split one visible column into multiple columns."
+            );
+
+            systemPrompt.AppendLine(
+                "Do not replace the actual table with a generic schema such as No., Item, Description, Qty, UOM, Rate, Amount, Date, Status."
+            );
+
+            systemPrompt.AppendLine("## VISUAL EXTRACTION PROCEDURE");
+
+            systemPrompt.AppendLine(
+                "Before answering an image-based extraction request, perform the following checks:"
+            );
+
+            systemPrompt.AppendLine(
+                "1. Determine what portion of the document is actually visible."
+            );
+
+            systemPrompt.AppendLine(
+                "2. Identify all visible headings, labels, and column headers."
+            );
+
+            systemPrompt.AppendLine(
+                "3. Determine whether actual data values are visible."
+            );
+
+            systemPrompt.AppendLine(
+                "4. Count only the rows that are visibly present."
+            );
+
+            systemPrompt.AppendLine(
+                "5. Extract only values that can be read from those visible rows."
+            );
+
+            systemPrompt.AppendLine(
+                "6. Do not infer information from the structure or expected meaning of the document."
+            );
+
+            systemPrompt.AppendLine(
+                "7. Verify that every output column exists in the image."
+            );
+
+            systemPrompt.AppendLine(
+                "8. Verify that every output row corresponds to a visibly present row."
+            );
+
+            systemPrompt.AppendLine(
+                "9. Verify that every output value is supported by visible image content."
+            );
+
+            systemPrompt.AppendLine(
+                "10. If any of these checks fail, do not invent the missing information."
+            );
+
+
             systemPrompt.AppendLine("## MULTIPLE DOCUMENTS");
             systemPrompt.AppendLine(
                 "When multiple attachments are provided, determine which document or image contains the relevant information."
@@ -9647,6 +9868,24 @@ namespace MEAI_GPT_API.Services
                 "Do not merge information from different documents unless the relationship is supported by the documents or the user's request."
             );
             systemPrompt.AppendLine();
+
+            systemPrompt.AppendLine("## ZERO-HALLUCINATION REQUIREMENT");
+
+            systemPrompt.AppendLine(
+                "For attachment and image analysis, accuracy is more important than completeness."
+            );
+
+            systemPrompt.AppendLine(
+                "It is always better to report that information is unavailable or unreadable than to provide a guessed answer."
+            );
+
+            systemPrompt.AppendLine(
+                "Never fabricate information to make the answer appear complete."
+            );
+
+            systemPrompt.AppendLine(
+                "Every factual value in an image-derived answer must be supported by visible content in the image or explicitly provided attachment text."
+            );
 
             systemPrompt.AppendLine("## RESPONSE RULES");
             systemPrompt.AppendLine(
@@ -9679,8 +9918,28 @@ namespace MEAI_GPT_API.Services
 
             yield return new StreamChunk { Type = "status", Content = "Analyzing attachments..." };
 
-            var history = _historyService.GetHistory(agentContext.SessionId);
+            var history = images is { Count: > 0 }
+                ? new List<ConversationTurn>()
+                : _historyService.GetHistory(agentContext.SessionId);
             var full = new StringBuilder();
+
+            if (images is { Count: > 0 })
+            {
+                systemPrompt.AppendLine();
+                systemPrompt.AppendLine("## CURRENT REQUEST CONTAINS IMAGE(S)");
+                systemPrompt.AppendLine(
+                    "The current user request contains one or more images."
+                );
+                systemPrompt.AppendLine(
+                    "Inspect the actual image before answering."
+                );
+                systemPrompt.AppendLine(
+                    "Do not rely on previous conversation to determine what is visible in the image."
+                );
+                systemPrompt.AppendLine(
+                    "For table extraction, output only columns and rows that are actually visible."
+                );
+            }
 
             await foreach (var token in StreamGenerateWithHistoryAsync(
                 genModel.Name!, systemPrompt.ToString(), history, fullQuestion, ct: ct, images: images))

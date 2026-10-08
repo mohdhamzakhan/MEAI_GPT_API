@@ -1,4 +1,7 @@
-﻿namespace MEAI_GPT_API.Models
+﻿using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Processing;
+
+namespace MEAI_GPT_API.Models
 {
     public class AttachmentModels
     {
@@ -33,7 +36,9 @@
         private const long MaxFileBytes = 15 * 1024 * 1024;
         private const int MaxImages = 4;
         private const int MaxDocChars = 60_000; // ~15k tokens per document
-
+        private const int ImageUpscaleFactor = 4;
+        private const int MaxProcessedImageWidth = 8192;
+        private const int MaxProcessedImageHeight = 4096;
         private readonly IDocumentProcessor _docProcessor;
         private readonly ILogger<AttachmentProcessor> _logger;
 
@@ -61,6 +66,7 @@
 
                     using var ms = new MemoryStream();
                     await file.CopyToAsync(ms);
+
                     result.Add(new ChatAttachment
                     {
                         FileName = file.FileName,
@@ -98,6 +104,62 @@
                 }
             }
             return result;
+        }
+
+        private async Task<byte[]> PrepareImageForVisionAsync(IFormFile file)
+        {
+            await using var input = file.OpenReadStream();
+
+            using var image = await Image.LoadAsync(input);
+
+            _logger.LogInformation(
+                "Original image: {FileName}, Width={Width}, Height={Height}",
+                file.FileName,
+                image.Width,
+                image.Height);
+
+            var targetWidth = image.Width * ImageUpscaleFactor;
+            var targetHeight = image.Height * ImageUpscaleFactor;
+
+            // Prevent excessively large images.
+            if (targetWidth > MaxProcessedImageWidth)
+            {
+                var scale = (double)MaxProcessedImageWidth / targetWidth;
+                targetWidth = MaxProcessedImageWidth;
+                targetHeight = Math.Max(1, (int)(targetHeight * scale));
+            }
+
+            if (targetHeight > MaxProcessedImageHeight)
+            {
+                var scale = (double)MaxProcessedImageHeight / targetHeight;
+                targetHeight = MaxProcessedImageHeight;
+                targetWidth = Math.Max(1, (int)(targetWidth * scale));
+            }
+
+            image.Mutate(x =>
+            {
+                x.Resize(new ResizeOptions
+                {
+                    Size = new Size(targetWidth, targetHeight),
+                    Mode = ResizeMode.Stretch,
+                    Sampler = KnownResamplers.Lanczos3
+                });
+            });
+
+            await using var output = new MemoryStream();
+
+            await image.SaveAsPngAsync(output);
+
+            var processed = output.ToArray();
+
+            _logger.LogInformation(
+                "Processed image: {FileName}, Width={Width}, Height={Height}, Bytes={Bytes}",
+                file.FileName,
+                targetWidth,
+                targetHeight,
+                processed.Length);
+
+            return processed;
         }
     }
 }
