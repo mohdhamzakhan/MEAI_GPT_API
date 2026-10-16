@@ -9370,6 +9370,8 @@ namespace MEAI_GPT_API.Services
             }
 
             string finalAnswer = responseText;
+            bool askedClarification = false;
+            bool declined = false;
 
             if (verification != null && verification.NeedsReprocessing &&
               (!verification.IsGrounded || !verification.IsComplete))
@@ -9404,6 +9406,7 @@ namespace MEAI_GPT_API.Services
                 }
                 else
                 {
+                    declined = true;
                     // ✅ CHANGED: the message used to unconditionally say "not
                     // confident ... fully grounded", which is actively
                     // misleading when the real failure was incompleteness —
@@ -9448,6 +9451,19 @@ namespace MEAI_GPT_API.Services
             // ============================
             // STREAM FINAL (VERIFIED) ANSWER
             // ============================
+
+            var quality = AnswerQualityBuilder.Build(verification, askedClarification, declined,
+                retrySkippedReason, finalChunks.Select(c => c.Source), plant, admin: true);
+
+            yield return new StreamChunk
+            {
+                Type = "answer_quality",
+                Content = JsonSerializer.Serialize(quality, new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+                })
+            };
             yield
             return new StreamChunk
             {
