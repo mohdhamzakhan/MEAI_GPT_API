@@ -8715,6 +8715,9 @@ namespace MEAI_GPT_API.Services
                 break;
             }
 
+            if (string.IsNullOrEmpty(conversationContext.EmployeeGrade) && _currentRequester != null)
+                conversationContext.EmployeeGrade = _policyAnalysis.GradeTierForCategory(_currentRequester.EmployeeCategory);
+
             // 🧭 Policy-variant clarification (e.g. Domestic vs. Foreign Travel) —
             // resolve a pending answer BEFORE retrieval runs again, so retrieval
             // below operates on the resumed original question, not the user's
@@ -8908,7 +8911,7 @@ namespace MEAI_GPT_API.Services
             };
 
             var retrievalResult = await ExecuteRetrievalAsync(
-              question, embModel, maxResults, plant, agentContext, useReRanking, plan, genModel);
+              question, embModel, maxResults, plant, agentContext, useReRanking, plan, genModel, conversationContext.EmployeeGrade);
 
             var finalChunks = retrievalResult.Chunks;
             var topicChanged = retrievalResult.TopicChanged;
@@ -10635,7 +10638,8 @@ Rewritten question:";
           // headcount. Optional so existing/other callers that don't have a
           // generation model handy still compile; falls back to the
           // smallest configured model's window (conservative) if omitted.
-          ModelConfiguration? genModel = null)
+          ModelConfiguration? genModel = null,
+          string? gradeTier = null)
         {
             var result = new RetrievalResult
             {
@@ -10785,6 +10789,7 @@ Rewritten question:";
                 // enough for ~6 distinct policies on a broad question), then
                 // immediately trim by a REAL token budget below, which is the
                 // actual safety net.
+                hybridChunks = _policyAnalysis.FilterToGradeTierSources(hybridChunks, gradeTier);
                 var diversified = DiversifyBySource(hybridChunks, maxTotal: 30, maxPerSource: 5);
 
                 // 🆕 Temporary diagnostic: list every chunk that survived

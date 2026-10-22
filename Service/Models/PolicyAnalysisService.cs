@@ -712,6 +712,32 @@ namespace MEAI_GPT_API.Service.Models
             return chunks.Where(c => !rejected.Contains(c.Source)).ToList();
         }
 
+        public string? GradeTierForCategory(string? category) =>
+    string.Equals(category, "Indirect", StringComparison.OrdinalIgnoreCase) ? GradeTiers[0].Label :
+    string.Equals(category, "Direct", StringComparison.OrdinalIgnoreCase) ? GradeTiers[1].Label : null;
+
+        public List<RelevantChunk> FilterToGradeTierSources(List<RelevantChunk> chunks, string? tierLabel)
+        {
+            if (string.IsNullOrEmpty(tierLabel) || chunks == null || chunks.Count == 0 ||
+                !GradeTiers.Any(t => t.Label == tierLabel)) return chunks;
+
+            bool Matches(string name, string label) =>
+                GradeTiers.Where(t => t.Label == label)
+                          .Any(t => t.Patterns.Any(p => Regex.IsMatch(name, p, RegexOptions.IgnoreCase)));
+
+            var other = GradeTiers.First(t => t.Label != tierLabel).Label;
+            var kept = chunks.Where(c =>
+            {
+                var name = System.IO.Path.GetFileName(c.Source ?? "");
+                return !(Matches(name, other) && !Matches(name, tierLabel));
+            }).ToList();
+
+            if (kept.Count == 0) return chunks; // never empty the pool
+            _logger.LogInformation("🎓 Grade-tier filter ({Tier}) dropped {N} chunk(s) from: {Src}", tierLabel,
+                chunks.Count - kept.Count, string.Join(", ", chunks.Except(kept).Select(c => c.Source).Distinct()));
+            return kept;
+        }
+
         public bool CheckPolicyCoverage(List<RelevantChunk> chunks, string question)
         {
             if (!chunks.Any())
