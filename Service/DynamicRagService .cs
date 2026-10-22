@@ -8733,6 +8733,7 @@ namespace MEAI_GPT_API.Services
                 {
                     _logger.LogInformation($"🧭 Policy variant clarified as '{chosen.Label}' ({chosen.SourceFile}) for session {agentContext.SessionId}");
                     rejectedPolicySources = options.Where(o => o.SourceFile != chosen.SourceFile).Select(o => o.SourceFile).ToList();
+                    conversationContext.PreferredPolicyQualifier = chosen.Label.ToLowerInvariant();
                     conversationContext.AwaitingPolicyClarification = false;
                     question = conversationContext.PendingPolicyClarificationQuestion ?? question;
                     conversationContext.PendingPolicyClarificationQuestion = null;
@@ -8937,7 +8938,15 @@ namespace MEAI_GPT_API.Services
             // right PROVISION within one policy.
             else
             {
-                var policyOptions = _policyAnalysis.DetectPolicyVariantAmbiguity(finalChunks);
+                var decision = _policyAnalysis.EvaluatePolicyVariant(finalChunks, question, conversationContext.PreferredPolicyQualifier);
+
+                if (decision.RejectedSources.Any())
+                {
+                    finalChunks = _policyAnalysis.FilterToSelectedPolicyVariant(finalChunks, decision.RejectedSources);
+                    conversationContext.PreferredPolicyQualifier = decision.ResolvedQualifier;
+                }
+
+                var policyOptions = decision.AskOptions;
                 if (policyOptions != null)
                 {
                     _logger.LogInformation($"🧭 Policy-variant ambiguity detected for session {agentContext.SessionId} — asking user to pick one");

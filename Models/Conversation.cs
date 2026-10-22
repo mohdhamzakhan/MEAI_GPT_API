@@ -70,6 +70,7 @@ namespace MEAI_GPT_API.Models
             public bool AwaitingPolicyClarification { get; set; } = false;
             public string? PendingPolicyClarificationQuestion { get; set; }
             public List<Service.Models.PolicyAnalysisService.PolicyClarificationOption>? PendingPolicyClarificationOptions { get; set; }
+            public string? PreferredPolicyQualifier { get; set; }   // e.g. "domestic", remembered for the session
 
             // 🆕 General-purpose clarification flow, not restricted to grade.
             // Triggered when the self-verification pipeline can't ground an

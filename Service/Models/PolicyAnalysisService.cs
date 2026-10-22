@@ -673,6 +673,39 @@ namespace MEAI_GPT_API.Service.Models
             return null;
         }
 
+        public class PolicyVariantDecision
+        {
+            public List<PolicyClarificationOption>? AskOptions { get; set; }  // non-null => must ask
+            public List<string> RejectedSources { get; set; } = new();        // non-empty => drop these
+            public string? ResolvedQualifier { get; set; }                    // remember for the session
+        }
+
+        public PolicyVariantDecision EvaluatePolicyVariant(List<RelevantChunk> chunks, string? questionText, string? rememberedQualifier)
+        {
+            var decision = new PolicyVariantDecision();
+            var options = DetectPolicyVariantAmbiguity(chunks);      // existing sibling-pair detection, unchanged
+            if (options == null) return decision;
+
+            var text = (questionText ?? "").ToLowerInvariant();
+            var named = options.Select(o => o.Label.ToLowerInvariant())
+                               .Where(q => Regex.IsMatch(text, $@"\b{Regex.Escape(q)}\b")).ToList();
+
+            if (named.Count == options.Count) return decision;       // asked about both: keep both, don't ask
+
+            string? pick = named.Count == 1 ? named[0]
+                : (rememberedQualifier != null && options.Any(o => o.Label.Equals(rememberedQualifier, StringComparison.OrdinalIgnoreCase)))
+                    ? rememberedQualifier.ToLowerInvariant() : null;
+
+            if (pick == null) { decision.AskOptions = options; return decision; }
+
+            var chosen = options.First(o => o.Label.Equals(pick, StringComparison.OrdinalIgnoreCase));
+            decision.RejectedSources = options.Where(o => o.SourceFile != chosen.SourceFile).Select(o => o.SourceFile).ToList();
+            decision.ResolvedQualifier = pick;
+            _logger.LogInformation("🧭 Policy variant auto-resolved to '{Pick}' ({How})", pick,
+                named.Count == 1 ? "named in question" : "remembered from earlier in this session");
+            return decision;
+        }
+
         private static string Capitalize(string s) => string.IsNullOrEmpty(s) ? s : char.ToUpperInvariant(s[0]) + s[1..];
 
         /// <summary>
