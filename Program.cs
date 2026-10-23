@@ -332,10 +332,6 @@ builder.Services.AddSingleton<DynamicCollectionManager>(provider =>
     return new DynamicCollectionManager(chromaClient, chromaOptions, logger);
 });
 
-builder.Services.Configure<InternetSearchOptions>(builder.Configuration.GetSection("InternetSearch"));
-builder.Services.AddHttpClient("WebSearch");
-builder.Services.AddScoped<IWebSearchService, WebSearchService>();
-
 if (Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development")
 {
     builder.Host.UseSerilog((context, config) =>
@@ -355,9 +351,18 @@ else
     });
 }
 
-
+builder.Services.Configure<InternetSearchOptions>(builder.Configuration.GetSection("InternetSearch"));
+builder.Services.AddHttpClient("WebSearch");
+builder.Services.AddScoped<IWebSearchService, WebSearchService>();
 var app = builder.Build();
+var wsLogger = app.Services.GetRequiredService<ILogger<Program>>();
+wsLogger.LogInformation("🌐 InternetSearch raw config: Enabled='{E}', Provider='{P}', Env='{Env}'",
+    builder.Configuration["InternetSearch:Enabled"],
+    builder.Configuration["InternetSearch:Provider"],
+    builder.Environment.EnvironmentName);
 
+var wsOpts = app.Services.GetRequiredService<IOptions<InternetSearchOptions>>().Value;
+wsLogger.LogInformation("🌐 InternetSearch bound options: Enabled={E}, Provider={P}", wsOpts.Enabled, wsOpts.Provider);
 var provider = new FileExtensionContentTypeProvider();
 provider.Mappings[".wasm"] = "application/wasm"; // Tell the server how to handle WebAssembly
 
