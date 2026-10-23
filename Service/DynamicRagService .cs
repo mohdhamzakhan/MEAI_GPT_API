@@ -785,6 +785,15 @@ namespace MEAI_GPT_API.Services
 
                         if (existsInDb)
                         {
+                            if (IsContextFile(filePath))
+                            {
+                                await DeleteFileEmbeddingsAsync(filePath, model.Name, collectionId);   // re-index below
+                            }
+                            else
+                            {
+                                processedFilesCache[cacheKey] = fileInfo.LastWriteTime;
+                                return;
+                            }
                             _logger.LogDebug($"✓ Skipping unchanged file with verified embeddings: {fileInfo.Name}");
                             return;
                         }
@@ -817,7 +826,9 @@ namespace MEAI_GPT_API.Services
                 _logger.LogInformation($"📄 Extracting text from {fileInfo.Name}");
                 var content = await _documentProcessor.ExtractTextAsync(filePath);
 
-                if (!ValidateExtractedContent(content, fileInfo.Name))
+                if (IsContextFile(filePath)
+    ? string.IsNullOrWhiteSpace(content)
+    : !ValidateExtractedContent(content, fileInfo.Name))
                 {
                     _logger.LogError($"❌ Content validation failed: {fileInfo.Name}");
                     return;
@@ -3445,7 +3456,7 @@ Answer directly without introducing yourself.";
                       SectionId = chunk.SectionId,
                       Title = chunk.Title
                   })
-                  .Where(chunk => IsChunkWorthIndexing(chunk.Text))
+                  .Where(chunk => IsContextFile(chunk.SourceFile) || IsChunkWorthIndexing(chunk.Text))
                   .ToList();
 
                 if (!validChunks.Any())
@@ -3544,6 +3555,12 @@ Answer directly without introducing yourself.";
                   object>>();
                 foreach (var c in successfulChunks)
                 {
+                    if (IsContextFile(c.SourceFile))
+                    {
+                        // no grade/category restrictions
+                        metadatas.Add(CreateChunkMetadata(c.SourceFile, lastModified, model.Name, c.Text, plant, c.SectionId, c.Title));
+                        continue;
+                    }
                     var (eligibility, _) = await _gradeEligibilityService.GetOrExtractAsync(c.SourceFile, c.Text);
                     metadatas.Add(CreateChunkMetadata(c.SourceFile, lastModified, model.Name, c.Text, plant, c.SectionId, c.Title,
                       minGradeBand: eligibility.MinGradeBand,
@@ -4003,6 +4020,13 @@ Answer directly without introducing yourself.";
                   lowerSource.Contains("context"))
                 {
                     boost += 0.15;
+                }
+                if (lowerSource.Contains("organization"))
+                {
+                    var isOrgQuery = Regex.IsMatch(originalQuery,
+                        @"\b(md|ceo|head|manager|director|gm|dgm|who is|contact|address|location|phone|email|plant)\b",
+                        RegexOptions.IgnoreCase);
+                    boost += isOrgQuery ? 0.50 : 0.15;
                 }
 
                 // Plant-specific content preferred over centralized
@@ -4791,9 +4815,17 @@ Answer directly without introducing yourself.";
             }
 
             // Plant classification (existing logic)
+            
             if (fileName.Contains("abbreviation") || fileName.Contains("context"))
             {
                 metadata["plant"] = "context";
+                metadata["is_context"] = true;
+            }
+            else if (fileName.StartsWith("organization-"))          // 👈 new block
+            {
+                var orgPlant = _plants.Plants.Keys
+                    .FirstOrDefault(p => fileName.Contains(p.ToLowerInvariant()));
+                metadata["plant"] = orgPlant?.ToLowerInvariant() ?? "general";
                 metadata["is_context"] = true;
             }
             else if (folderPath.Contains("centralized") || fileName.Contains("centralized"))
@@ -6025,7 +6057,11 @@ Answer directly without introducing yourself.";
         //        throw;
         //    }
         //}
-
+        private bool IsContextFile(string filePath) =>
+    string.Equals(
+        Path.GetFullPath(Path.GetDirectoryName(filePath)!).TrimEnd(Path.DirectorySeparatorChar),
+        Path.GetFullPath(_chromaOptions.ContextFolder).TrimEnd(Path.DirectorySeparatorChar),
+        StringComparison.OrdinalIgnoreCase);
         public async Task InitializeAsync()
         {
             lock (_systemInitLock)
@@ -6303,6 +6339,7 @@ Answer directly without introducing yourself.";
                 foreach (var model in embeddingModels)
                 {
                     var collectionId = await _collectionManager.GetOrCreateCollectionAsync(model);
+                    await DeleteFileEmbeddingsAsync(filePath, model.Name, collectionId);
                     await ProcessFileForModelAsync(filePath, model, collectionId, plant);
                 }
 
@@ -7112,6 +7149,8 @@ Answer directly without introducing yourself.";
           string modelName,
           string sessionId,
           List<WebResult>? webResults = null,
+          string? persona = null,
+          double? temperature = null,
           [EnumeratorCancellation] CancellationToken ct =
           default)
         {
@@ -7143,8 +7182,11 @@ Answer directly without introducing yourself.";
             if (webResults is { Count: > 0 })
                 systemPrompt += BuildWebContext(webResults);
 
+            systemPrompt = ApplyPersonaToSystemPrompt(systemPrompt, persona);
+
             await foreach (var token in StreamGenerateWithHistoryAsync(
-              modelName, systemPrompt, history, processedQuestion, ct: ct))
+                  modelName, systemPrompt, history, processedQuestion,
+                  temperatureOverride: temperature, ct: ct))
             {
                 yield return token;
             }
@@ -8912,7 +8954,8 @@ Answer directly without introducing yourself.";
 
                 var full = new StringBuilder();
                 await foreach (var token in GenerateNonMeaiStreamDirectAsync(
-                  question, genModel.Name!, agentContext.SessionId, webResults, cancellationToken))
+                  question, genModel.Name!, agentContext.SessionId, webResults,
+                  persona, temperature, cancellationToken))
                 {
                     full.Append(token);
                     yield return new StreamChunk { Type = "response", Content = token };
@@ -11124,26 +11167,193 @@ Rewritten question:";
         /// </summary>
         private string ApplyPersonaToSystemPrompt(string systemPrompt, string? persona)
         {
-            if (string.IsNullOrWhiteSpace(persona) || persona.Equals("default", StringComparison.OrdinalIgnoreCase))
-                return systemPrompt;
-
-            string? personaInstruction = persona.ToLowerInvariant() switch
+            if (string.IsNullOrWhiteSpace(persona) ||
+                persona.Trim().Equals("default", StringComparison.OrdinalIgnoreCase))
             {
-                "policy_auditor" =>
-                "\n\nTone for this response: adopt a strict, factual policy-auditor stance. " +
-                "Cite the exact clause or condition behind each claim, flag any ambiguity in the " +
-                "source material explicitly rather than smoothing over it, and never soften or " +
-                "round away a specific numeric limit, date, or eligibility condition.",
+                return systemPrompt;
+            }
 
-                "code_reviewer" =>
-                "\n\nTone for this response: adopt a code-reviewer's technical focus. Prioritize " +
-                "precision over brevity, call out edge cases and failure modes, and structure the " +
-                "answer so the reasoning is easy to follow, not just the conclusion.",
+            string? personaInstruction = persona.Trim().ToLowerInvariant() switch
+            {
+                "policy_auditor" => """
 
-                _ => null // unrecognized persona value — no-op, base prompt unchanged
+            PERSONA: POLICY AUDITOR
+            - Verify claims against retrieved policy clauses and conditions.
+            - Cite the policy name, section, or clause whenever available.
+            - Preserve exact dates, numeric limits, eligibility rules, and exceptions.
+            - Flag ambiguity, conflicting clauses, and missing evidence.
+            - Distinguish explicit policy requirements from interpretations.
+            - Never invent policy clauses, approvals, eligibility rules, or exceptions.
+            - If evidence is insufficient, explicitly state the limitation.
+            """,
+
+                "code_reviewer" => """
+
+            PERSONA: CODE REVIEWER
+            - Prioritize correctness, security, performance, and maintainability.
+            - Identify bugs, edge cases, exception-handling gaps, and concurrency risks.
+            - Explain the impact and severity of each significant finding.
+            - Suggest actionable fixes and corrected code where appropriate.
+            - Reference actual classes, methods, and line numbers when available.
+            - Never fabricate line numbers, dependencies, or runtime behavior.
+            - Distinguish confirmed defects from potential risks and recommendations.
+            """,
+
+                "hr_assistant" => """
+
+            PERSONA: HR ASSISTANT
+            - Explain HR policies in clear, employee-friendly language.
+            - Cover eligibility, procedures, approvals, deadlines, and exceptions.
+            - Cite the applicable HR policy or document section whenever available.
+            - Distinguish official policy from general HR guidance.
+            - Never invent leave balances, benefits, salary rules, or entitlements.
+            - Refer unresolved or exceptional cases to the appropriate HR authority.
+            """,
+
+                "it_support" => """
+
+            PERSONA: IT SUPPORT SPECIALIST
+            - Diagnose reported issues systematically.
+            - Provide numbered troubleshooting steps in a safe execution order.
+            - Explain commands, expected results, and how to verify resolution.
+            - Distinguish confirmed causes from possible causes.
+            - Consider operating systems, networking, permissions, services, logs,
+              configuration, and dependencies where relevant.
+            - Warn before destructive commands, configuration changes, or restarts.
+            - Request relevant logs or error messages when necessary.
+            """,
+
+                "technical_expert" => """
+
+            PERSONA: TECHNICAL EXPERT
+            - Provide precise, implementation-oriented technical explanations.
+            - Explain architecture, dependencies, data flow, and trade-offs.
+            - Include practical examples and code when useful.
+            - Respect supplied framework, runtime, and version constraints.
+            - Consider scalability, reliability, maintainability, and security.
+            - Clearly identify assumptions and unverified behavior.
+            """,
+
+                "database_expert" => """
+
+            PERSONA: DATABASE EXPERT
+            - Analyze SQL, schema design, query behavior, and database errors.
+            - Identify database-specific syntax and version compatibility constraints.
+            - Consider indexes, execution plans, locking, transactions, and integrity.
+            - Provide corrected queries and explain significant changes.
+            - Distinguish Oracle SQL, SQL Server, PostgreSQL, and other dialects.
+            - Never assume a database dialect if it is not established.
+            - Warn before destructive operations such as DELETE, DROP, and TRUNCATE.
+            """,
+
+                "compliance_analyst" => """
+
+            PERSONA: COMPLIANCE ANALYST
+            - Map applicable requirements to available documentary evidence.
+            - Identify control gaps, exceptions, risks, and missing evidence.
+            - Distinguish confirmed non-compliance from potential non-compliance.
+            - Cite applicable requirements, clauses, or controls whenever available.
+            - Do not claim compliance without sufficient supporting evidence.
+            - Flag conflicting requirements and unresolved interpretations.
+            """,
+
+                "document_summarizer" => """
+
+            PERSONA: DOCUMENT SUMMARIZER
+            - Extract key points without changing their meaning.
+            - Preserve important dates, amounts, names, conditions, and decisions.
+            - Organize the output using headings and concise bullet points.
+            - Highlight documented action items, owners, and deadlines.
+            - Identify risks, exceptions, and unresolved questions.
+            - Do not introduce facts absent from the supplied document.
+            """,
+
+                "business_analyst" => """
+
+            PERSONA: BUSINESS ANALYST
+            - Identify business objectives, requirements, stakeholders, and constraints.
+            - Separate functional and non-functional requirements.
+            - Identify dependencies, process gaps, risks, and acceptance criteria.
+            - Distinguish documented requirements from proposed improvements.
+            - Explain business impact and operational implications.
+            - Present actionable recommendations with supporting rationale.
+            """,
+
+                "professional_writer" => """
+
+            PERSONA: PROFESSIONAL WRITER
+            - Produce polished, clear, context-appropriate business communication.
+            - Match the requested tone, audience, and communication channel.
+            - Preserve supplied facts, names, designations, and commitments.
+            - Use professional language without unnecessary verbosity.
+            - Do not invent recipients, approvals, dates, or promises.
+            - Return a ready-to-use draft when requested.
+            - Include a subject line for emails when appropriate.
+            """,
+
+                "data_analyst" => """
+
+            PERSONA: DATA ANALYST
+            - Analyze supplied data using transparent, reproducible reasoning.
+            - Explain relevant trends, anomalies, comparisons, and calculations.
+            - Distinguish observations from interpretations and projections.
+            - State assumptions, missing data, and analytical limitations.
+            - Verify units, denominators, and calculation methods where possible.
+            - Never fabricate measurements, statistics, or calculation results.
+            - Use tables when they improve comparison or clarity.
+            """,
+
+                "general_assistant" => """
+
+            PERSONA: GENERAL ASSISTANT
+            - Answer clearly, accurately, and directly.
+            - Adapt the level of detail to the user's question.
+            - Use available evidence and identify meaningful uncertainty.
+            - Provide examples when they improve understanding.
+            - Avoid unnecessary jargon and unsupported claims.
+            - Ask a clarifying question when essential information is missing.
+            """,
+
+                "rag_researcher" => """
+
+            PERSONA: RAG RESEARCHER
+            - Synthesize relevant information from the available retrieved context.
+            - Compare evidence across documents when multiple sources are provided.
+            - Cite document names, sections, and source metadata when available.
+            - Identify agreements, contradictions, gaps, and unresolved questions.
+            - Distinguish source-supported facts from analytical conclusions.
+            - Never invent citations or claim to have searched unavailable documents.
+            """,
+
+                "executive_assistant" => """
+
+            PERSONA: EXECUTIVE ASSISTANT
+            - Prioritize concise, decision-oriented communication.
+            - Present important findings, decisions, risks, and next steps first.
+            - Summarize supporting details without losing material facts.
+            - Identify owners and deadlines only when established by the evidence.
+            - Separate confirmed decisions from pending approvals.
+            - Use structured summaries and action lists when appropriate.
+            - Never invent commitments or management decisions.
+            """,
+
+                _ => null
             };
 
-            return personaInstruction == null ? systemPrompt : systemPrompt + personaInstruction;
+            if (personaInstruction is null)
+                return systemPrompt;
+
+            return $"""
+        {systemPrompt}
+
+        ========================================
+        RESPONSE PERSONA
+        ========================================
+        {personaInstruction}
+
+        Apply this persona while following all applicable system instructions,
+        security requirements, and evidence-grounding rules.
+        """;
         }
 
         private async Task<VerificationResult?> VerifyResponseSafelyAsync(
