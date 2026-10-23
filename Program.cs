@@ -10,6 +10,7 @@ using MEAI_GPT_API.Services.Agent.Tools;
 using MEAIGPTAPI.Models;
 using MEAIGPTAPI.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.StackExchangeRedis;
 using Microsoft.Extensions.DependencyInjection;
@@ -353,6 +354,15 @@ else
 
 
 var app = builder.Build();
+
+var provider = new FileExtensionContentTypeProvider();
+provider.Mappings[".wasm"] = "application/wasm"; // Tell the server how to handle WebAssembly
+
+// 2. Pass it into UseStaticFiles
+app.UseStaticFiles(new StaticFileOptions
+{
+    ContentTypeProvider = provider
+});
 
 // Ensure database is created
 using (var scope = app.Services.CreateScope())
