@@ -332,6 +332,9 @@ builder.Services.AddSingleton<DynamicCollectionManager>(provider =>
     return new DynamicCollectionManager(chromaClient, chromaOptions, logger);
 });
 
+builder.Services.Configure<InternetSearchOptions>(builder.Configuration.GetSection("InternetSearch"));
+builder.Services.AddHttpClient("WebSearch");
+builder.Services.AddScoped<IWebSearchService, WebSearchService>();
 
 if (Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development")
 {
