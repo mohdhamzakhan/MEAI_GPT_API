@@ -2668,8 +2668,8 @@ namespace MEAI_GPT_API.Services
                 OllamaStreamResponse? chunk;
                 try
                 {
-                    thinkingChars += chunk?.Message?.Thinking?.Length ?? 0;
                     chunk = JsonSerializer.Deserialize<OllamaStreamResponse>(line);
+                    thinkingChars += chunk?.Message?.Thinking?.Length ?? 0;
                 }
                 catch
                 {
@@ -11291,125 +11291,214 @@ Rewritten question:";
         /// must fall back to the existing flat refusal in that case, not
         /// invent a question just to have one.
         /// </summary>
+
         private async Task<string?> TryGenerateClarifyingQuestionAsync(
-          string question, List<RelevantChunk> chunks, ModelConfiguration genModel, CancellationToken cancellationToken)
+            string question,
+            List<RelevantChunk> chunks,
+            ModelConfiguration genModel,
+            CancellationToken cancellationToken)
         {
             try
             {
-                // Source titles + a short excerpt each — enough for the model
-                // to see *why* the answer was ambiguous (e.g. two documents
-                // with conflicting eligibility) without needing the full
-                // chunk text that already went into the failed generation.
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // Keep a short excerpt from each of up to six distinct sources.
                 var excerpts = chunks
-                  .GroupBy(c => c.Source)
-                  .Take(6)
-                  .Select(g => $"[{g.Key}]: {g.First().Text.Substring(0, Math.Min(200, g.First().Text.Length))}...");
+                    .Where(c => !string.IsNullOrWhiteSpace(c.Source))
+                    .GroupBy(c => c.Source)
+                    .Take(6)
+                    .Select(g =>
+                    {
+                        var text = g.First().Text ?? string.Empty;
+                        var excerpt = text[..Math.Min(200, text.Length)];
 
-                var prompt = $@"An HR policy assistant could not confidently answer this question from the
-              retrieved policy excerpts below— possibly because the answer genuinely
-        depends on something about the employee that wasn 't stated in the question
-          (their grade, which plant they 're at, Direct vs Indirect status, which
-            specific policy variant applies, a date / timeframe, etc.).
+                        return $"[{g.Key}]: {excerpt}";
+                    })
+                    .ToList();
 
-        Question: "" {question}
-                ""
-      
-        Retrieved excerpts: {string.Join("\n", excerpts)}
+                if (excerpts.Count == 0)
+                {
+                    _logger.LogInformation(
+                        "Clarification skipped because no source excerpts were available.");
 
-                Is there ONE specific, useful question you could ask the employee that
-                would likely
-                let you answer confidently and correctly? Only propose a
-              question
-              if answering it would genuinely resolve the ambiguity— do not
-        invent a question just to have one, and do not ask something the excerpts
-              already answer.
+                    return null;
+                }
 
-        Respond with ONLY this JSON, nothing
-        else: {{
-                        ""
-                      needs_clarification "": true or false,
-              ""
-                      question "": "" < a single, specific, employee - facing question, or null > ""
-                    }}
-                ";
+                var prompt = $@"Determine whether one specific clarification question
+would resolve a genuine ambiguity that prevents a reliable answer.
 
-                var modelName = !string.IsNullOrWhiteSpace(_config.GroundingRetryModel) ?
-                  _config.GroundingRetryModel :
-                  genModel.Name;
+Employee question:
+{question}
+
+Retrieved policy excerpts:
+{string.Join("\n\n", excerpts)}
+
+Decide whether missing employee-specific information is the reason
+a reliable answer cannot be provided.
+
+Ask a question only when:
+- A specific, relevant piece of information is missing.
+- The retrieved excerpts indicate that this information affects the answer.
+- The employee's response would likely resolve the ambiguity.
+
+Do not ask for information already stated in the question or established
+by the excerpts.
+
+Do not ask a question merely because answer verification failed.
+If the excerpts contain contradictory policies, do not assume that asking
+the employee can resolve the contradiction. Return false unless a specific
+missing fact would genuinely resolve the issue.
+
+Return exactly one valid JSON object in this format when clarification
+is useful:
+{{
+  ""needs_clarification"": true,
+  ""question"": ""One specific question for the employee""
+}}
+
+Otherwise return:
+{{
+  ""needs_clarification"": false,
+  ""question"": null
+}}
+
+Return valid JSON only. Do not include markdown fences or commentary.";
+
+                var modelName =
+                    !string.IsNullOrWhiteSpace(_config.GroundingRetryModel)
+                        ? _config.GroundingRetryModel
+                        : genModel.Name;
 
                 var requestData = new
                 {
                     model = modelName,
-                    messages = new[] {
-              new {
-                role = "system", content = "You output ONLY valid JSON. No markdown fences, no commentary."
-              },
-              new {
-                role = "user", content = prompt
-              }
+                    messages = new[]
+                    {
+                new
+                {
+                    role = "system",
+                    content =
+                        "You determine whether clarification is useful. " +
+                        "Return only valid JSON matching the requested schema."
+                },
+                new
+                {
+                    role = "user",
+                    content = prompt
+                }
             },
                     temperature = 0.1,
                     stream = false
                 };
 
-                // ⏱️ CHANGED: was CreateLinkedTokenSource(cancellationToken) +
-                // CancelAfter(30s) passed as a single token -- OllamaHttpClient's
-                // own internal 3-retry loop then shared that one 30s deadline
-                // non-fresh, so a slow first attempt burned the whole budget and
-                // any "retries" failed near-instantly. This call already runs
-                // after two full generation+verification rounds, so keep the cap
-                // at 30s (don't make a slow request even slower) but give each of
-                // up to 2 attempts a genuinely fresh 30s window instead of 1 real
-                // attempt + 1 wasted instant one. cancellationToken is passed
-                // through directly so a real client disconnect still stops this
-                // immediately rather than waiting out the full budget.
-                var response = await _ollamaClient.PostAsJsonAsync(
-                  "/api/chat", requestData, cancellationToken,
-                  maxRetries: 2,
-                  perAttemptTimeout: TimeSpan.FromSeconds(30));
+                using var response = await _ollamaClient.PostAsJsonAsync(
+                    "/api/chat",
+                    requestData,
+                    cancellationToken,
+                    maxRetries: 2,
+                    perAttemptTimeout: TimeSpan.FromSeconds(45));
+
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning($"⚠️ Clarifying-question generation call failed: {response.StatusCode}");
+                    _logger.LogWarning(
+                        "Clarifying-question generation returned HTTP {StatusCode}.",
+                        (int)response.StatusCode);
+
                     return null;
                 }
 
-                var raw = await response.Content.ReadAsStringAsync();
-                using
-                var doc = JsonDocument.Parse(raw);
-                var content = doc.RootElement.GetProperty("message").GetProperty("content").GetString() ?? "";
-                content = content.Trim();
-                if (content.StartsWith("```"))
+                var raw = await response.Content.ReadAsStringAsync(
+                    cancellationToken);
+
+                using var doc = JsonDocument.Parse(raw);
+
+                if (!doc.RootElement.TryGetProperty("message", out var message) ||
+                    !message.TryGetProperty("content", out var contentElement) ||
+                    contentElement.ValueKind != JsonValueKind.String)
                 {
-                    var firstNewline = content.IndexOf('\n');
-                    if (firstNewline >= 0) content = content[(firstNewline + 1)..];
-                    var lastFence = content.LastIndexOf("```");
-                    if (lastFence >= 0) content = content[..lastFence];
+                    _logger.LogWarning(
+                        "Clarifying-question response did not contain message.content.");
+
+                    return null;
                 }
 
-                using
-                var parsed = JsonDocument.Parse(content.Trim());
+                var content = contentElement.GetString()?.Trim();
+
+                if (string.IsNullOrWhiteSpace(content))
+                {
+                    return null;
+                }
+
+                // Tolerate markdown fences if the model ignores the JSON-only rule.
+                if (content.StartsWith("```", StringComparison.Ordinal))
+                {
+                    var firstNewline = content.IndexOf('\n');
+
+                    if (firstNewline >= 0)
+                    {
+                        content = content[(firstNewline + 1)..];
+                    }
+
+                    var lastFence = content.LastIndexOf(
+                        "```",
+                        StringComparison.Ordinal);
+
+                    if (lastFence >= 0)
+                    {
+                        content = content[..lastFence].Trim();
+                    }
+                }
+
+                using var parsed = JsonDocument.Parse(content);
                 var root = parsed.RootElement;
 
-                var needsClarification = root.TryGetProperty("needs_clarification", out
-                  var nc) && nc.ValueKind == JsonValueKind.True;
-                if (!needsClarification) return null;
+                if (!root.TryGetProperty("needs_clarification", out var nc) ||
+                    (nc.ValueKind != JsonValueKind.True &&
+                     nc.ValueKind != JsonValueKind.False))
+                {
+                    _logger.LogWarning(
+                        "Clarification response contained an invalid needs_clarification value.");
 
-                var clarifyingQuestion = root.TryGetProperty("question", out
-                    var q) && q.ValueKind == JsonValueKind.String ?
-                  q.GetString() :
-                  null;
+                    return null;
+                }
 
-                return string.IsNullOrWhiteSpace(clarifyingQuestion) ? null : clarifyingQuestion;
+                if (!nc.GetBoolean())
+                {
+                    return null;
+                }
+
+                if (!root.TryGetProperty("question", out var q) ||
+                    q.ValueKind != JsonValueKind.String)
+                {
+                    _logger.LogWarning(
+                        "Clarification was requested, but no valid question was returned.");
+
+                    return null;
+                }
+
+                var clarifyingQuestion = q.GetString()?.Trim();
+
+                return string.IsNullOrWhiteSpace(clarifyingQuestion)
+                    ? null
+                    : clarifyingQuestion;
+            }
+            catch (OperationCanceledException)
+                when (cancellationToken.IsCancellationRequested)
+            {
+                // Preserve real caller cancellation.
+                throw;
             }
             catch (Exception ex)
             {
-                // Never let this block the existing refusal fallback —
-                // worst case, we lose the clarification opportunity and
-                // behave exactly as before this feature existed.
-                _logger.LogWarning(ex, "⚠️ Clarifying-question generation failed — falling back to standard refusal");
+                // Clarification is optional; preserve the existing refusal fallback.
+                _logger.LogWarning(
+                    ex,
+                    "Clarifying-question generation failed; falling back to standard refusal.");
+
                 return null;
             }
         }
+
 
         /// <summary>
         /// Appends a persona-specific instruction to an already-built system

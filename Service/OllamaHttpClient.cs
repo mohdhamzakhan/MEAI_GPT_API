@@ -89,25 +89,44 @@ namespace MEAIGPTAPI.Services
             public DateTime? LastFailureTime { get; set; }
         }
 
-        private OllamaEndpoint? GetNextHealthyEndpoint()
+        private OllamaEndpoint? GetNextHealthyEndpoint(
+    HashSet<string> attemptedEndpoints)
         {
             lock (_lock)
             {
-                var healthyEndpoints = _endpoints.Where(e => e.IsHealthy).ToList();
+                // Prefer healthy endpoints not yet attempted.
+                var healthyUntried = _endpoints
+                    .Where(e => e.IsHealthy &&
+                                !attemptedEndpoints.Contains(e.Url))
+                    .ToList();
 
-                if (!healthyEndpoints.Any())
+                if (healthyUntried.Count > 0)
                 {
-                    _logger.LogWarning("No healthy endpoints available, attempting to use any endpoint");
-                    // Try to use the least recently failed endpoint
-                    return _endpoints.OrderBy(e => e.LastFailureTime ?? DateTime.MinValue).FirstOrDefault();
+                    var endpoint =
+                        healthyUntried[_currentIndex % healthyUntried.Count];
+
+                    _currentIndex++;
+
+                    return endpoint;
                 }
 
-                // Round-robin through healthy endpoints
-                var endpoint = healthyEndpoints[_currentIndex % healthyEndpoints.Count];
-                _currentIndex++;
+                // Try an untried unhealthy endpoint before repeating an endpoint.
+                var unhealthyUntried = _endpoints
+                    .Where(e => !attemptedEndpoints.Contains(e.Url))
+                    .OrderBy(e => e.LastFailureTime ?? DateTime.MinValue)
+                    .ToList();
 
-                _logger.LogDebug($"Selected healthy endpoint: {endpoint.Url}");
-                return endpoint;
+                if (unhealthyUntried.Count > 0)
+                {
+                    return unhealthyUntried[0];
+                }
+
+                // All endpoints have been attempted. Retry the least recently
+                // failed endpoint, or a healthy endpoint if one remains.
+                return _endpoints
+                    .OrderBy(e => e.IsHealthy ? 0 : 1)
+                    .ThenBy(e => e.LastFailureTime ?? DateTime.MinValue)
+                    .FirstOrDefault();
             }
         }
 
@@ -157,45 +176,43 @@ namespace MEAIGPTAPI.Services
         }
 
         private async Task<HttpResponseMessage> ExecuteWithFailoverCoreAsync(
-            Func<string, CancellationToken, Task<HttpResponseMessage>> action,
-            int maxRetries = 3,
-            TimeSpan? perAttemptTimeout = null,
-            CancellationToken outerCancellationToken = default)
+    Func<string, CancellationToken, Task<HttpResponseMessage>> action,
+    int maxRetries = 3,
+    TimeSpan? perAttemptTimeout = null,
+    CancellationToken outerCancellationToken = default)
         {
-            Exception? lastException = null;
-            var attemptedEndpoints = new HashSet<string>();
+            int maxAttempts = Math.Max(1, maxRetries);
 
-            for (int attempt = 0; attempt < maxRetries; attempt++)
+            Exception? lastException = null;
+
+            // Tracks endpoints already attempted during this request.
+            // Prefer untried endpoints before retrying an existing one.
+            var attemptedEndpoints = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase);
+
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
-                // Caller actually cancelled (request aborted, shutdown, etc.) —
-                // stop immediately rather than spending the remaining attempts
-                // on a result nobody wants anymore.
+                // Do not retry if the caller cancelled the request.
                 outerCancellationToken.ThrowIfCancellationRequested();
 
-                var endpoint = GetNextHealthyEndpoint();
+                // Prefer a healthy endpoint that has not yet been attempted.
+                // If all endpoints have been tried, allow a genuine retry.
+                var endpoint = GetNextHealthyEndpoint(attemptedEndpoints);
 
                 if (endpoint == null)
                 {
-                    _logger.LogError("No endpoints available for request");
-                    throw new Exception("No Ollama endpoints available", lastException);
-                }
-
-                // Skip if we already tried this endpoint
-                if (attemptedEndpoints.Contains(endpoint.Url))
-                {
-                    if (attemptedEndpoints.Count >= _endpoints.Count)
-                    {
-                        // We've tried all endpoints
-                        break;
-                    }
-                    continue;
+                    throw new HttpRequestException(
+                        "No Ollama endpoints are configured or available.",
+                        lastException);
                 }
 
                 attemptedEndpoints.Add(endpoint.Url);
 
-                // Fresh per-attempt deadline, linked to (but independent of the
-                // remaining budget of) the caller's real cancellation token.
-                using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(outerCancellationToken);
+                // Each attempt receives its own timeout.
+                using var attemptCts =
+                    CancellationTokenSource.CreateLinkedTokenSource(
+                        outerCancellationToken);
+
                 if (perAttemptTimeout.HasValue)
                 {
                     attemptCts.CancelAfter(perAttemptTimeout.Value);
@@ -203,42 +220,97 @@ namespace MEAIGPTAPI.Services
 
                 try
                 {
-                    _logger.LogDebug($"Attempt {attempt + 1}: Using endpoint {endpoint.Url}");
-                    var response = await action(endpoint.Url, attemptCts.Token);
+                    _logger.LogInformation(
+                        "Ollama request attempt {Attempt}/{MaxAttempts} " +
+                        "using endpoint {Endpoint}",
+                        attempt,
+                        maxAttempts,
+                        endpoint.Url);
 
-                    // Success - mark endpoint as healthy
-                    MarkEndpointHealthy(endpoint);
+                    var response = await action(
+                        endpoint.Url,
+                        attemptCts.Token);
+
+                    // Retry transient HTTP failures only.
+                    bool isRetryableStatus =
+                        (int)response.StatusCode == 429 ||
+                        (int)response.StatusCode >= 500;
+
+                    if (isRetryableStatus && attempt < maxAttempts)
+                    {
+                        _logger.LogWarning(
+                            "Ollama returned HTTP {StatusCode} from {Endpoint} " +
+                            "on attempt {Attempt}/{MaxAttempts}. Retrying.",
+                            (int)response.StatusCode,
+                            endpoint.Url,
+                            attempt,
+                            maxAttempts);
+
+                        response.Dispose();
+                        MarkEndpointUnhealthy(endpoint);
+
+                        await Task.Delay(
+                            TimeSpan.FromMilliseconds(200 * attempt),
+                            outerCancellationToken);
+
+                        continue;
+                    }
+
+                    // Keep the endpoint's health status consistent with
+                    // the result of this request.
+                    if (response.IsSuccessStatusCode)
+                    {
+                        MarkEndpointHealthy(endpoint);
+                    }
+                    else if (isRetryableStatus)
+                    {
+                        MarkEndpointUnhealthy(endpoint);
+                    }
+
+                    // Return the final HTTP response to the caller.
+                    // Existing callers can handle non-success status codes.
                     return response;
                 }
-                catch (OperationCanceledException) when (outerCancellationToken.IsCancellationRequested)
+                catch (OperationCanceledException)
+                    when (outerCancellationToken.IsCancellationRequested)
                 {
-                    // The CALLER cancelled (not our per-attempt timeout) —
-                    // propagate immediately instead of logging it as a
-                    // retryable endpoint failure and looping again.
+                    // Actual caller cancellation must not trigger a retry.
                     throw;
                 }
                 catch (Exception ex)
                 {
                     lastException = ex;
 
-                    var timedOut = attemptCts.IsCancellationRequested && perAttemptTimeout.HasValue;
-                    _logger.LogWarning(ex,
-                        timedOut
-                            ? $"Request to {endpoint.Url} timed out after {perAttemptTimeout} (attempt {attempt + 1}/{maxRetries})"
-                            : $"Request to {endpoint.Url} failed (attempt {attempt + 1}/{maxRetries})");
+                    bool timedOut =
+                        attemptCts.IsCancellationRequested &&
+                        perAttemptTimeout.HasValue;
 
-                    // Mark endpoint as unhealthy
+                    _logger.LogWarning(
+                        ex,
+                        "Ollama request {FailureType} at {Endpoint}. " +
+                        "Attempt {Attempt}/{MaxAttempts}; timeout {Timeout}.",
+                        timedOut ? "timed out" : "failed",
+                        endpoint.Url,
+                        attempt,
+                        maxAttempts,
+                        perAttemptTimeout);
+
                     MarkEndpointUnhealthy(endpoint);
 
-                    // Don't delay on last attempt
-                    if (attempt < maxRetries - 1)
+                    if (attempt < maxAttempts)
                     {
-                        await Task.Delay(100 * (attempt + 1), outerCancellationToken); // Exponential backoff
+                        // Bounded backoff between attempts.
+                        await Task.Delay(
+                            TimeSpan.FromMilliseconds(200 * attempt),
+                            outerCancellationToken);
                     }
                 }
             }
 
-            throw new Exception($"All Ollama endpoints failed after {maxRetries} attempts. Tried: {string.Join(", ", attemptedEndpoints)}", lastException);
+            throw new HttpRequestException(
+                $"Ollama request failed after {maxAttempts} attempts. " +
+                $"Endpoints attempted: {string.Join(", ", attemptedEndpoints)}",
+                lastException);
         }
 
         private void MarkEndpointHealthy(OllamaEndpoint endpoint)
