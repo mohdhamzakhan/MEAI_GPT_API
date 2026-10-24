@@ -1,4 +1,5 @@
 ﻿using MEAI_GPT_API.Services;
+using MEAIGPTAPI.Services;
 using System.Collections.Concurrent;
 using System.Net.Http.Json;
 using System.Text;
@@ -24,7 +25,7 @@ namespace MEAI_GPT_API.Service
     public class DocumentRouterService
     {
         private readonly HttpClient _chromaClient;
-        private readonly HttpClient _ollamaClient;
+        private readonly OllamaHttpClient _ollamaClient;
         private readonly DynamicCollectionManager _collectionManager;
         private readonly IConfiguration _config;
         private readonly ILogger<DocumentRouterService> _logger;
@@ -42,12 +43,13 @@ namespace MEAI_GPT_API.Service
 
         public DocumentRouterService(
             IHttpClientFactory httpClientFactory,
+            OllamaHttpClient ollamaClient,
             DynamicCollectionManager collectionManager,
             IConfiguration config,
             ILogger<DocumentRouterService> logger)
         {
             _chromaClient = httpClientFactory.CreateClient("ChromaDB");
-            _ollamaClient = httpClientFactory.CreateClient("OllamaAPI");
+            _ollamaClient = ollamaClient;
             _collectionManager = collectionManager;
             _config = config;
             _logger = logger;
@@ -95,7 +97,6 @@ namespace MEAI_GPT_API.Service
                 var candidateDocs = docs.Take(maxCandidates).ToList();
 
                 var prompt = BuildRouterPrompt(candidateDocs, query);
-
                 var requestBody = new
                 {
                     model = routerModel,
@@ -105,15 +106,19 @@ namespace MEAI_GPT_API.Service
                     keep_alive = _config.GetValue<string>("DocumentRouter:KeepAlive", "24h"),
                     options = new { temperature = 0.0, num_predict = 20 }
                 };
-
-                var response = await _ollamaClient.PostAsJsonAsync("/api/generate", requestBody);
+                var timeoutSec = _config.GetValue<int>("DocumentRouter:TimeoutSeconds", 15);
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSec));
+                var response = await _ollamaClient.PostAsJsonAsync(
+                            "/api/generate", requestBody, CancellationToken.None,
+                            maxRetries: 1,
+                            perAttemptTimeout: TimeSpan.FromSeconds(timeoutSec));
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Document router call returned {StatusCode} — skipping router anchor for this query", response.StatusCode);
                     return new List<string>();
                 }
 
-                var responseJson = await response.Content.ReadAsStringAsync();
+                var responseJson = await response.Content.ReadAsStringAsync(cts.Token);
                 using var parsedResponse = JsonDocument.Parse(responseJson);
                 LogOllamaTimings(parsedResponse.RootElement, routerModel);
                 var rawAnswer = parsedResponse.RootElement.TryGetProperty("response", out var respProp)
@@ -199,6 +204,13 @@ namespace MEAI_GPT_API.Service
                 }
 
                 return titles;
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning(
+                    "Document router timed out after {S}s — continuing without router anchor for this query",
+                    _config.GetValue<int>("DocumentRouter:TimeoutSeconds", 15));
+                return new List<string>();
             }
             catch (Exception ex)
             {

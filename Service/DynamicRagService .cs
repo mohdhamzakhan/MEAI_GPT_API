@@ -2654,7 +2654,7 @@ namespace MEAI_GPT_API.Services
             var stream = await response.Content.ReadAsStreamAsync(ct);
             using
             var reader = new StreamReader(stream);
-
+            int thinkingChars = 0, contentTokens = 0;
             while (!reader.EndOfStream && !ct.IsCancellationRequested)
             {
                 var line = await reader.ReadLineAsync();
@@ -2668,6 +2668,7 @@ namespace MEAI_GPT_API.Services
                 OllamaStreamResponse? chunk;
                 try
                 {
+                    thinkingChars += chunk?.Message?.Thinking?.Length ?? 0;
                     chunk = JsonSerializer.Deserialize<OllamaStreamResponse>(line);
                 }
                 catch
@@ -2676,11 +2677,22 @@ namespace MEAI_GPT_API.Services
                 }
 
                 var token = chunk?.Message?.Content ?? chunk?.Response;
-                if (!string.IsNullOrEmpty(token))
-                    yield
-                  return token;
+                if (!string.IsNullOrEmpty(token)) { contentTokens++; yield return token; }
 
-                if (chunk?.Done == true) break;
+                if (chunk?.Done == true)
+                {
+                    _logger.LogInformation(
+                        "⏱️ [gen-ollama] model={Model} content_tokens={C} thinking_chars={T} done_reason={R} " +
+                        "prompt_tokens={PT} (ctx limit 32768) gen_tokens={GT} load={Load:F0}ms total={Total:F0}ms",
+                        model, contentTokens, thinkingChars, chunk.DoneReason ?? "?",
+                        chunk.PromptEvalCount, chunk.EvalCount,
+                        (chunk.LoadDuration ?? 0) / 1e6, (chunk.TotalDuration ?? 0) / 1e6);
+
+                    if (contentTokens == 0)
+                        _logger.LogWarning("⚠️ Model {Model} produced NO answer text (thinking_chars={T}, done_reason={R})",
+                            model, thinkingChars, chunk.DoneReason);
+                    break;
+                }
             }
         }
 
@@ -8656,6 +8668,28 @@ Answer directly without introducing yourself.";
             }
         }
 
+        private static readonly HashSet<string> _variantStopWords = new(StringComparer.OrdinalIgnoreCase)
+  { "policy", "scheme", "plant", "and", "of", "the", "for", "rules", "guidelines" };
+
+        private bool QuestionMentionsPolicyFamily(string question, IEnumerable<string> optionSourceFiles)
+        {
+            var wordSets = optionSourceFiles
+                .Select(f => ExtractDocumentTitleTerms(f)
+                    .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(w => w.ToLowerInvariant())
+                    .Where(w => w.Length > 2 && !_variantStopWords.Contains(w))
+                    .ToHashSet())
+                .ToList();
+
+            if (wordSets.Count == 0) return true;
+
+            var shared = wordSets.Aggregate((a, b) => { var c = new HashSet<string>(a); c.IntersectWith(b); return c; });
+            if (shared.Count == 0) return true;   // can't tell: keep existing behavior
+
+            var q = _abbreviationService.ExpandQuery(question).ToLowerInvariant();
+            return shared.Any(w => q.Contains(w));
+        }
+
         // Per-request counters (safe: DynamicRagService is Scoped)
         private int _searchCalls;
         private long _searchMs;
@@ -9258,6 +9292,11 @@ Answer directly without introducing yourself.";
                 }
 
                 var policyOptions = decision.AskOptions;
+                if (policyOptions != null && !QuestionMentionsPolicyFamily(question, policyOptions.Select(o => o.SourceFile)))
+                {
+                    _logger.LogInformation("🧭 Policy-variant prompt skipped: question doesn't mention the policy family");
+                    policyOptions = null;
+                }
                 if (policyOptions != null)
                 {
                     _logger.LogInformation($"🧭 Policy-variant ambiguity detected for session {agentContext.SessionId} — asking user to pick one");
@@ -9393,16 +9432,26 @@ Answer directly without introducing yourself.";
               question :
               $"{question}\n\n(For context: I am {conversationContext.EmployeeGrade}. Only use the policy provisions that apply to this grade; ignore provisions written for the other grade.)";
 
-            async Task<(string Text, bool Errored, string? ErrorContent)> GenerateBufferedAsync(string modelName, string? questionOverride = null)
+            async Task<(string Text, bool Errored, string? ErrorContent)> GenerateBufferedAsync(
+                             string modelName, string? questionOverride = null, int? timeoutSeconds = null)
             {
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                if (timeoutSeconds.HasValue) cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds.Value));
+
                 var sb = new StringBuilder();
                 await foreach (var token in GenerateResponseFromContext(
-                  questionOverride ?? questionForModel, modelName, agentContext, finalChunks, meaiInfo, plant, persona, temperature, topicChanged, cancellationToken))
+                  questionOverride ?? questionForModel, modelName, agentContext, finalChunks, meaiInfo, plant,
+                  persona, temperature, topicChanged, cts.Token))
                 {
                     if (token.StartsWith("__ERROR__:"))
                         return (sb.ToString(), true, token[10..]);
                     sb.Append(token);
                 }
+
+                // A timeout ends the stream quietly with partial text: report it as a failure, not as an answer
+                if (timeoutSeconds.HasValue && cts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                    return (sb.ToString(), true, $"timed out after {timeoutSeconds}s");
+
                 return (sb.ToString(), false, null);
             }
 
@@ -9454,7 +9503,7 @@ Answer directly without introducing yourself.";
 
                     if (retryModelConfig != null)
                     {
-                        var (retryText, retryErrored, retryErrorContent) = await GenerateBufferedAsync(retryModelConfig.Name!);
+                        var (retryText, retryErrored, _) = await GenerateBufferedAsync(retryModelConfig.Name!, timeoutSeconds: 90);
 
                         if (!retryErrored && !string.IsNullOrWhiteSpace(retryText))
                         {
@@ -9766,10 +9815,19 @@ Answer directly without introducing yourself.";
                         Question = question,
                         Plant = plant,
                         RetrievedSourcesJson = JsonSerializer.Serialize(finalChunks.Select(c => c.Source).Distinct()),
-                        GroundingReason = groundingReason,
-                        Confidence = verification.OverallConfidence,
+                        GroundingReason = "generation_empty",
+                        Confidence = 0,
                         GenerationModel = genModel.Name ?? ""
                     });
+
+                    yield return new StreamChunk
+                    {
+                        Type = "response",
+                        Content = "I couldn't generate an answer right now. Please try again in a moment, " +
+                                  "or contact HR if it's urgent."
+                    };
+                    yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+                    yield break;
                 }
             }
 
@@ -12715,6 +12773,11 @@ Rewritten question:";
                 get;
                 set;
             }
+
+            [JsonPropertyName("prompt_eval_count")] public int? PromptEvalCount { get; set; }
+            [JsonPropertyName("eval_count")] public int? EvalCount { get; set; }
+            [JsonPropertyName("load_duration")] public long? LoadDuration { get; set; }
+            [JsonPropertyName("total_duration")] public long? TotalDuration { get; set; }
         }
         private class MessageContent
         {
@@ -12731,6 +12794,10 @@ Rewritten question:";
                 get;
                 set;
             }
+
+            [JsonPropertyName("thinking")]
+            public string? Thinking { get; set; }
+
         }
         private async Task<SessionResult> SafeInitializeSession(string? sessionId, string? userId, CancellationToken ct =
           default)

@@ -692,11 +692,34 @@ namespace MEAI_GPT_API.Service.Models
 
             if (named.Count == options.Count) return decision;       // asked about both: keep both, don't ask
 
+            // 🆕 Is the question even about this policy family? The shared title words
+            // (qualifier and generic words already stripped) are the topic, e.g. "travel".
+            var qualifiers = options.Select(o => o.Label.ToLowerInvariant()).ToArray();
+            var sharedTopicWords = options
+                .Select(o => NormalizeTitleWords(o.SourceFile, qualifiers).AsEnumerable())
+                .Aggregate((a, b) => a.Intersect(b))
+                .ToList();
+            var topicMentioned = sharedTopicWords.Count == 0           // can't tell: keep the old behavior
+                                 || sharedTopicWords.Any(w => TopicWordInText(w, text));
+
             string? pick = named.Count == 1 ? named[0]
                 : (rememberedQualifier != null && options.Any(o => o.Label.Equals(rememberedQualifier, StringComparison.OrdinalIgnoreCase)))
                     ? rememberedQualifier.ToLowerInvariant() : null;
 
-            if (pick == null) { decision.AskOptions = options; return decision; }
+            if (pick == null)
+            {
+                if (!topicMentioned)
+                {
+                    // The pair only surfaced through an anchor or trigger; the question isn't about this topic.
+                    _logger.LogInformation(
+                        "🧭 Policy-variant prompt skipped: question doesn't mention the policy topic ({Topic}) for {Options}",
+                        string.Join("/", sharedTopicWords), string.Join(" vs ", options.Select(o => o.Label)));
+                    return decision;
+                }
+
+                decision.AskOptions = options;
+                return decision;
+            }
 
             var chosen = options.First(o => o.Label.Equals(pick, StringComparison.OrdinalIgnoreCase));
             decision.RejectedSources = options.Where(o => o.SourceFile != chosen.SourceFile).Select(o => o.SourceFile).ToList();
@@ -704,6 +727,14 @@ namespace MEAI_GPT_API.Service.Models
             _logger.LogInformation("🧭 Policy variant auto-resolved to '{Pick}' ({How})", pick,
                 named.Count == 1 ? "named in question" : "remembered from earlier in this session");
             return decision;
+        }
+
+        // "travel" matches "travel", "travelling", "travels". The first 5 letters are used as a stem for longer words.
+        private static bool TopicWordInText(string word, string text)
+        {
+            if (string.IsNullOrWhiteSpace(word)) return false;
+            var stem = word.Length > 5 ? word[..5] : word;
+            return Regex.IsMatch(text, $@"\b{Regex.Escape(stem)}\w*");
         }
 
         private static string Capitalize(string s) => string.IsNullOrEmpty(s) ? s : char.ToUpperInvariant(s[0]) + s[1..];

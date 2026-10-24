@@ -61,7 +61,7 @@ namespace MEAI_GPT_API.Services.Agent
                 // 2. Check factual grounding (for MEAI queries)
                 if (checkFactuality && sources.Any())
                 {
-                    var (isGrounded, reason, isConflict) = await CheckGroundingAsync(response, sources);
+                    var (isGrounded, reason, isConflict) = await CheckGroundingAsync(query, response, sources);
                     result.IsGrounded = isGrounded;
                     result.IsSourceConflict = isConflict;
                     if (!isGrounded && reason != null)
@@ -153,7 +153,8 @@ Answer with ONLY 'yes' or 'no'.";
             }
         }
 
-        private async Task<(bool IsGrounded, string? Reason, bool IsConflict)> CheckGroundingAsync(string response, List<RelevantChunk> sources)
+        private async Task<(bool IsGrounded, string? Reason, bool IsConflict)> CheckGroundingAsync(
+                                             string query, string response, List<RelevantChunk> sources)
         {
             // Previously only the top 3 chunks were shown to the verifier
             // (sources.Take(3)), while generation itself sees the full
@@ -164,37 +165,69 @@ Answer with ONLY 'yes' or 'no'.";
             // still keeping the prompt bounded.
             var sourceText = string.Join("\n\n", sources.Take(6).Select(s => s.Text));
 
-            // 🆕 CHANGED: was a plain yes/no. Real case: Parking Policy says
-            // "AM & above get allotted parking slots"; Company Car Support
-            // Policy separately says employees on the car loan scheme must
-            // park outside due to space constraints. The response asserted
-            // the Parking Policy's rule, which genuinely IS in the sources —
-            // this isn't a hallucination, it's two real policies disagreeing
-            // and the model silently picking one side. A plain yes/no can't
-            // tell these apart, so both got flagged identically as "no,
-            // ungrounded" and handled with a same-prompt model-swap retry,
-            // which can't fix a conflict the ORIGINAL prompt never asked the
-            // model to look for. Now asks for a third verdict specifically
-            // for this case, handled differently in the retry logic (see
-            // ProcessQueryStreamAsync) — regenerated with the SAME model but
-            // explicitly instructed to surface both sides, not swapped to a
-            // "smarter" model hoping it magically knows to do that unprompted.
-            var prompt = $@"Is the following response factually grounded in the source material?
+            var prompt = $@"Evaluate whether the following response is factually grounded in the provided source material.
+
+Employee Question:
+{query}
 
 Source Material:
 {sourceText}
 
-Response:
+Response to Evaluate:
 {response}
 
-Reply on the FIRST line with exactly one of: 'yes', 'no-hallucination', or 'no-conflict'.
-- 'yes': every claim in the response is supported by the source material, with no contradiction between different parts of the source material on this point.
-- 'no-hallucination': the response includes a claim, entity, or figure that is NOT supported by ANY part of the source material — it was invented.
-- 'no-conflict': the response's claim DOES appear in the source material, but a DIFFERENT part of the source material states something that contradicts it on the same point, and the response picked one side without acknowledging the other.
+YOUR TASK
 
-On the second line, give one short sentence explaining why — if it's a conflict, briefly name what each conflicting part says.
+Independently analyze the response against the entire source material. Do not assume that the source documents are consistent. Identify unsupported claims, contradictory statements, exceptions, conditions, and differences in applicability.
 
-IMPORTANT EXCEPTION: if the response performs a CALCULATION using a rate, ratio, or formula that IS stated in the source material (e.g. the source says ""one day of leave per 10.73 days worked"" and the response computes the result of dividing a number the user gave by 10.73), that computed number counts as grounded ('yes') even though the exact figure doesn't appear verbatim in the source — the underlying rate does, and the arithmetic is standard math anyone could verify. Only use 'no-hallucination' for a calculation if the stated rate/formula itself isn't in the source, or if the arithmetic is wrong given that rate.";
+Return exactly one of these verdicts on the FIRST line:
+yes
+no-hallucination
+no-conflict
+
+VERDICT DEFINITIONS
+
+yes:
+Every material factual claim in the response is supported by the source material, and there is no unresolved contradiction in the source material that materially affects the response. The response accurately represents applicable conditions, exceptions, and qualifications.
+
+no-hallucination:
+The response contains at least one material factual claim that cannot be supported by any relevant part of the source material, and the issue is not better classified as no-conflict.
+
+This includes invented facts, unsupported policy statements, fabricated conditions or exceptions, incorrect calculations, and conclusions based on assumptions that are not established by the available evidence.
+
+no-conflict:
+The response makes a claim that is supported by at least one part of the source material, but another relevant part of the source material contradicts or materially conflicts with that claim. The response presents one position as definitive without acknowledging the conflicting evidence.
+
+Apply this verdict only when the conflicting statements concern the same material question and their applicability overlaps or cannot be reconciled from the available evidence. Do not classify compatible rules, different employee categories, conditional policies, exceptions, or policies addressing different circumstances as contradictions when their scopes can be reconciled.
+
+ANALYSIS REQUIREMENTS
+
+1. Examine all relevant source passages, not just the first matching passage.
+2. Compare the response's claims against both supporting and contradicting evidence.
+3. Determine whether apparent contradictions can be reconciled by differences in scope, eligibility, dates, conditions, precedence, or exceptions. Use such distinctions only when supported by the source material.
+4. Do not assume that one document overrides another unless the source establishes that precedence.
+5. Do not invent missing context to resolve a contradiction or to establish that two rules apply to the same situation.
+6. If applicability cannot be determined from the available evidence, distinguish uncertainty from a proven contradiction. Classify unsupported conclusions as no-hallucination unless the source itself contains a relevant unresolved conflict supporting no-conflict.
+7. If both supporting and conflicting evidence exist, determine whether the response acknowledges the disagreement and accurately qualifies its conclusion.
+8. Treat figures, names, and amounts explicitly supplied by the employee in the question as employee-provided information, not as hallucinations merely because they do not appear in the source material.
+9. A calculation is grounded if its formula or rate is supported by the source, its inputs are established, and the arithmetic is correct. The calculated result does not need to appear verbatim in the source. If the formula is unsupported, an input is unjustified, or the arithmetic is incorrect, classify the relevant claim as no-hallucination.
+10. Evaluate factual grounding, not writing quality, completeness alone, or whether the response matches your preferred interpretation.
+
+CLASSIFICATION PRIORITY
+
+- First, determine whether the response contains a material claim contradicted by relevant source evidence.
+- If that claim is supported by one source passage but materially contradicted by another relevant passage, and the response fails to acknowledge the conflict, return no-conflict.
+- Otherwise, if any material claim is unsupported by the source material, return no-hallucination.
+- Otherwise, return yes.
+
+If the response contains both a genuine source conflict and an unrelated unsupported claim, return no-conflict if the conflict materially affects the response. Explain the additional unsupported claim in the second line when concise. Do not overlook either issue.
+
+OUTPUT FORMAT
+
+Line 1: Exactly one verdict: yes, no-hallucination, or no-conflict.
+Line 2: One concise, evidence-based sentence explaining the verdict. For no-conflict, identify the conflicting claims or policies and explain the unresolved disagreement. For no-hallucination, identify the unsupported claim. For yes, explain why the response is adequately grounded.
+
+Do not output your internal reasoning, analysis steps, headings, Markdown, or additional lines.";
 
             try
             {
