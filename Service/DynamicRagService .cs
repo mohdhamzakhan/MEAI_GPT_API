@@ -69,6 +69,8 @@ namespace MEAI_GPT_API.Services
         private readonly IMetricsCollector _metrics;
         private readonly Conversation _conversation;
         private static readonly ConcurrentDictionary<string, ConversationContext> _sessionContexts = new();
+        private sealed record StoredAttachment(string FileName, string Text, DateTime StoredAt);
+        private static readonly ConcurrentDictionary<string, List<StoredAttachment>> _sessionAttachments = new();
         private static readonly ConcurrentBag<CorrectionEntry> _correctionsCache = new();
         private readonly object _lockObject = new();
         private readonly string _currentUser = "system";
@@ -234,6 +236,7 @@ namespace MEAI_GPT_API.Services
         }
 
         private readonly IWebSearchService _webSearch;
+        private readonly QuestionLearningService _questionLearning;
         public DynamicRagService(
           IModelManager modelManager,
           DynamicCollectionManager collectionManager,
@@ -276,7 +279,8 @@ namespace MEAI_GPT_API.Services
           GradeEligibilityService gradeEligibilityService,
           IEmployeeDirectoryService employeeDirectory,
           RagInitializationState initState,
-          IWebSearchService webSearch)
+          IWebSearchService webSearch,
+          QuestionLearningService questionLearning)
         {
             _modelManager = modelManager;
             _collectionManager = collectionManager;
@@ -330,6 +334,7 @@ namespace MEAI_GPT_API.Services
             _gradeEligibilityService = gradeEligibilityService;
             _employeeDirectory = employeeDirectory;
             _webSearch = webSearch;
+            _questionLearning = questionLearning;
         }
 
         //For Agentic AI
@@ -563,7 +568,49 @@ namespace MEAI_GPT_API.Services
 
             return contextFiles;
         }
+        private void RememberAttachments(string sessionId, List<ChatAttachment> attachments)
+        {
+            var docs = attachments
+                .Where(a => !a.IsImage && !string.IsNullOrWhiteSpace(a.ExtractedText))
+                .ToList();
+            if (!docs.Any()) return;
 
+            var list = _sessionAttachments.GetOrAdd(sessionId, _ => new List<StoredAttachment>());
+            lock (list)
+            {
+                foreach (var d in docs)
+                {
+                    list.RemoveAll(x => x.FileName.Equals(d.FileName, StringComparison.OrdinalIgnoreCase));
+                    list.Add(new StoredAttachment(d.FileName, d.ExtractedText!, DateTime.Now));
+                }
+                while (list.Count > 5) list.RemoveAt(0);   // keep the 5 most recent files
+            }
+            _logger.LogInformation("📎 Remembered {N} attachment(s) for session {S}", docs.Count, sessionId);
+        }
+
+        private string BuildRememberedAttachmentContext(string sessionId, int maxTotalChars = 24000)
+        {
+            if (!_sessionAttachments.TryGetValue(sessionId, out var list)) return "";
+
+            List<StoredAttachment> fresh;
+            lock (list) fresh = list.Where(a => DateTime.Now - a.StoredAt < TimeSpan.FromHours(2)).ToList();
+            if (!fresh.Any()) return "";
+
+            var perFile = maxTotalChars / fresh.Count;
+            var sb = new StringBuilder();
+            sb.AppendLine();
+            sb.AppendLine("The user attached the file(s) below earlier in this conversation. " +
+                          "Answer follow-up questions about them using ONLY this content. " +
+                          "If the answer is not in it, say so. Never invent names, numbers, or scores.");
+            foreach (var a in fresh)
+            {
+                var text = a.Text.Length > perFile ? a.Text[..perFile] + "\n...(truncated)" : a.Text;
+                sb.AppendLine($"===== ATTACHED FILE: {a.FileName} =====");
+                sb.AppendLine(text);
+                sb.AppendLine("===== END OF FILE =====");
+            }
+            return sb.ToString();
+        }
         private List<string> GetPolicyFiles(string plant)
         {
             var policyFiles = new List<string>();
@@ -1735,6 +1782,11 @@ namespace MEAI_GPT_API.Services
                 if (conversation != null)
                 {
                     await _conversationStorage.MarkAsAppreciatedAsync(conversation.Id);
+                    if (conversation.Sources is { Count: > 0 and <= 2 })
+                    {
+                        foreach (var src in conversation.Sources)
+                            await _questionLearning.PromoteAppreciatedAsync(question, src);
+                    }
                     _logger.LogInformation($"⭐ Marked conversation {conversation.Id} as appreciated in database");
                 }
 
@@ -2285,6 +2337,13 @@ namespace MEAI_GPT_API.Services
                     {
                         _logger.LogInformation($"Cleaned up expired session: {sessionId}");
                     }
+                }
+
+                foreach (var kv in _sessionAttachments.ToList())
+                {
+                    bool stale;
+                    lock (kv.Value) stale = kv.Value.All(a => DateTime.Now - a.StoredAt > TimeSpan.FromHours(2));
+                    if (stale) _sessionAttachments.TryRemove(kv.Key, out _);
                 }
             }
             catch (Exception ex)
@@ -5022,21 +5081,31 @@ Answer directly without introducing yourself.";
                 // strongest signal available, stronger than raw similarity,
                 // stronger than the auto-generated trigger map, and stronger than
                 // the document router's LLM guess (which has been observed to
-                // fail outright on some queries).
-                var learnedMatches = _learnedTriggerService.MatchTriggers(query);
-                foreach (var (anchorText, sourceFile) in learnedMatches)
+                var learnedMatches = _learnedTriggerService.MatchTriggersDetailed(query);
+                foreach (var m in learnedMatches)
                 {
-                    var chunks = await SearchChromaDBAsync(anchorText, embeddingModel, 6, plant);
+                    var chunks = await SearchChromaDBAsync(m.AnchorText, embeddingModel, 6, plant);
                     var best = chunks.Take(4).ToList();
-                    foreach (var c in best) c.RelevanceScore *= 1.30;
+
+                    // human-confirmed > thumbs-up > auto-learned
+                    var boost = m.Origin == LearnedTriggerService.OriginAuto ? 1.15
+                              : m.Origin == LearnedTriggerService.OriginAppreciation ? 1.20
+                              : 1.30;
+                    foreach (var c in best) c.RelevanceScore *= boost;
+
                     allChunks.AddRange(best);
                     anchorMatchedChunks.AddRange(best);
-                    // ✅ Registered as deterministic, same tier as topic anchors and
-                    // policy triggers (in fact stronger — human-confirmed, not
-                    // keyword/LLM-matched) — so if DocumentRouterService's guess
-                    // disagrees with a learned correction on the same chunk, the
-                    // router doesn't get to claim it as a "router-only" pick.
-                    foreach (var c in best) deterministicAnchorTexts.Add(c.Text);
+
+                    if (m.Origin == LearnedTriggerService.OriginAuto)
+                    {
+                        // auto-learned: lower-trust tier (needs the higher score floor), same as router guesses
+                        foreach (var c in best)
+                            if (!deterministicAnchorTexts.Contains(c.Text)) routerOnlyAnchorTexts.Add(c.Text);
+                    }
+                    else
+                    {
+                        foreach (var c in best) deterministicAnchorTexts.Add(c.Text);
+                    }
                 }
 
                 // 2c. Dynamic document router. TopicAnchorService above only
@@ -6118,6 +6187,21 @@ Answer directly without introducing yourself.";
                     _plantLastScan[plant] = DateTime.Now;
                 }
 
+                try
+                {
+                    if (embeddingModels.Any())
+                    {
+                        var indexed = await GetDistinctSourceFilesAsync(embeddingModels.First().Name);
+                        var pruned = await _learnedTriggerService.PruneMissingSourcesAsync(indexed.Select(d => d.SourceFile));
+                        if (pruned > 0)
+                            _logger.LogInformation("🧹 Pruned {N} learned-trigger entries pointing at documents that are no longer indexed", pruned);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Learned trigger pruning skipped");
+                }
+
                 lock (_systemInitLock)
                 {
                     _systemInitialized = true;
@@ -7183,6 +7267,7 @@ Answer directly without introducing yourself.";
                 systemPrompt += BuildWebContext(webResults);
 
             systemPrompt = ApplyPersonaToSystemPrompt(systemPrompt, persona);
+            systemPrompt += BuildRememberedAttachmentContext(sessionId);
 
             await foreach (var token in StreamGenerateWithHistoryAsync(
                   modelName, systemPrompt, history, processedQuestion,
@@ -8702,14 +8787,18 @@ Answer directly without introducing yourself.";
             // than treating it as a fresh, standalone query — a bare
             // answer like "the Sanand plant one" means nothing to
             // retrieval on its own without the question it's answering.
+
+            bool questionWasMerged = false;
             if (conversationContext.AwaitingGeneralClarification && !string.IsNullOrWhiteSpace(conversationContext.PendingGeneralClarificationOriginalQuestion))
             {
                 var originalQuestion = conversationContext.PendingGeneralClarificationOriginalQuestion;
                 var clarificationAnswer = question;
+                questionWasMerged = true;
 
                 _logger.LogInformation($"✅ Resolving pending clarification. Original: '{originalQuestion}' | Employee answered: '{clarificationAnswer}'");
 
                 question = $"{originalQuestion} (Additional context from employee: {clarificationAnswer})";
+
 
                 conversationContext.AwaitingGeneralClarification = false;
                 conversationContext.PendingGeneralClarificationQuestion = null;
@@ -8974,6 +9063,7 @@ Answer directly without introducing yourself.";
 
                 if (!string.IsNullOrWhiteSpace(full.ToString()))
                 {
+
                     _ = SaveConversationSafelyAsync(
                       agentContext, question, full.ToString(),
                       new List<RelevantChunk>(), genModel, embModel,
@@ -9544,7 +9634,7 @@ Answer directly without introducing yourself.";
                     conversationContext.PendingGeneralClarificationQuestion = clarifyingQuestion;
                     conversationContext.PendingGeneralClarificationOriginalQuestion = question;
                     conversationContext.ClarificationAttemptCount++;
-
+                    askedClarification = true;
                     _logger.LogInformation($"❓ Asking clarifying question instead of refusing: {clarifyingQuestion}");
 
                     finalAnswer = clarifyingQuestion;
@@ -9615,6 +9705,15 @@ Answer directly without introducing yourself.";
                 Type = "response",
                 Content = finalAnswer
             };
+
+            if (verification != null && verification.IsGrounded && verification.IsComplete &&
+                !verification.NeedsReprocessing && !declined && !askedClarification &&
+                !questionWasMerged && finalChunks.Any())
+            {
+                _ = _questionLearning.RecordVerifiedAsync(
+                    question, userId ?? "system",
+                    finalChunks.Select(c => c.Source), verification.OverallConfidence);
+            }
 
             // ============================
             // SAVE TO DATABASE
@@ -10073,6 +10172,7 @@ Answer directly without introducing yourself.";
             }
 
             var fullQuestion = BuildQuestionWithAttachments(question, attachments);
+            RememberAttachments(agentContext.SessionId, attachments);
 
             if (policyChunks.Any())
                 yield return new StreamChunk { Type = "sources", Sources = policyChunks.Select(c => c.Source).Distinct().ToList() };

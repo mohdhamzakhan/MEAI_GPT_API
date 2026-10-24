@@ -5,6 +5,26 @@ VisualStudioVersion = 17.14.36310.24
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MEAI_GPT_API", "MEAI_GPT_API.csproj", "{89883292-BB61-4792-BF63-597341EA7572}"
 EndProject
+Project("{E24C65DC-7377-472B-9ABA-BC803B73C61A}") = "MEAIGPT_Website", "..\..\MEAIGPT_Website\", "{C674F088-BC1D-FF45-A075-C2DF55C72071}"
+	ProjectSection(WebsiteProperties) = preProject
+		TargetFrameworkMoniker = ".NETFramework,Version%3Dv4.0"
+		Debug.AspNetCompiler.VirtualPath = "/localhost_59752"
+		Debug.AspNetCompiler.PhysicalPath = "..\..\MEAIGPT_Website\"
+		Debug.AspNetCompiler.TargetPath = "PrecompiledWeb\localhost_59752\"
+		Debug.AspNetCompiler.Updateable = "true"
+		Debug.AspNetCompiler.ForceOverwrite = "true"
+		Debug.AspNetCompiler.FixedNames = "false"
+		Debug.AspNetCompiler.Debug = "True"
+		Release.AspNetCompiler.VirtualPath = "/localhost_59752"
+		Release.AspNetCompiler.PhysicalPath = "..\..\MEAIGPT_Website\"
+		Release.AspNetCompiler.TargetPath = "PrecompiledWeb\localhost_59752\"
+		Release.AspNetCompiler.Updateable = "true"
+		Release.AspNetCompiler.ForceOverwrite = "true"
+		Release.AspNetCompiler.FixedNames = "false"
+		Release.AspNetCompiler.Debug = "False"
+		VWDPort = "59752"
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +35,10 @@ Global
 		{89883292-BB61-4792-BF63-597341EA7572}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{89883292-BB61-4792-BF63-597341EA7572}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{89883292-BB61-4792-BF63-597341EA7572}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C674F088-BC1D-FF45-A075-C2DF55C72071}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C674F088-BC1D-FF45-A075-C2DF55C72071}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C674F088-BC1D-FF45-A075-C2DF55C72071}.Release|Any CPU.ActiveCfg = Debug|Any CPU
+		{C674F088-BC1D-FF45-A075-C2DF55C72071}.Release|Any CPU.Build.0 = Debug|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

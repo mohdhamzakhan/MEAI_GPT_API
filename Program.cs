@@ -322,7 +322,8 @@ builder.Services.AddScoped<IModelManager>(provider =>
 
     return new ModelManager(httpClient, logger, configOptions);
 });
-
+builder.Services.Configure<AutoLearningOptions>(builder.Configuration.GetSection("AutoLearning"));
+builder.Services.AddScoped<QuestionLearningService>();
 builder.Services.AddSingleton<DynamicCollectionManager>(provider =>
 {
     var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();

@@ -1,52 +1,39 @@
-﻿// Service/LearnedTriggerService.cs
-//
-// Closes the loop that PolicyTriggerService and DocumentRouterService can't:
-// both are automated (LLM-generated triggers, LLM-routed document guesses)
-// and can be wrong, as seen in practice (the router matching "Foreign Travel
-// Policy" and "Product Cybersecurity Policy" for a resignation question).
-// A human correction is ground truth — when someone clicks "Correct" and
-// confirms the right answer, this service extracts the actual question that
-// failed and permanently binds it to the correct document, so the exact
-// same question (or a close paraphrase) is never mis-routed again.
-//
-// Deliberately kept as a SEPARATE store from policy-triggers.json rather
-// than merged into it: this file is auditable ("what did a human actually
-// confirm") and safe to review/prune independently of the LLM-generated
-// file, which gets fully regenerated on content changes.
-
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace MEAI_GPT_API.Service
 {
     public class LearnedTriggerEntry
     {
-        [JsonPropertyName("SourceFile")]
-        public string SourceFile { get; set; } = string.Empty;
+        [JsonPropertyName("SourceFile")] public string SourceFile { get; set; } = string.Empty;
+        [JsonPropertyName("Triggers")] public List<string> Triggers { get; set; } = new();
+        [JsonPropertyName("AnchorText")] public string AnchorText { get; set; } = string.Empty;
+        [JsonPropertyName("LearnedAt")] public DateTime LearnedAt { get; set; } = DateTime.UtcNow;
+        [JsonPropertyName("CorrectionCount")] public int CorrectionCount { get; set; } = 1;
 
-        // The ORIGINAL failing question, normalized. Unlike PolicyTriggerService's
-        // hand/LLM-picked short phrases, this is the actual query that was
-        // gotten wrong — the strongest possible signal for "if you see this
-        // again, here's the right document."
-        [JsonPropertyName("Triggers")]
-        public List<string> Triggers { get; set; } = new();
-
-        [JsonPropertyName("AnchorText")]
-        public string AnchorText { get; set; } = string.Empty;
-
-        [JsonPropertyName("LearnedAt")]
-        public DateTime LearnedAt { get; set; } = DateTime.UtcNow;
-
-        [JsonPropertyName("CorrectionCount")]
-        public int CorrectionCount { get; set; } = 1;
+        // correction (human/admin) > appreciation (user thumbs-up) > auto (threshold-learned).
+        // Old files have no Origin, so they default to the human tier.
+        [JsonPropertyName("Origin")] public string Origin { get; set; } = "correction";
+        [JsonPropertyName("LastMatchedAt")] public DateTime? LastMatchedAt { get; set; }
+        [JsonPropertyName("MatchCount")] public int MatchCount { get; set; }
     }
+
+    public record LearnedMatch(string AnchorText, string SourceFile, string Origin);
 
     public class LearnedTriggerService
     {
+        public const string OriginCorrection = "correction";
+        public const string OriginAppreciation = "appreciation";
+        public const string OriginAuto = "auto";
+
+        private static readonly Regex NonWord = new(@"[^\p{L}\p{N}\s]", RegexOptions.Compiled);
+        private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
+
         private readonly ILogger<LearnedTriggerService> _logger;
         private readonly string _filePath;
-        private readonly SemaphoreSlim _fileLock = new(1, 1);
-
+        private readonly SemaphoreSlim _fileLock = new(1, 1);   // serializes writers
+        private readonly object _sync = new();                  // guards _entries for readers and writers
         private List<LearnedTriggerEntry> _entries = new();
 
         public LearnedTriggerService(ILogger<LearnedTriggerService> logger, string filePath)
@@ -62,8 +49,7 @@ namespace MEAI_GPT_API.Service
             {
                 if (File.Exists(_filePath))
                 {
-                    var json = File.ReadAllText(_filePath);
-                    _entries = JsonSerializer.Deserialize<List<LearnedTriggerEntry>>(json) ?? new();
+                    _entries = JsonSerializer.Deserialize<List<LearnedTriggerEntry>>(File.ReadAllText(_filePath)) ?? new();
                     _logger.LogInformation($"📋 Loaded {_entries.Count} learned trigger entries from {_filePath}");
                 }
             }
@@ -74,77 +60,65 @@ namespace MEAI_GPT_API.Service
             }
         }
 
-        // Normalizes the same way PolicyTriggerService's MatchTriggers
-        // compares (lowercase substring match) — kept simple and
-        // predictable rather than fuzzy, since this is meant to catch exact
-        // or near-exact repeats of a question that was already gotten
-        // wrong once, not loosely related questions.
+        // ───────────── normalization & matching ─────────────
+
         private static string Normalize(string text) =>
-            text.Trim().ToLowerInvariant();
+            Regex.Replace(NonWord.Replace(text.ToLowerInvariant(), " "), @"\s+", " ").Trim();
 
-        /// <summary>
-        /// Called when a human correction is saved. Binds the ORIGINAL
-        /// question (not the correction text) to the given source
-        /// document, so future occurrences of this same question are
-        /// anchored correctly regardless of what embedding similarity,
-        /// PolicyTriggerService, or DocumentRouterService independently
-        /// decide. If this exact question already has a learned entry
-        /// pointing elsewhere, it's overwritten — a newer human correction
-        /// always wins over a stale one.
-        /// </summary>
-        public async Task PromoteAsync(string originalQuestion, string correctSourceFile)
+        private static HashSet<string> Tokens(string norm) =>
+            norm.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
+
+        private static int Rank(string? origin) => origin switch
         {
-            if (string.IsNullOrWhiteSpace(originalQuestion) || string.IsNullOrWhiteSpace(correctSourceFile))
-                return;
+            OriginCorrection => 3,
+            OriginAppreciation => 2,
+            OriginAuto => 1,
+            _ => 3
+        };
 
-            var normalizedQuestion = Normalize(originalQuestion);
+        // Exact equality always matches. Otherwise word-based: a short query
+        // can no longer match by being a substring of a longer trigger.
+        private static bool IsMatch(string query, string trigger)
+        {
+            if (query == trigger) return true;
 
+            var q = Tokens(query);
+            var t = Tokens(trigger);
+            if (q.Count < 3 || t.Count < 3) return false;
+
+            var inter = q.Intersect(t).Count();
+
+            // near-identical wording
+            if ((double)inter / q.Union(t).Count() >= 0.8) return true;
+
+            // one side fully contained in the other (e.g. a topic-anchored
+            // retrieval query that wraps the original question)
+            var smaller = Math.Min(q.Count, t.Count);
+            return smaller >= 4 && inter == smaller;
+        }
+
+        // ───────────── writes ─────────────
+
+        private async Task<bool> MutateAsync(Func<bool> mutate)
+        {
             await _fileLock.WaitAsync();
             try
             {
-                var existing = _entries.FirstOrDefault(e =>
-                    e.Triggers.Any(t => string.Equals(t, normalizedQuestion, StringComparison.OrdinalIgnoreCase)));
-
-                if (existing != null)
+                string json;
+                lock (_sync)
                 {
-                    if (string.Equals(existing.SourceFile, correctSourceFile, StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Same question corrected the same way again — just bump the
-                        // confidence counter, useful later for surfacing "well-confirmed"
-                        // vs. "corrected once" entries if this ever needs pruning.
-                        existing.CorrectionCount++;
-                    }
-                    else
-                    {
-                        // A newer correction disagrees with a previous one — trust the
-                        // latest human judgment over the older one.
-                        _logger.LogWarning(
-                            "Learned trigger for '{Question}' changing source from {Old} to {New} — newer correction overrides",
-                            originalQuestion, existing.SourceFile, correctSourceFile);
-                        existing.SourceFile = correctSourceFile;
-                        existing.AnchorText = ExtractDocumentTitleTerms(correctSourceFile);
-                        existing.LearnedAt = DateTime.UtcNow;
-                        existing.CorrectionCount = 1;
-                    }
-                }
-                else
-                {
-                    _entries.Add(new LearnedTriggerEntry
-                    {
-                        SourceFile = correctSourceFile,
-                        Triggers = new List<string> { normalizedQuestion },
-                        AnchorText = ExtractDocumentTitleTerms(correctSourceFile)
-                    });
+                    if (!mutate()) return false;
+                    json = JsonSerializer.Serialize(_entries, JsonOpts);
                 }
 
-                var options = new JsonSerializerOptions { WriteIndented = true };
                 var dir = Path.GetDirectoryName(_filePath);
                 if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-                await File.WriteAllTextAsync(_filePath, JsonSerializer.Serialize(_entries, options));
 
-                _logger.LogInformation(
-                    "✅ Learned trigger promoted: '{Question}' -> {Source}",
-                    originalQuestion, correctSourceFile);
+                // write then swap, so a crash mid-write can't corrupt the file
+                var tmp = _filePath + ".tmp";
+                await File.WriteAllTextAsync(tmp, json);
+                File.Move(tmp, _filePath, overwrite: true);
+                return true;
             }
             finally
             {
@@ -152,61 +126,167 @@ namespace MEAI_GPT_API.Service
             }
         }
 
-        /// <summary>
-        /// Same shape/contract as PolicyTriggerService.MatchTriggers, so the
-        /// caller in GetRelevantChunksWithExpansionAsync can merge both
-        /// with identical handling — just a stronger boost, since this is
-        /// human-verified rather than LLM-generated or LLM-routed.
-        /// </summary>
-        public List<(string AnchorText, string SourceFile)> MatchTriggers(string query)
+        private void AddTrigger(string norm, string sourceName, string origin)
         {
-            if (string.IsNullOrWhiteSpace(query) || _entries.Count == 0)
-                return new();
+            var target = _entries.FirstOrDefault(e =>
+                e.Origin == origin && e.SourceFile.Equals(sourceName, StringComparison.OrdinalIgnoreCase));
 
-            var normalizedQuery = Normalize(query);
-            var matches = new List<(string AnchorText, string SourceFile)>();
-
-            foreach (var entry in _entries)
+            if (target == null)
             {
-                // Substring match in either direction: catches both a verbatim
-                // repeat and a slightly-trimmed/expanded rephrasing that still
-                // contains the original question as a substring, or vice versa.
-                if (entry.Triggers.Any(t => normalizedQuery.Contains(t) || t.Contains(normalizedQuery)))
+                target = new LearnedTriggerEntry
                 {
-                    matches.Add((entry.AnchorText, entry.SourceFile));
+                    SourceFile = sourceName,
+                    Origin = origin,
+                    AnchorText = ExtractDocumentTitleTerms(sourceName)
+                };
+                _entries.Add(target);
+            }
+
+            target.Triggers.Add(norm);
+            target.LearnedAt = DateTime.UtcNow;
+        }
+
+        /// <summary>
+        /// Binds a question to a document. Higher tiers are never overwritten by
+        /// lower ones (auto can't undo a human correction); equal or higher tiers
+        /// replace an older binding for the same question.
+        /// </summary>
+        public async Task PromoteAsync(string originalQuestion, string correctSourceFile,
+            string origin = OriginCorrection)
+        {
+            if (string.IsNullOrWhiteSpace(originalQuestion) || string.IsNullOrWhiteSpace(correctSourceFile))
+                return;
+
+            var norm = Normalize(originalQuestion);
+            if (norm.Length == 0) return;
+            var sourceName = Path.GetFileName(correctSourceFile);
+
+            var changed = await MutateAsync(() =>
+            {
+                var existing = _entries.FirstOrDefault(e => e.Triggers.Contains(norm));
+
+                if (existing != null)
+                {
+                    var sameSource = existing.SourceFile.Equals(sourceName, StringComparison.OrdinalIgnoreCase);
+
+                    if (sameSource && Rank(origin) <= Rank(existing.Origin))
+                    {
+                        existing.CorrectionCount++;          // same question, same document, confirmed again
+                        return true;
+                    }
+
+                    if (!sameSource && Rank(origin) < Rank(existing.Origin))
+                    {
+                        _logger.LogInformation(
+                            "Learned trigger for '{Q}' kept at {Old} ({OldOrigin}); lower-tier {Origin} suggestion for {New} ignored",
+                            originalQuestion, existing.SourceFile, existing.Origin, origin, sourceName);
+                        return false;
+                    }
+
+                    if (!sameSource)
+                        _logger.LogWarning("Learned trigger for '{Q}' moving from {Old} to {New} ({Origin})",
+                            originalQuestion, existing.SourceFile, sourceName, origin);
+
+                    // move this one trigger (not the whole entry) to its new home/tier
+                    existing.Triggers.Remove(norm);
+                    if (existing.Triggers.Count == 0) _entries.Remove(existing);
+                }
+
+                AddTrigger(norm, sourceName, origin);
+                return true;
+            });
+
+            if (changed)
+                _logger.LogInformation("✅ Learned trigger promoted ({Origin}): '{Q}' -> {Src}",
+                    origin, originalQuestion, sourceName);
+        }
+
+        // ───────────── reads ─────────────
+
+        public List<LearnedMatch> MatchTriggersDetailed(string query)
+        {
+            if (string.IsNullOrWhiteSpace(query)) return new();
+
+            var norm = Normalize(query);
+            var matches = new List<LearnedMatch>();
+
+            lock (_sync)
+            {
+                foreach (var e in _entries)
+                {
+                    if (!e.Triggers.Any(t => IsMatch(norm, t))) continue;
+                    matches.Add(new LearnedMatch(e.AnchorText, e.SourceFile, e.Origin));
+                    e.MatchCount++;                       // persisted with the next write
+                    e.LastMatchedAt = DateTime.UtcNow;
                 }
             }
 
             if (matches.Count > 0)
-            {
-                _logger.LogInformation(
-                    "🎓 Learned-correction trigger match for '{Query}': {Matches}",
-                    query, string.Join(", ", matches.Select(m => $"{m.SourceFile} <- \"{m.AnchorText}\"")));
-            }
+                _logger.LogInformation("🎓 Learned trigger match for '{Query}': {Matches}", query,
+                    string.Join(", ", matches.Select(m => $"{m.SourceFile} [{m.Origin}]")));
 
             return matches.Distinct().ToList();
         }
 
-        // Duplicated from PolicyTriggerService/DocumentRouterService by design
-        // — see the "kept in sync BY HAND" comment on those. All title-term
-        // extraction call sites must agree on the same filename convention.
+        // Kept so existing callers still compile.
+        public List<(string AnchorText, string SourceFile)> MatchTriggers(string query) =>
+            MatchTriggersDetailed(query).Select(m => (m.AnchorText, m.SourceFile)).Distinct().ToList();
+
+        // ───────────── admin / maintenance ─────────────
+
+        public List<LearnedTriggerEntry> GetAll()
+        {
+            lock (_sync)
+                return _entries.Select(e => new LearnedTriggerEntry
+                {
+                    SourceFile = e.SourceFile,
+                    Triggers = e.Triggers.ToList(),
+                    AnchorText = e.AnchorText,
+                    LearnedAt = e.LearnedAt,
+                    CorrectionCount = e.CorrectionCount,
+                    Origin = e.Origin,
+                    LastMatchedAt = e.LastMatchedAt,
+                    MatchCount = e.MatchCount
+                }).ToList();
+        }
+
+        public Task<bool> RemoveTriggerAsync(string question) =>
+            MutateAsync(() =>
+            {
+                var norm = Normalize(question);
+                var e = _entries.FirstOrDefault(x => x.Triggers.Contains(norm));
+                if (e == null) return false;
+                e.Triggers.Remove(norm);
+                if (e.Triggers.Count == 0) _entries.Remove(e);
+                return true;
+            });
+
+        /// <summary>Drops entries whose document is no longer indexed. Never prunes against an empty list.</summary>
+        public async Task<int> PruneMissingSourcesAsync(IEnumerable<string> indexedFileNames)
+        {
+            var existing = new HashSet<string>(
+                indexedFileNames.Select(f => Path.GetFileName(f)), StringComparer.OrdinalIgnoreCase);
+            if (existing.Count == 0) return 0;
+
+            var removed = 0;
+            await MutateAsync(() =>
+            {
+                removed = _entries.RemoveAll(e => !existing.Contains(e.SourceFile));
+                return removed > 0;
+            });
+            return removed;
+        }
+
         private static string ExtractDocumentTitleTerms(string fileName)
         {
             if (string.IsNullOrWhiteSpace(fileName)) return "";
-
             var name = Path.GetFileNameWithoutExtension(fileName);
 
             var underscoreIdx = name.IndexOf('_');
-            if (underscoreIdx >= 0 && underscoreIdx < 8)
-            {
-                name = name[(underscoreIdx + 1)..];
-            }
+            if (underscoreIdx >= 0 && underscoreIdx < 8) name = name[(underscoreIdx + 1)..];
 
             var parenIdx = name.IndexOf('(');
-            if (parenIdx >= 0)
-            {
-                name = name[..parenIdx];
-            }
+            if (parenIdx >= 0) name = name[..parenIdx];
 
             return string.Join(' ', name.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim();
         }
