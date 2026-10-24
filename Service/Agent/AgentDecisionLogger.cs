@@ -7,12 +7,15 @@ namespace MEAI_GPT_API.Services.Agent
         private static readonly object _lock = new();
         private readonly ILogger<AgentDecisionLogger> _logger;
         private readonly string _logDir;
+        private readonly string _logFile;
+        private const long MaxFileBytes = 10 * 1024 * 1024;   // rotate at 10 MB
         private const int RetentionDays = 30;
 
         public AgentDecisionLogger(ILogger<AgentDecisionLogger> logger)
         {
             _logger = logger;
             _logDir = Path.Combine(AppContext.BaseDirectory, "Logs");
+            _logFile = Path.Combine(_logDir, "agent-decisions.jsonl");
             Directory.CreateDirectory(_logDir);
             CleanupOldFiles();
         }
@@ -22,11 +25,11 @@ namespace MEAI_GPT_API.Services.Agent
             try
             {
                 var json = JsonSerializer.Serialize(decision);
-                var file = Path.Combine(_logDir, $"agent-decisions-{DateTime.Now:yyyy-MM-dd}.jsonl");
 
-                lock (_lock)   // one writer at a time
+                lock (_lock)
                 {
-                    File.AppendAllText(file, json + Environment.NewLine);
+                    RotateIfNeeded();
+                    File.AppendAllText(_logFile, json + Environment.NewLine);
                 }
 
                 _logger.LogInformation("🤖 Agent Decision: {Phase} -> {Decision} (Confidence: {Confidence:P0})",
@@ -51,10 +54,20 @@ namespace MEAI_GPT_API.Services.Agent
             });
         }
 
+        private void RotateIfNeeded()
+        {
+            var info = new FileInfo(_logFile);
+            if (!info.Exists || info.Length < MaxFileBytes) return;
+
+            var archive = Path.Combine(_logDir, $"agent-decisions-{DateTime.Now:yyyyMMdd-HHmmss}.jsonl");
+            File.Move(_logFile, archive);
+        }
+
         private void CleanupOldFiles()
         {
             try
             {
+                // only archives; the live agent-decisions.jsonl doesn't match this pattern
                 foreach (var f in Directory.GetFiles(_logDir, "agent-decisions-*.jsonl"))
                     if (File.GetLastWriteTime(f) < DateTime.Now.AddDays(-RetentionDays))
                         File.Delete(f);

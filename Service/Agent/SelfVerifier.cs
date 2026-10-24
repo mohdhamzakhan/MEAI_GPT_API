@@ -43,7 +43,8 @@ namespace MEAI_GPT_API.Services.Agent
             string query,
             string response,
             List<RelevantChunk> sources,
-            bool checkFactuality = true)
+            bool checkFactuality = true,
+            string? sessionId = null)
         {
             var result = new VerificationResult
             {
@@ -94,7 +95,8 @@ namespace MEAI_GPT_API.Services.Agent
                     Phase = "SelfVerification",
                     DecisionMade = result.NeedsReprocessing ? "RETRY_NEEDED" : "APPROVED",
                     Reasoning = $"Confidence: {result.OverallConfidence:P0}, Complete: {result.IsComplete}, Grounded: {result.IsGrounded}",
-                    Confidence = result.OverallConfidence
+                    Confidence = result.OverallConfidence,
+                    SessionId = sessionId
                 });
 
                 return result;

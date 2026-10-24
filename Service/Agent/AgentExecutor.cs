@@ -147,7 +147,8 @@ namespace MEAI_GPT_API.Services.Agent
                     Phase = $"Step_{step.Name}",
                     DecisionMade = toolResult.Success ? "Success" : "Failed",
                     Reasoning = toolResult.ErrorMessage ?? "Completed successfully",
-                    Confidence = toolResult.Confidence
+                    Confidence = toolResult.Confidence,
+                    SessionId = context.SessionId
                 });
 
                 return stepResult;

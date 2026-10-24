@@ -30,7 +30,7 @@ namespace MEAI_GPT_API.Service
         private readonly ILogger<DocumentRouterService> _logger;
 
         private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(15);
-        private readonly ConcurrentDictionary<string, (DateTime CachedAt, List<(string SourceFile, string Title)> Docs)> _cache = new();
+        private static readonly ConcurrentDictionary<string, (DateTime CachedAt, List<(string SourceFile, string Title)> Docs)> _cache = new();
 
         // Tags that mean "visible regardless of which plant is asking" --
         // mirrors the metadata["plant"] values assigned during indexing in
@@ -51,6 +51,21 @@ namespace MEAI_GPT_API.Service
             _collectionManager = collectionManager;
             _config = config;
             _logger = logger;
+        }
+
+        private void LogOllamaTimings(JsonElement root, string model)
+        {
+            static double Ms(JsonElement r, string name) =>
+                r.TryGetProperty(name, out var p) && p.TryGetInt64(out var ns) ? ns / 1_000_000.0 : 0;
+            static long N(JsonElement r, string name) =>
+                r.TryGetProperty(name, out var p) && p.TryGetInt64(out var v) ? v : 0;
+
+            _logger.LogInformation(
+                "⏱️ [router-ollama] model={Model} total={Total:F0}ms load={Load:F0}ms " +
+                "prompt_eval={PE:F0}ms ({PT} tokens) generate={Gen:F0}ms ({GT} tokens)",
+                model, Ms(root, "total_duration"), Ms(root, "load_duration"),
+                Ms(root, "prompt_eval_duration"), N(root, "prompt_eval_count"),
+                Ms(root, "eval_duration"), N(root, "eval_count"));
         }
 
         // Returns document TITLE TERMS (e.g. "Due Settlement Policy"), not
@@ -86,7 +101,8 @@ namespace MEAI_GPT_API.Service
                     model = routerModel,
                     prompt = prompt,
                     stream = false,
-                    think = false, // see SelfVerifier.cs -- Qwen3-family "thinking" burns the token budget before answering; harmless no-op for non-reasoning models like llama3.2
+                    think = false,
+                    keep_alive = _config.GetValue<string>("DocumentRouter:KeepAlive", "24h"),
                     options = new { temperature = 0.0, num_predict = 20 }
                 };
 
@@ -99,6 +115,7 @@ namespace MEAI_GPT_API.Service
 
                 var responseJson = await response.Content.ReadAsStringAsync();
                 using var parsedResponse = JsonDocument.Parse(responseJson);
+                LogOllamaTimings(parsedResponse.RootElement, routerModel);
                 var rawAnswer = parsedResponse.RootElement.TryGetProperty("response", out var respProp)
                     ? respProp.GetString() ?? ""
                     : "";

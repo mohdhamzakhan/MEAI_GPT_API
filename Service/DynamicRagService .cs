@@ -134,6 +134,9 @@ namespace MEAI_GPT_API.Services
         // so this can never leak between concurrent requests. If that
         // registration ever changes to Singleton, this must be revisited.
         private EmployeeRecord? _currentRequester;
+        // Set once per request so every agent-log entry can be tied to its session.
+        // Safe as instance state because this service is Scoped (one instance per request).
+        private string? _logSessionId;
 
         // ✅ NEW: rank of a grade/title EXPLICITLY NAMED IN THE QUESTION TEXT
         // itself (e.g. "what are the benefits for AM" -> Assistant Manager's
@@ -4297,6 +4300,7 @@ Answer directly without introducing yourself.";
         }
         private async Task<List<RelevantChunk>> SearchChromaDBAsync(string query, ModelConfiguration embeddingModel, int maxResults, string plant)
         {
+            var swCall = Stopwatch.StartNew();
             // 1. Normalize plant for strict ChromaDB metadata matching
             var normalizedPlant = plant.Trim().ToLowerInvariant();
 
@@ -4308,11 +4312,13 @@ Answer directly without introducing yourself.";
 
                 // 2. Oversampling: Fetch 3x the requested results to create a broader candidate pool.
                 // This ensures your downstream BM25 and Cross-Encoder re-rankers have the best possible data to sort.
+                var swSec = Stopwatch.StartNew();
                 int candidatePoolSize = maxResults * 3;
                 List<RelevantChunk> candidates;
 
                 // Detect if this is a section-based query
                 var sectionQuery = await _policyAnalysis.DetectAndParseSection(query);
+                Interlocked.Add(ref _sectionDetectMs, swSec.ElapsedMilliseconds);
 
                 if (sectionQuery != null)
                 {
@@ -4339,6 +4345,11 @@ Answer directly without introducing yourself.";
             {
                 _logger.LogError(ex, $"Enhanced search failed for: {query}");
                 return new List<RelevantChunk>();
+            }
+            finally
+            {
+                Interlocked.Increment(ref _searchCalls);
+                Interlocked.Add(ref _searchMs, swCall.ElapsedMilliseconds);
             }
         }
         public async Task LearnFromSuccessfulQuery(string query, string sectionNumber, string documentType, List<RelevantChunk> chunks)
@@ -4971,11 +4982,13 @@ Answer directly without introducing yourself.";
 
             try
             {
+                var timer = new StepTimer(_logger, "expansion");
                 var allChunks = new List<RelevantChunk>();
 
                 // 1. Original query search
                 var originalChunks = await SearchChromaDBAsync(query, embeddingModel, maxResults, plant);
                 allChunks.AddRange(originalChunks);
+                timer.Lap("original query search");
 
                 // 2. Expanded query search
                 var expandedQuery = _abbreviationService.ExpandQueryList(query);
@@ -5002,6 +5015,7 @@ Answer directly without introducing yourself.";
                     foreach (var c in best) c.RelevanceScore *= 1.15;
                     allChunks.AddRange(best);
                 }
+                timer.Lap("abbreviation-expansion searches");
 
                 // 2b. Topic-anchor search. Different gap than the
                 // abbreviation expansion above: that only matches a single
@@ -5049,6 +5063,7 @@ Answer directly without introducing yourself.";
                     anchorMatchedChunks.AddRange(best);
                     foreach (var c in best) deterministicAnchorTexts.Add(c.Text);
                 }
+                timer.Lap("topic anchor searches");
 
                 // 2b. Trigger-anchor expansion search — same pattern as abbreviation
                 // expansion above, but driven by the auto-generated policy-triggers.json
@@ -5071,7 +5086,7 @@ Answer directly without introducing yourself.";
                     anchorMatchedChunks.AddRange(best);
                     foreach (var c in best) deterministicAnchorTexts.Add(c.Text);
                 }
-
+                timer.Lap("policy trigger searches");
                 // 2b-ii. Learned-correction trigger expansion — same pattern as 2b
                 // above, but sourced from LearnedTriggerService: human-confirmed
                 // corrections, not LLM-generated trigger phrases. Boosted higher
@@ -5107,7 +5122,7 @@ Answer directly without introducing yourself.";
                         foreach (var c in best) deterministicAnchorTexts.Add(c.Text);
                     }
                 }
-
+                timer.Lap("learned trigger searches");
                 // 2c. Dynamic document router. TopicAnchorService above only
                 // covers documents someone manually wrote trigger phrases
                 // for -- doesn't scale to 130+ policies. This asks one fast
@@ -5117,6 +5132,7 @@ Answer directly without introducing yourself.";
                 // document config. Fails open (empty list) on any error, so
                 // a router hiccup never blocks the main retrieval path.
                 var routedTitles = await _documentRouterService.RouteAsync(query, plant, embeddingModel.Name);
+                timer.Lap("document router LLM call");
                 foreach (var routedTitle in routedTitles)
                 {
                     var anchoredQuery = $"{query} {routedTitle}";
@@ -5134,7 +5150,7 @@ Answer directly without introducing yourself.";
                             routerOnlyAnchorTexts.Add(c.Text);
                     }
                 }
-
+                timer.Lap("router anchored searches");
                 // 2d. Cross-reference expansion. Found via a real incident: a
                 // Settlement Policy chunk cited "Annexure-4 of Office Computers &
                 // its usage policy" inline, but that referenced policy was never
@@ -5257,7 +5273,7 @@ Answer directly without introducing yourself.";
                         _logger.LogWarning(ex, "Cross-reference expansion failed — continuing without it for this query");
                     }
                 }
-
+                timer.Lap("cross-reference expansion");
                 // 3. Topic-continuity search. A boost applied only AFTER
                 // truncation can't rescue a chunk that never made the
                 // top-maxResults cut in the first place — it can only
@@ -6548,17 +6564,16 @@ Answer directly without introducing yourself.";
                     // every single query has to embed the question here before Chroma
                     // search can run at all, so a slow/overloaded Ollama killed
                     // retrieval outright rather than getting a real retry.
+                    var swEmb = Stopwatch.StartNew();
                     var response = await _ollamaClient.PostAsJsonAsync(
                       "/api/embeddings", request, CancellationToken.None,
                       maxRetries: 3,
                       perAttemptTimeout: TimeSpan.FromSeconds(45),
-                      // 🆕 Only gate DOCUMENT embeddings (indexing-time,
-                      // isQuery: false) against the background-concurrency
-                      // limit. Query embeddings (isQuery: true) are on the
-                      // live request path -- a real user is waiting on this
-                      // response, so it must never be throttled behind
-                      // whatever a bulk refresh happens to be doing.
                       isBackgroundTask: !isQuery);
+                    Interlocked.Increment(ref _embedMisses);
+                    Interlocked.Add(ref _embedMissMs, swEmb.ElapsedMilliseconds);
+                    _logger.LogInformation("⏱️ embedding call (cache miss): {Ms} ms, {Chars} chars, model {Model}",
+                        swEmb.ElapsedMilliseconds, processedText.Length, model.Name);
                     if (response.IsSuccessStatusCode)
                     {
                         var json = await response.Content.ReadAsStringAsync();
@@ -8585,6 +8600,69 @@ Answer directly without introducing yourself.";
             return startsWithWQuestion && !isComplex;
         }
 
+        // ───────── Timing instrumentation (temporary, remove after tuning) ─────────
+        private sealed class StepTimer
+        {
+            private readonly ILogger _log;
+            private readonly string _tag;
+            private readonly Stopwatch _lap = Stopwatch.StartNew();
+            private readonly Stopwatch _total = Stopwatch.StartNew();
+            private readonly string? _filePath;
+            private static readonly object _fileLock = new();
+            public StepTimer(ILogger? log, string tag, string fileName = "timer_log.txt")
+            {
+                _log = log;
+                _tag = tag;
+
+                try
+                {
+                    // Ensures the 'logs' directory exists in the application directory
+                    var logsDirectory = Path.Combine(AppContext.BaseDirectory, "logs");
+                    Directory.CreateDirectory(logsDirectory);
+                    _filePath = Path.Combine(logsDirectory, fileName);
+                }
+                catch
+                {
+                    // Fallback if directory creation fails
+                    _filePath = null;
+                }
+            }
+
+            public void Lap(string step)
+            {
+                var logMessage = $"⏱️ [{_tag}] {step}: {_lap.ElapsedMilliseconds} ms (running total {_total.ElapsedMilliseconds} ms)";
+
+                // 1. Log to standard ILogger (Console, App Insights, etc.)
+                _log?.LogInformation("{Message}", logMessage);
+
+                // 2. Write directly to the dedicated timer log file
+                if (!string.IsNullOrEmpty(_filePath))
+                {
+                    var formattedLine = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {logMessage}{Environment.NewLine}";
+                    try
+                    {
+                        lock (_fileLock) // Thread-safe file writing
+                        {
+                            File.AppendAllText(_filePath, formattedLine);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _log?.LogWarning(ex, "Failed to write step timer log to file.");
+                    }
+                }
+
+                _lap.Restart();
+            }
+        }
+
+        // Per-request counters (safe: DynamicRagService is Scoped)
+        private int _searchCalls;
+        private long _searchMs;
+        private long _sectionDetectMs;
+        private int _embedMisses;
+        private long _embedMissMs;
+
         public async IAsyncEnumerable<StreamChunk> ProcessQueryStreamAsync(
           string question,
           string plant,
@@ -8610,6 +8688,8 @@ Answer directly without introducing yourself.";
         {
             var stopwatch = Stopwatch.StartNew();
 
+            var timer = new StepTimer(_logger, "stream");
+
             // ============================
             // PRE-FLIGHT VALIDATION
             // ============================
@@ -8628,13 +8708,16 @@ Answer directly without introducing yourself.";
                 break;
             }
 
+            timer.Lap("validate + create context");
+
             var agentContext = validationResult.Context!;
+            _logSessionId = agentContext.SessionId;
 
             // ✅ NEW: same per-request resolution as ProcessQueryAsync — see
             // that method's comment for why this is safe as instance state
             // (DynamicRagService is Scoped, one instance per HTTP request).
             _currentRequester = await _employeeDirectory.GetEmployeeInfoAsync(userId ?? "system");
-
+            timer.Lap("employee lookup");
             // ✅ NEW: does the QUESTION ITSELF name a grade ("benefits for
             // AM")? If so, that should drive eligibility filtering for this
             // request regardless of who's actually asking — see
@@ -9017,6 +9100,7 @@ Answer directly without introducing yourself.";
                 yield
                 break;
             }
+            timer.Lap("cache check (appreciated + corrections)");
 
             // ============================
             // NON-MEAI → DIRECT LLM ONLY
@@ -9099,6 +9183,8 @@ Answer directly without introducing yourself.";
                 break;
             }
 
+            timer.Lap("planning");
+
             var plan = planResult.Plan!;
 
             // ============================
@@ -9136,6 +9222,8 @@ Answer directly without introducing yourself.";
 
             var retrievalResult = await ExecuteRetrievalAsync(
               question, embModel, maxResults, plant, agentContext, useReRanking, plan, genModel, conversationContext.EmployeeGrade);
+
+            timer.Lap("retrieval (total)");
 
             var finalChunks = retrievalResult.Chunks;
             var topicChanged = retrievalResult.TopicChanged;
@@ -9332,6 +9420,7 @@ Answer directly without introducing yourself.";
                 break;
             }
 
+            timer.Lap("generation");
             if (string.IsNullOrWhiteSpace(responseText))
             {
                 // ✅ CHANGED: was an immediate hard "error" event with no
@@ -9410,6 +9499,7 @@ Answer directly without introducing yourself.";
             // VERIFICATION
             // ============================
             var verification = await VerifyResponseSafelyAsync(question, responseText, finalChunks, meaiInfo);
+            timer.Lap("first verification");
 
             // ✅ NEW: on a grounding failure, retry once with a stronger model before
             // falling back to a refusal. Retrieval already succeeded here (real
@@ -9690,6 +9780,7 @@ Answer directly without introducing yourself.";
             var quality = AnswerQualityBuilder.Build(verification, askedClarification, declined,
                 retrySkippedReason, finalChunks.Select(c => c.Source), plant, admin: true);
 
+            timer.Lap("retry / conflict / clarification (after verification)");
             yield return new StreamChunk
             {
                 Type = "answer_quality",
@@ -10618,7 +10709,7 @@ Answer directly without introducing yourself.";
                     question = question.Substring(0, Math.Min(100, question.Length)),
                     plant,
                     sessionId = agentContext.SessionId
-                });
+                }, agentContext.SessionId);
 
                 return new ValidationResult
                 {
@@ -10654,7 +10745,8 @@ Answer directly without introducing yourself.";
                         Phase = "CacheHit",
                         DecisionMade = "AppreciatedAnswer",
                         Reasoning = "Found cached appreciated answer",
-                        Confidence = 0.95
+                        Confidence = 0.95,
+                        SessionId = _logSessionId,
                     });
 
                     return new CacheResult
@@ -10672,7 +10764,8 @@ Answer directly without introducing yourself.";
                         Phase = "CacheHit",
                         DecisionMade = "CorrectionFound",
                         Reasoning = "Found user correction",
-                        Confidence = 1.0
+                        Confidence = 1.0,
+                        SessionId = _logSessionId,
                     });
 
                     var rephrased = await _helperMethods.RephraseWithLLMAsync(
@@ -10883,6 +10976,7 @@ Rewritten question:";
           ModelConfiguration? genModel = null,
           string? gradeTier = null)
         {
+            var timer = new StepTimer(_logger, "retrieval");
             var result = new RetrievalResult
             {
                 Chunks = new List<RelevantChunk>()
@@ -10891,7 +10985,7 @@ Rewritten question:";
             try
             {
                 var sectionQuery = await _policyAnalysis.DetectAndParseSection(question);
-
+                timer.Lap("section detect");
                 List<RelevantChunk> chunks;
 
                 if (sectionQuery != null)
@@ -10980,10 +11074,11 @@ Rewritten question:";
                 }
 
                 chunks = FilterByPolicyIntent(chunks, question);
+                timer.Lap("search + expansion (GetRelevantChunksWithExpansionAsync)");
 
                 // Apply BM25
                 var bm25Chunks = _bm25Service.Rank(question, chunks, maxResults * 2);
-
+                timer.Lap("filter + BM25");
                 var hybridChunks = chunks
                   .Concat(bm25Chunks)
                   .GroupBy(c => c.Id)
@@ -11008,7 +11103,7 @@ Rewritten question:";
                         _logger.LogWarning(ex, "Reranking failed, falling back to un-reranked results");
                     }
                 }
-
+                timer.Lap("rerank");
                 // ✅ CHANGED: was a flat hybridChunks.Take(8) — that let a
                 // broad question's entire chunk budget get consumed by
                 // whichever 2-3 policies scored highest, silently dropping
@@ -11033,7 +11128,7 @@ Rewritten question:";
                 // actual safety net.
                 hybridChunks = _policyAnalysis.FilterToGradeTierSources(hybridChunks, gradeTier);
                 var diversified = DiversifyBySource(hybridChunks, maxTotal: 30, maxPerSource: 5);
-
+                timer.Lap("diversify + token budget");
                 // 🆕 Temporary diagnostic: list every chunk that survived
                 // diversification, before the token-budget trim below decides
                 // which of them actually reach generation. This is what tells
@@ -11095,7 +11190,10 @@ Rewritten question:";
                     DecisionMade = $"Retrieved {result.Chunks.Count} chunks",
                     Confidence = result.Chunks.Any() ? result.Chunks.Average(c => c.Similarity) : 0.0
                 });
-
+                _logger.LogInformation(
+                        "⏱️ [retrieval] summary: {Calls} Chroma searches took {SearchMs} ms in total (this INCLUDES their embeddings and {SectionMs} ms of section-detect); " +
+                        "{Misses} embedding cache misses took {MissMs} ms inside Ollama",
+                        _searchCalls, _searchMs, _sectionDetectMs, _embedMisses, _embedMissMs);
                 return result;
             }
             catch (Exception ex)
@@ -11468,7 +11566,8 @@ Rewritten question:";
                   question,
                   response,
                   chunks,
-                  checkFactuality
+                  checkFactuality,
+                  _logSessionId
                 );
 
                 _agentLogger.LogDecision(new AgentDecision
@@ -11653,7 +11752,8 @@ Rewritten question:";
                     Phase = "Complete",
                     DecisionMade = "SUCCESS",
                     Reasoning = $"Total duration: {durationMs}ms, Confidence: {confidence:P0}",
-                    Confidence = confidence
+                    Confidence = confidence,
+                    SessionId = _logSessionId,
                 });
             }
             catch (Exception ex)
