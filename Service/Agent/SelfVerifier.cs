@@ -209,8 +209,8 @@ ANALYSIS REQUIREMENTS
 5. Do not invent missing context to resolve a contradiction or to establish that two rules apply to the same situation.
 6. If applicability cannot be determined from the available evidence, distinguish uncertainty from a proven contradiction. Classify unsupported conclusions as no-hallucination unless the source itself contains a relevant unresolved conflict supporting no-conflict.
 7. If both supporting and conflicting evidence exist, determine whether the response acknowledges the disagreement and accurately qualifies its conclusion.
-8. Treat figures, names, and amounts explicitly supplied by the employee in the question as employee-provided information, not as hallucinations merely because they do not appear in the source material.
-9. A calculation is grounded if its formula or rate is supported by the source, its inputs are established, and the arithmetic is correct. The calculated result does not need to appear verbatim in the source. If the formula is unsupported, an input is unjustified, or the arithmetic is incorrect, classify the relevant claim as no-hallucination.
+8. Treat figures, names, dates, choices and amounts supplied by the employee as employee-provided information, not as hallucinations merely because they do not appear in the source material. This includes any text after ""Additional context from employee:"" in the question, which is the employee's own answer to a clarifying question (for example ""30"" meaning 30 days).
+9. If the source does not fix a divisor, rate or basis, and the response either uses the one the employee supplied or states its assumption explicitly and shows the working, that assumption is not a hallucination. Judge only whether the arithmetic is correct and whether the assumption is clearly stated.
 10. Evaluate factual grounding, not writing quality, completeness alone, or whether the response matches your preferred interpretation.
 
 CLASSIFICATION PRIORITY

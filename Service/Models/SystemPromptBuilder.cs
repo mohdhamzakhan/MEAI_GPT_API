@@ -229,11 +229,10 @@ Would you like detailed information about any specific policy?
 
             // 5. Default fallback
             return BuildContextAwareSystemPrompt(plant, chunks, query);
-
-            // 5. Default fallback
-            return BuildContextAwareSystemPrompt(plant, chunks, query);
         }
-
+        private static string BuildClarifyReminder() =>
+    "⚠️ BEFORE ANSWERING: if a detail that only the employee can supply is missing and it changes the answer, " +
+    "ignore the format above and reply with exactly one line: CLARIFY: <your question>\n";
         private string BuildPolicyDetailSystemPrompt(string plant, List<RelevantChunk> chunks, string query)
         {
             var sb = new StringBuilder();
@@ -314,6 +313,9 @@ Would you like detailed information about any specific policy?
             sb.AppendLine("🎯 USER QUESTION:");
             sb.AppendLine(query);
             sb.AppendLine();
+
+            sb.AppendLine(BuildClarifyReminder());
+
             sb.AppendLine("Now provide a COMPLETE, WELL-STRUCTURED policy explanation.");
 
             return sb.ToString();
@@ -1020,6 +1022,9 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
             prompt.AppendLine("   - The calculated result is considered valid even if the exact number does not appear in the");
             prompt.AppendLine("     source text, because it is directly derived from the rate, ratio, or formula provided");
             prompt.AppendLine("     in the context.");
+            prompt.AppendLine("   - Ordinary arithmetic and calendar facts (days in a month, converting a monthly figure to a daily");
+            prompt.AppendLine("     figure) are not outside knowledge, so rules 1 and 5 do not forbid them. Numbers the user states");
+            prompt.AppendLine("     in the question are inputs to use, not claims to verify.");
             prompt.AppendLine();
 
             // Added after a real incident: a "domestic travel meal
@@ -1063,6 +1068,27 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
             prompt.AppendLine("   - When genuinely unsure whether an excerpt matches the person asked about, prefer");
             prompt.AppendLine("     leaving it out over guessing — an incomplete answer is safer than misapplying a");
             prompt.AppendLine("     benefit to the wrong person");
+            prompt.AppendLine();
+
+            prompt.AppendLine("9. **ASK WHEN YOU ARE UNSURE — DO NOT GUESS AND DO NOT REFUSE**");
+            prompt.AppendLine("   - This rule overrides rules 2, 4 and 5 and any response format below.");
+            prompt.AppendLine("   - Before answering, check: do I have everything needed to give a CORRECT answer? Inputs can come");
+            prompt.AppendLine("     from the question, from the context, or from ordinary common knowledge (arithmetic, calendar facts).");
+            prompt.AppendLine("   - If a detail that only the EMPLOYEE can supply is missing, it would change the answer, and neither");
+            prompt.AppendLine("     the question nor the policy fixes it (which policy variant, which date or period, which basis or");
+            prompt.AppendLine("     assumption, which leave type, etc.), do NOT guess and do NOT say the information is unavailable.");
+            prompt.AppendLine("     Reply with exactly one line:");
+            prompt.AppendLine("     CLARIFY: <one short, specific question; list the options if there are only a few>");
+            prompt.AppendLine("   - Only ask for something the USER can supply. If the policy itself does not cover the topic, say so per rule 4.");
+            prompt.AppendLine("   - Never ask for the employee's plant, grade, position or employment category; those are already known");
+            prompt.AppendLine("     (Permanent is the default per rule 5).");
+            prompt.AppendLine("   - Ask at most one question, and never ask for something already stated in the question or the context.");
+            prompt.AppendLine("   - If you can reasonably proceed under a stated assumption that does not materially change the");
+            prompt.AppendLine("     outcome, answer and state the assumption instead of asking.");
+            prompt.AppendLine("   - When you reply with CLARIFY, write nothing else.");
+            prompt.AppendLine("   - Proceed under a stated assumption ONLY if every reasonable alternative assumption would give the same");
+            prompt.AppendLine("     final answer. If different reasonable assumptions would produce different results (a different amount,");
+            prompt.AppendLine("     date, count or eligibility), the detail is material: ask with CLARIFY instead of picking one.");
             prompt.AppendLine();
 
             return prompt.ToString();
@@ -1265,6 +1291,8 @@ A resigned employee must complete a **Full & Final Settlement** as per the **Set
             prompt.AppendLine("🎯 **USER QUESTION:**");
             prompt.AppendLine(query);
             prompt.AppendLine();
+
+            prompt.AppendLine(BuildClarifyReminder());
 
             prompt.AppendLine("Now, answer the question using ONLY the context provided above. Be thorough and cite your sources!");
 
