@@ -8697,32 +8697,1268 @@ Answer directly without introducing yourself.";
         private int _embedMisses;
         private long _embedMissMs;
 
+
+        //No use now 26-10
+        //public async IAsyncEnumerable<StreamChunk> ProcessQueryStreamAsync(
+        //  string question,
+        //  string plant,
+        //  string? generationModel = null,
+        //  string? embeddingModel = null,
+        //  // ⏱️ CHANGED: was 20 -- raised so the pipeline has enough real
+        //  // candidates to work with before reranking/diversification/budget
+        //  // trimming narrow it down for real. 20 was capping the field
+        //  // before DiversifyBySource's more generous ceiling (raised
+        //  // separately) ever got a chance to matter.
+        //  int maxResults = 40,
+        //  bool meaiInfo = true,
+        //  string? sessionId = null,
+        //  bool useReRanking = true,
+        //  string? userId = null,
+        //  // ✅ NEW: previously accepted by the frontend but never actually
+        //  // wired through — persona shapes the system prompt's tone,
+        //  // temperature overrides the per-model sampling default.
+        //  string? persona = null,
+        //  double? temperature = null,
+        //  [EnumeratorCancellation] CancellationToken cancellationToken =
+        //  default)
+        //{
+        //    var stopwatch = Stopwatch.StartNew();
+
+        //    var timer = new StepTimer(_logger, "stream");
+
+        //    // ============================
+        //    // PRE-FLIGHT VALIDATION
+        //    // ============================
+        //    var validationResult = await ValidateAndInitializeAsync(
+        //      question, plant, sessionId, userId, generationModel, embeddingModel, cancellationToken);
+
+        //    if (!validationResult.Success)
+        //    {
+        //        yield
+        //        return new StreamChunk
+        //        {
+        //            Type = "error",
+        //            Content = validationResult.ErrorMessage
+        //        };
+        //        yield
+        //        break;
+        //    }
+
+        //    timer.Lap("validate + create context");
+
+        //    var agentContext = validationResult.Context!;
+        //    _logSessionId = agentContext.SessionId;
+
+        //    // ✅ NEW: same per-request resolution as ProcessQueryAsync — see
+        //    // that method's comment for why this is safe as instance state
+        //    // (DynamicRagService is Scoped, one instance per HTTP request).
+        //    _currentRequester = await _employeeDirectory.GetEmployeeInfoAsync(userId ?? "system");
+        //    timer.Lap("employee lookup");
+        //    // ✅ NEW: does the QUESTION ITSELF name a grade ("benefits for
+        //    // AM")? If so, that should drive eligibility filtering for this
+        //    // request regardless of who's actually asking — see
+        //    // BuildEligibilityClauses.
+        //    ResolveQueryMentionedGradeRank(question);
+
+        //    // ✅ CRITICAL: AgentContext is rebuilt from scratch every request
+        //    // by CreateAgentContextAsync (it reloads History from the DB but
+        //    // has no persistence for arbitrary flags) — a flag set on it
+        //    // would vanish by the very next turn. ConversationContext, via
+        //    // the Conversation singleton's ConcurrentDictionary keyed by
+        //    // SessionId, is what actually survives across turns — it's what
+        //    // ProcessQueryAsync already relies on for this exact purpose.
+        //    // All clarification state below lives here, not on agentContext.
+        //    var conversationContext = _conversation.GetOrCreateConversationContext(agentContext.SessionId);
+
+        //    // ✅ NEW: resolve an answer to a pending designation ask (see the
+        //    // trigger below). Classifying Direct vs Indirect here also
+        //    // answers the EXISTING coarse "Supervisor and above / Below
+        //    // Supervisor" question for free — per the org structure, Jr.
+        //    // Supervisor and above IS the Indirect category, and below it
+        //    // IS Direct — so conversationContext.EmployeeGrade is set directly
+        //    // from this, and the grade-clarification check further below
+        //    // won't ask again since it only fires when that's still empty.
+
+        //    //if (conversationContext.AwaitingDesignationClarification)
+        //    //{
+        //    //    var designationAnswer = question.Trim();
+        //    //    conversationContext.AwaitingDesignationClarification = false;
+        //    //    question = conversationContext.PendingDesignationClarificationOriginalQuestion ?? question;
+        //    //    conversationContext.PendingDesignationClarificationOriginalQuestion = null;
+
+        //    //    if (!string.IsNullOrWhiteSpace(designationAnswer))
+        //    //    {
+        //    //        var lower = designationAnswer.ToLowerInvariant();
+        //    //        EmployeeRecord updatedRecord;
+
+        //    //        if (lower.Contains("direct worker"))
+        //    //        {
+        //    //            updatedRecord = new EmployeeRecord
+        //    //            {
+        //    //                UserId = _currentRequester!.UserId,
+        //    //                EmployeeCategory = "Direct",
+        //    //                DirectSubtype = "Direct Worker"
+        //    //            };
+        //    //            conversationContext.EmployeeGrade = "Below Supervisor";
+        //    //        }
+        //    //        else if (lower.Contains("administrative staff") || lower.Contains("admin staff"))
+        //    //        {
+        //    //            updatedRecord = new EmployeeRecord
+        //    //            {
+        //    //                UserId = _currentRequester!.UserId,
+        //    //                EmployeeCategory = "Direct",
+        //    //                DirectSubtype = "Administrative Staff"
+        //    //            };
+        //    //            conversationContext.EmployeeGrade = "Below Supervisor";
+        //    //        }
+        //    //        else
+        //    //        {
+        //    //            // Grade only exists on the Indirect side — same
+        //    //            // structural rule GradeEligibilityService applies
+        //    //            // when extracting eligibility from policy chunks.
+        //    //            updatedRecord = new EmployeeRecord
+        //    //            {
+        //    //                UserId = _currentRequester!.UserId,
+        //    //                EmployeeCategory = "Indirect",
+        //    //                Grade = designationAnswer
+        //    //            };
+        //    //            conversationContext.EmployeeGrade = "Supervisor and above";
+        //    //        }
+
+        //    //        var persisted = await _employeeDirectory.SetEmployeeInfoAsync(updatedRecord);
+        //    //        _currentRequester = updatedRecord; // use immediately — don't make them wait a request for their own answer to take effect
+
+        //    //        _logger.LogInformation(
+        //    //$"📋 Designation captured for '{updatedRecord.UserId}': Category={updatedRecord.EmployeeCategory}, " +
+        //    //          $"Grade={updatedRecord.Grade}, DirectSubtype={updatedRecord.DirectSubtype} (persisted={persisted})");
+
+        //    //        if (!persisted)
+        //    //            _logger.LogWarning("⚠️ Designation captured but not persisted to disk — will be asked again next session if this keeps happening");
+        //    //    }
+        //    //}
+
+        //    // ✅ CHANGED: an employee with no record at all in the directory
+        //    // no longer gets asked via a free-text chat question — instead
+        //    // this signals the frontend to show a structured picker
+        //    // (dropdown of known designations), which persists the answer
+        //    // directly through POST /api/rag/employee/designation. No
+        //    // cross-turn state is needed here anymore: the frontend holds
+        //    // onto the original question and resubmits it once the picker
+        //    // is saved, so there's nothing to resolve on a "next turn" —
+        //    // the very next request will simply have a known _currentRequester.
+        //    if (string.IsNullOrEmpty(_currentRequester?.Grade) && string.IsNullOrEmpty(_currentRequester?.EmployeeCategory))
+        //    {
+        //        _logger.LogInformation($"📋 No designation on file for '{_currentRequester?.UserId}' — signaling frontend to collect it via the position picker");
+
+        //        yield
+        //        return new StreamChunk
+        //        {
+        //            Type = "requires_designation",
+        //            Content = "Please select your position to continue.",
+        //            PendingQuestion = question
+        //        };
+        //        yield
+        //        return new StreamChunk
+        //        {
+        //            Type = "complete",
+        //            ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+        //        };
+        //        yield
+        //        break;
+        //    }
+
+        //    // ✅ NEW: ask an employee with NO record at all in the directory
+        //    // for their designation, once — this populates the directory
+        //    // (used for retrieval-time eligibility filtering) so they're
+        //    // never asked again, in this session or any future one.
+        //    // Deliberately independent of whether THIS specific question
+        //    // happens to be grade-specific — unlike the check further below,
+        //    // the goal here is a complete directory, not just unblocking
+        //    // one answer.
+        //    else if (string.IsNullOrEmpty(_currentRequester?.Grade) && string.IsNullOrEmpty(_currentRequester?.EmployeeCategory) &&
+        //      string.IsNullOrEmpty(conversationContext.EmployeeGrade))
+        //    {
+        //        conversationContext.AwaitingDesignationClarification = true;
+        //        conversationContext.PendingDesignationClarificationOriginalQuestion = question;
+
+        //        await foreach (var chunk in StreamTextResponse(
+        //          "Before I answer — I don't have your position on file yet. Could you tell me your designation or job title " +
+        //          "(e.g. \"Deputy Manager\", \"Officer\", \"Direct Worker\", \"Administrative Staff\")? I'll remember it so I don't need to ask again.",
+        //          cancellationToken))
+        //        {
+        //            yield
+        //            return chunk;
+        //        }
+        //        yield
+        //        return new StreamChunk
+        //        {
+        //            Type = "complete",
+        //            ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+        //        };
+        //        yield
+        //        break;
+        //    }
+
+        //    // ✅ NEW: if this turn's message is the employee's answer to a
+        //    // clarifying question asked last turn (see
+        //    // TryGenerateClarifyingQuestionAsync / the grounding-failure
+        //    // branch below), combine it with the original question rather
+        //    // than treating it as a fresh, standalone query — a bare
+        //    // answer like "the Sanand plant one" means nothing to
+        //    // retrieval on its own without the question it's answering.
+
+        //    bool questionWasMerged = false;
+        //    if (conversationContext.AwaitingGeneralClarification && !string.IsNullOrWhiteSpace(conversationContext.PendingGeneralClarificationOriginalQuestion))
+        //    {
+        //        var originalQuestion = conversationContext.PendingGeneralClarificationOriginalQuestion;
+        //        var clarificationAnswer = question;
+        //        questionWasMerged = true;
+
+        //        _logger.LogInformation($"✅ Resolving pending clarification. Original: '{originalQuestion}' | Employee answered: '{clarificationAnswer}'");
+
+        //        question = $"{originalQuestion} (Additional context from employee: {clarificationAnswer})";
+
+
+        //        conversationContext.AwaitingGeneralClarification = false;
+        //        conversationContext.PendingGeneralClarificationQuestion = null;
+        //        conversationContext.PendingGeneralClarificationOriginalQuestion = null;
+        //        // Deliberately NOT resetting ClarificationAttemptCount here —
+        //        // it caps attempts across this whole resolution chain, so if
+        //        // the re-answer ALSO fails grounding, the cap still applies
+        //        // before asking a second time rather than looping forever.
+        //    }
+
+        //    // 🎯 Title-band clarification: a title NAMED IN THE QUESTION (e.g.
+        //    // "benefits for AM") spans more than one band (e.g. "AM" is both
+        //    // ManagementStaff and LowerManagement). Resolve a pending answer,
+        //    // or ask one for the first time, before doing anything else --
+        //    // same reachability caveat as the grade-clarification block below:
+        //    // this has to live here, not just in ProcessQueryAsync, or the
+        //    // live UI never actually triggers it.
+        //    bool awaitingTitleBandAnswer = false;
+        //    List<string> titleBandOptionsForPrompt = new();
+        //    string? titleBandTitleForPrompt = null;
+
+        //    if (conversationContext.AwaitingTitleBandClarification)
+        //    {
+        //        var chosenBand = ResolveTitleBandAnswer(question, conversationContext.PendingTitleBandOptions);
+        //        if (chosenBand != null)
+        //        {
+        //            _logger.LogInformation($"🎯 Title band clarified as '{chosenBand}' for session {agentContext.SessionId}");
+        //            conversationContext.AwaitingTitleBandClarification = false;
+        //            question = conversationContext.PendingTitleBandClarificationQuestion ?? question;
+        //            conversationContext.PendingTitleBandClarificationQuestion = null;
+        //            conversationContext.PendingTitleBandOptions = new();
+        //            ResolveQueryMentionedGradeRank(question, forcedBand: chosenBand);
+        //        }
+        //        else
+        //        {
+        //            awaitingTitleBandAnswer = true;
+        //            titleBandOptionsForPrompt = conversationContext.PendingTitleBandOptions;
+        //        }
+        //    }
+        //    else if (_pendingAmbiguousGradeMention != null)
+        //    {
+        //        var title = _pendingAmbiguousGradeMention.Title;
+        //        var options = _pendingAmbiguousGradeMention.Bands;
+        //        _logger.LogInformation($"🎯 Ambiguous title '{title}' mentioned in question, spans bands [{string.Join(", ", options)}] — asking user to clarify");
+
+        //        conversationContext.AwaitingTitleBandClarification = true;
+        //        conversationContext.PendingTitleBandClarificationQuestion = question;
+        //        conversationContext.PendingTitleBandOptions = options;
+        //        conversationContext.PendingTitleBandTitle = title;
+
+        //        awaitingTitleBandAnswer = true;
+        //        titleBandOptionsForPrompt = options;
+        //        titleBandTitleForPrompt = title;
+        //    }
+
+        //    if (awaitingTitleBandAnswer)
+        //    {
+        //        var titleBandOptionsText = string.Join("\n", titleBandOptionsForPrompt
+        //          .Select((b, i) => $"{i + 1}. {GradeHierarchyService.DisplayName(b)}"));
+        //        var titleBandPromptText = titleBandTitleForPrompt != null ?
+        //          $"'{System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(titleBandTitleForPrompt)}' is used for two different grade bands here. Which one are you asking about?\n\n{titleBandOptionsText}" :
+        //  $"Sorry, I didn't quite catch that. Which one did you mean?\n\n{titleBandOptionsText}";
+
+        //        await foreach (var chunk in StreamTextResponse(titleBandPromptText, cancellationToken))
+        //        {
+        //            yield
+        //            return chunk;
+        //        }
+        //        yield
+        //        return new StreamChunk
+        //        {
+        //            Type = "complete",
+        //            ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+        //        };
+        //        yield
+        //        break;
+        //    }
+
+        //    // 🧑‍💼 Grade clarification — ported from ProcessQueryAsync, which
+        //    // had this logic but was never actually reachable from the
+        //    // streaming endpoint the live UI calls. Resolve an answer to a
+        //    // pending grade question, or pick up a volunteered grade
+        //    // mentioned unprompted in the question itself.
+        //    bool awaitingGradeAnswer = false;
+        //    if (conversationContext.AwaitingGradeClarification)
+        //    {
+        //        var resolvedGrade = _policyAnalysis.TryResolveGradeAnswer(question, allowNumberedOptions: true);
+        //        if (resolvedGrade != null)
+        //        {
+        //            _logger.LogInformation($"🧑‍💼 Grade clarified as '{resolvedGrade}' for session {agentContext.SessionId}");
+        //            conversationContext.EmployeeGrade = resolvedGrade;
+        //            conversationContext.AwaitingGradeClarification = false;
+        //            question = conversationContext.PendingClarificationQuestion ?? question;
+        //            conversationContext.PendingClarificationQuestion = null;
+        //        }
+        //        else
+        //        {
+        //            // Didn't recognize an answer — re-ask rather than silently
+        //            // proceeding with a guessed or blended answer.
+        //            awaitingGradeAnswer = true;
+        //        }
+        //    }
+        //    else if (string.IsNullOrEmpty(conversationContext.EmployeeGrade))
+        //    {
+        //        var gradeFromQuestion = _policyAnalysis.TryResolveGradeAnswer(question, allowNumberedOptions: false);
+        //        if (gradeFromQuestion != null)
+        //            conversationContext.EmployeeGrade = gradeFromQuestion;
+        //    }
+
+        //    if (awaitingGradeAnswer)
+        //    {
+        //        await foreach (var chunk in StreamTextResponse(
+        //          "Sorry, I didn't quite catch that. Could you confirm your position so I can give you the correct answer?\n\n1. Supervisor and above\n2. Below Supervisor",
+        //          cancellationToken))
+        //        {
+        //            yield
+        //            return chunk;
+        //        }
+        //        yield
+        //        return new StreamChunk
+        //        {
+        //            Type = "complete",
+        //            ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+        //        };
+        //        yield
+        //        break;
+        //    }
+
+        //    if (string.IsNullOrEmpty(conversationContext.EmployeeGrade) && _currentRequester != null)
+        //        conversationContext.EmployeeGrade = _policyAnalysis.GradeTierForCategory(_currentRequester.EmployeeCategory);
+
+        //    // 🧭 Policy-variant clarification (e.g. Domestic vs. Foreign Travel) —
+        //    // resolve a pending answer BEFORE retrieval runs again, so retrieval
+        //    // below operates on the resumed original question, not the user's
+        //    // short reply ("1" / "domestic"). rejectedPolicySources carries the
+        //    // deselected document(s) forward to the post-retrieval filter.
+        //    bool awaitingPolicyVariantAnswer = false;
+        //    List<string> rejectedPolicySources = new();
+        //    if (conversationContext.AwaitingPolicyClarification)
+        //    {
+        //        var options = conversationContext.PendingPolicyClarificationOptions ?? new();
+        //        var chosen = _policyAnalysis.TryResolvePolicyVariantAnswer(question, options);
+        //        if (chosen != null)
+        //        {
+        //            _logger.LogInformation($"🧭 Policy variant clarified as '{chosen.Label}' ({chosen.SourceFile}) for session {agentContext.SessionId}");
+        //            rejectedPolicySources = options.Where(o => o.SourceFile != chosen.SourceFile).Select(o => o.SourceFile).ToList();
+        //            conversationContext.PreferredPolicyQualifier = chosen.Label.ToLowerInvariant();
+        //            conversationContext.AwaitingPolicyClarification = false;
+        //            question = conversationContext.PendingPolicyClarificationQuestion ?? question;
+        //            conversationContext.PendingPolicyClarificationQuestion = null;
+        //            conversationContext.PendingPolicyClarificationOptions = null;
+        //        }
+        //        else
+        //        {
+        //            awaitingPolicyVariantAnswer = true;
+        //        }
+        //    }
+
+        //    if (awaitingPolicyVariantAnswer)
+        //    {
+        //        var retryOptions = conversationContext.PendingPolicyClarificationOptions ?? new();
+        //        var retryOptionsText = string.Join("\n", retryOptions.Select((o, i) => $"{i + 1}. {o.Label}"));
+        //        await foreach (var chunk in StreamTextResponse(
+        //          $"Sorry, I didn't quite catch that. Which one did you mean?\n\n{retryOptionsText}",
+        //          cancellationToken))
+        //        {
+        //            yield
+        //            return chunk;
+        //        }
+        //        yield
+        //        return new StreamChunk
+        //        {
+        //            Type = "complete",
+        //            ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+        //        };
+        //        yield
+        //        break;
+        //    }
+
+        //    _logger.LogInformation($"📝 Session {agentContext.SessionId} has {agentContext.History.Count} history items");
+
+        //    if (agentContext.History.Any())
+        //    {
+        //        var lastQ = agentContext.History.Last().Question;
+        //        _logger.LogInformation($"📝 Last question was: {lastQ.Substring(0, Math.Min(50, lastQ.Length))}");
+        //    }
+        //    var genModel = validationResult.GenerationModel!;
+        //    var embModel = validationResult.EmbeddingModel!;
+
+        //    yield
+        //    return new StreamChunk
+        //    {
+        //        Type = "status",
+        //        Content = "Initializing agent..."
+        //    };
+
+        //    // ============================
+        //    // CACHE CHECK
+        //    // ============================
+        //    var cacheResult = await CheckCacheAsync(question, generationModel);
+
+        //    if (cacheResult.HasResult)
+        //    {
+        //        await foreach (var chunk in StreamTextResponse(cacheResult.CachedAnswer!, cancellationToken))
+        //        {
+        //            yield
+        //            return chunk;
+        //        }
+
+        //        yield
+        //        return new StreamChunk
+        //        {
+        //            Type = "complete",
+        //            ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+        //        };
+        //        yield
+        //        break;
+        //    }
+        //    timer.Lap("cache check (appreciated + corrections)");
+
+        //    // ============================
+        //    // NON-MEAI → DIRECT LLM ONLY
+        //    // ============================
+        //    if (!meaiInfo)
+        //    {
+        //        await EnsureHistorySeededAsync(agentContext.SessionId);
+
+        //        // 🌐 Internet search — only when enabled in appsettings (InternetSearch:Enabled)
+        //        var webResults = new List<WebResult>();
+        //        if (_webSearch.IsEnabled)
+        //        {
+        //            var searchQuestion = ResolveNonMeaiQuestion(
+        //                question, _historyService.GetHistory(agentContext.SessionId));
+
+        //            if (ShouldSearchWeb(searchQuestion))
+        //            {
+        //                yield return new StreamChunk { Type = "status", Content = "Searching the internet..." };
+        //                webResults = await _webSearch.SearchAsync(searchQuestion, cancellationToken);
+        //            }
+        //        }
+
+        //        yield return new StreamChunk { Type = "status", Content = "Generating response..." };
+
+        //        var full = new StringBuilder();
+        //        await foreach (var token in GenerateNonMeaiStreamDirectAsync(
+        //          question, genModel.Name!, agentContext.SessionId, webResults,
+        //          persona, temperature, cancellationToken))
+        //        {
+        //            full.Append(token);
+        //            yield return new StreamChunk { Type = "response", Content = token };
+        //        }
+
+        //        // Append clickable sources after the answer (also saved with the conversation)
+        //        if (webResults.Count > 0 && !string.IsNullOrWhiteSpace(full.ToString()))
+        //        {
+        //            var sourcesMd = BuildWebSourcesMarkdown(webResults);
+        //            if (sourcesMd.Length > 0)
+        //            {
+        //                full.Append(sourcesMd);
+        //                yield return new StreamChunk { Type = "response", Content = sourcesMd };
+        //            }
+        //        }
+
+        //        if (!string.IsNullOrWhiteSpace(full.ToString()))
+        //        {
+
+        //            _ = SaveConversationSafelyAsync(
+        //              agentContext, question, full.ToString(),
+        //              new List<RelevantChunk>(), genModel, embModel,
+        //              plant, null, stopwatch.ElapsedMilliseconds);
+        //        }
+
+        //        yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+        //        yield break;
+        //    }
+
+        //    // ============================
+        //    // PLANNING
+        //    // ============================
+        //    yield
+        //    return new StreamChunk
+        //    {
+        //        Type = "status",
+        //        Content = "Planning execution..."
+        //    };
+
+        //    var planResult = await CreateExecutionPlanAsync(question, agentContext, meaiInfo);
+
+        //    if (!planResult.Success)
+        //    {
+        //        await foreach (var chunk in ExecuteDirectPathAsync(
+        //          question, plant, agentContext, genModel, embModel,
+        //          maxResults, meaiInfo, useReRanking, stopwatch, cancellationToken))
+        //        {
+        //            yield
+        //            return chunk;
+        //        }
+        //        yield
+        //        break;
+        //    }
+
+        //    timer.Lap("planning");
+
+        //    var plan = planResult.Plan!;
+
+        //    // ============================
+        //    // QUESTION REWRITE (display-only)
+        //    // ============================
+        //    // What people actually type is often terse/blunt ("AM parking?",
+        //    // "where park car") -- fine for retrieval, but gives the user no way
+        //    // to visually confirm it was understood correctly. Show a clean,
+        //    // complete, plain-English restatement before the answer arrives.
+        //    // Purely cosmetic: `question` itself still flows unchanged into
+        //    // retrieval, generation and history everywhere below.
+        //    //var rewrittenQuestion = await RewriteQuestionPlainEnglishAsync(
+        //    //  question, agentContext.History, genModel.Name!);
+
+        //    //if (!string.IsNullOrWhiteSpace(rewrittenQuestion) &&
+        //    //  !string.Equals(rewrittenQuestion.Trim(), question.Trim(), StringComparison.OrdinalIgnoreCase))
+        //    //{
+        //    //    yield
+        //    //    return new StreamChunk
+        //    //    {
+        //    //        Type = "rewritten_question",
+        //    //        Content = rewrittenQuestion
+        //    //    };
+        //    //}
+
+        //    // ============================
+        //    // RETRIEVAL
+        //    // ============================
+        //    yield
+        //    return new StreamChunk
+        //    {
+        //        Type = "status",
+        //        Content = "Searching knowledge base..."
+        //    };
+
+        //    var retrievalResult = await ExecuteRetrievalAsync(
+        //      question, embModel, maxResults, plant, agentContext, useReRanking, plan, genModel, conversationContext.EmployeeGrade);
+
+        //    timer.Lap("retrieval (total)");
+
+        //    var finalChunks = retrievalResult.Chunks;
+        //    var topicChanged = retrievalResult.TopicChanged;
+
+        //    // 🪦 Drop chunks describing the OTHER death scenario than the one
+        //    // asked about — ported alongside the grade check below, same
+        //    // reasoning as ProcessQueryAsync: structural filtering here, not
+        //    // a prompt instruction, so a mismatched chunk can't reach the
+        //    // model at all.
+        //    finalChunks = _policyAnalysis.FilterScenarioMismatchedChunks(finalChunks, question);
+
+        //    // If we just resumed from a resolved policy-variant clarification,
+        //    // strip the deselected policy's chunks out of this fresh retrieval
+        //    // before anything downstream (grade check, generation) sees them.
+        //    if (rejectedPolicySources.Any())
+        //    {
+        //        finalChunks = _policyAnalysis.FilterToSelectedPolicyVariant(finalChunks, rejectedPolicySources);
+        //    }
+        //    // Otherwise, check whether THIS retrieval freshly surfaced two
+        //    // sibling policy documents (e.g. Domestic vs. Foreign Travel) that
+        //    // the question doesn't disambiguate — same idea as the grade
+        //    // check below, but for picking the right POLICY rather than the
+        //    // right PROVISION within one policy.
+        //    else
+        //    {
+        //        var decision = _policyAnalysis.EvaluatePolicyVariant(finalChunks, question, conversationContext.PreferredPolicyQualifier);
+
+        //        if (decision.RejectedSources.Any())
+        //        {
+        //            finalChunks = _policyAnalysis.FilterToSelectedPolicyVariant(finalChunks, decision.RejectedSources);
+        //            conversationContext.PreferredPolicyQualifier = decision.ResolvedQualifier;
+        //        }
+
+        //        var policyOptions = decision.AskOptions;
+        //        if (policyOptions != null && !QuestionMentionsPolicyFamily(question, policyOptions.Select(o => o.SourceFile)))
+        //        {
+        //            _logger.LogInformation("🧭 Policy-variant prompt skipped: question doesn't mention the policy family");
+        //            policyOptions = null;
+        //        }
+        //        if (policyOptions != null)
+        //        {
+        //            _logger.LogInformation($"🧭 Policy-variant ambiguity detected for session {agentContext.SessionId} — asking user to pick one");
+        //            conversationContext.AwaitingPolicyClarification = true;
+        //            conversationContext.PendingPolicyClarificationQuestion = question;
+        //            conversationContext.PendingPolicyClarificationOptions = policyOptions;
+
+        //            var optionsText = string.Join("\n", policyOptions.Select((o, i) => $"{i + 1}. {o.Label}"));
+        //            await foreach (var chunk in StreamTextResponse(
+        //              $"This question could fall under more than one policy. Which one applies to you?\n\n{optionsText}",
+        //              cancellationToken))
+        //            {
+        //                yield
+        //                return chunk;
+        //            }
+        //            yield
+        //            return new StreamChunk
+        //            {
+        //                Type = "complete",
+        //                ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+        //            };
+        //            yield
+        //            break;
+        //        }
+        //    }
+
+        //    // 🧑‍💼 If retrieved content spans both grade tiers and we still
+        //    // don't know the employee's grade, pause and ask rather than
+        //    // generating an answer that guesses or blends both grades'
+        //    // provisions. Checked AFTER retrieval, not on the raw question,
+        //    // since "grade-specific" depends on the matched POLICY, not the
+        //    // question's wording. This existed in ProcessQueryAsync but was
+        //    // never reachable from this streaming method until now.
+        //    if (string.IsNullOrEmpty(conversationContext.EmployeeGrade) && _policyAnalysis.HasGradeSpecificContent(finalChunks))
+        //    {
+        //        _logger.LogInformation($"🧑‍💼 Grade-specific policy content detected for session {agentContext.SessionId} — asking user to clarify position");
+        //        conversationContext.AwaitingGradeClarification = true;
+        //        conversationContext.PendingClarificationQuestion = question;
+
+        //        await foreach (var chunk in StreamTextResponse(
+        //          "This policy has different provisions depending on your grade. Could you let me know your position?\n\n1. Supervisor and above\n2. Below Supervisor",
+        //          cancellationToken))
+        //        {
+        //            yield
+        //            return chunk;
+        //        }
+        //        yield
+        //        return new StreamChunk
+        //        {
+        //            Type = "complete",
+        //            ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+        //        };
+        //        yield
+        //        break;
+        //    }
+
+        //    // ============================
+        //    // STREAM SOURCES
+        //    // ============================
+        //    if (finalChunks.Any())
+        //    {
+        //        yield
+        //        return new StreamChunk
+        //        {
+        //            Type = "sources",
+        //            Sources = finalChunks.Select(c => c.Source).Distinct().ToList()
+        //        };
+
+        //        // ✅ NEW: turn the wait into something meaningful instead of a
+        //        // generic spinner — we already know which policies matched,
+        //        // so show that instead of hiding it. Capped at 6 and lightly
+        //        // paced (not real per-policy work — retrieval already
+        //        // finished) purely so each name is readable rather than
+        //        // flashing past; the actual "sources" event above already
+        //        // carries the full, uncapped list for citations.
+        //        var statusTemplates = new[] {
+        //  "📄 Extracting details from {0}...",
+        //  "🔍 Reading {0}...",
+        //  "📚 Checking {0}..."
+        //};
+        //        var displaySourceNames = finalChunks
+        //          .Select(c => System.IO.Path.GetFileNameWithoutExtension(c.Source ?? "")
+        //            .Replace('_', ' ').Replace('-', ' ').Trim())
+        //          .Where(n => !string.IsNullOrWhiteSpace(n))
+        //          .Distinct()
+        //          .Take(6)
+        //          .ToList();
+
+        //        for (int i = 0; i < displaySourceNames.Count; i++)
+        //        {
+        //            yield
+        //            return new StreamChunk
+        //            {
+        //                Type = "status",
+        //                Content = string.Format(statusTemplates[i % statusTemplates.Length], displaySourceNames[i])
+        //            };
+        //            await Task.Delay(280, cancellationToken);
+        //        }
+
+        //        var combinedAnnexureLinks = finalChunks
+        //          .Where(c => c.AnnexureLinks != null)
+        //          .SelectMany(c => c.AnnexureLinks!)
+        //          .GroupBy(kv => kv.Key)
+        //          .ToDictionary(g => g.Key, g => g.First().Value);
+
+        //        if (combinedAnnexureLinks.Any())
+        //        {
+        //            yield
+        //            return new StreamChunk
+        //            {
+        //                Type = "links",
+        //                AnnexureLinks = combinedAnnexureLinks
+        //            };
+        //        }
+        //    }
+
+        //    // ============================
+        //    // RESPONSE GENERATION (buffered — see verification block below)
+        //    // ============================
+        //    yield
+        //    return new StreamChunk
+        //    {
+        //        Type = "status",
+        //        Content = "Generating response..."
+        //    };
+
+        //    // Once known, fold the grade into the question text the model
+        //    // actually sees — kept separate from `question` itself so
+        //    // conversation history/follow-up detection elsewhere continues
+        //    // to operate on the employee's original wording, not this
+        //    // annotated form. Same pattern as ProcessQueryAsync.
+        //    var questionForModel = string.IsNullOrEmpty(conversationContext.EmployeeGrade) ?
+        //      question :
+        //      $"{question}\n\n(For context: I am {conversationContext.EmployeeGrade}. Only use the policy provisions that apply to this grade; ignore provisions written for the other grade.)";
+
+        //    async Task<(string Text, bool Errored, string? ErrorContent)> GenerateBufferedAsync(
+        //                     string modelName, string? questionOverride = null, int? timeoutSeconds = null)
+        //    {
+        //        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        //        if (timeoutSeconds.HasValue) cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds.Value));
+
+        //        var sb = new StringBuilder();
+        //        await foreach (var token in GenerateResponseFromContext(
+        //          questionOverride ?? questionForModel, modelName, agentContext, finalChunks, meaiInfo, plant,
+        //          persona, temperature, topicChanged, cts.Token))
+        //        {
+        //            if (token.StartsWith("__ERROR__:"))
+        //                return (sb.ToString(), true, token[10..]);
+        //            sb.Append(token);
+        //        }
+
+        //        // A timeout ends the stream quietly with partial text: report it as a failure, not as an answer
+        //        if (timeoutSeconds.HasValue && cts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        //            return (sb.ToString(), true, $"timed out after {timeoutSeconds}s");
+
+        //        return (sb.ToString(), false, null);
+        //    }
+
+        //    var (responseText, generationErrored, generationErrorContent) = await GenerateBufferedAsync(genModel.Name!);
+
+        //    if (generationErrored)
+        //    {
+        //        yield
+        //        return new StreamChunk
+        //        {
+        //            Type = "error",
+        //            Content = generationErrorContent
+        //        };
+        //        yield
+        //        break;
+        //    }
+
+        //    timer.Lap("generation");
+        //    if (string.IsNullOrWhiteSpace(responseText))
+        //    {
+        //        // ✅ CHANGED: was an immediate hard "error" event with no
+        //        // retry at all — a harsher failure mode than an ungrounded
+        //        // or incomplete answer gets (those retry with a stronger
+        //        // model first; this didn't retry at all). An empty
+        //        // generation is at least as recoverable as those cases —
+        //        // confirmed in production: a 10-source, broad-topic query
+        //        // (spanning Company Car, Mediclaim, Apprentice Scheme, GPA,
+        //        // health checkup, Trainee Scheme, Superannuation, Anti
+        //        // Trust, and two ISMS policies) produced zero output tokens
+        //        // from the primary model, most likely from being
+        //        // overwhelmed trying to synthesize too many unrelated
+        //        // documents in one pass — exactly the kind of case a
+        //        // stronger model is more likely to handle. Reusing the same
+        //        // GroundingRetryModel config and gate as the grounding/
+        //        // completeness retry above, rather than a hard failure the
+        //        // user has no way to recover from except retyping the
+        //        // question and hoping for a different result.
+        //        var retryModelName = _config.GroundingRetryModel;
+        //        var retriedEmpty = false;
+
+        //        if (!string.IsNullOrWhiteSpace(retryModelName) &&
+        //          !string.Equals(retryModelName, genModel.Name, StringComparison.OrdinalIgnoreCase))
+        //        {
+        //            _logger.LogWarning(
+        //              "⚠️ Generation returned empty output from '{OriginalModel}' — retrying once with '{RetryModel}' before failing.",
+        //              genModel.Name, retryModelName);
+
+        //            var retryModelConfig = await _modelManager.GetModelAsync(retryModelName);
+
+        //            if (retryModelConfig != null)
+        //            {
+        //                var (retryText, retryErrored, _) = await GenerateBufferedAsync(retryModelConfig.Name!, timeoutSeconds: 90);
+
+        //                if (!retryErrored && !string.IsNullOrWhiteSpace(retryText))
+        //                {
+        //                    responseText = retryText;
+        //                    genModel = retryModelConfig;
+        //                    _logger.LogInformation("✅ Retry with '{RetryModel}' produced a non-empty response.", retryModelName);
+        //                }
+        //                else
+        //                {
+        //                    retriedEmpty = true;
+        //                }
+        //            }
+        //            else
+        //            {
+        //                _logger.LogWarning("Empty-response retry model '{RetryModel}' not found — skipping retry.", retryModelName);
+        //            }
+        //        }
+
+        //        // Only hard-fail if the retry either wasn't attempted (no
+        //        // retry model configured/found) or also came back empty —
+        //        // otherwise responseText now holds the successful retry's
+        //        // content and execution falls through to verification below
+        //        // as normal.
+        //        if (string.IsNullOrWhiteSpace(responseText))
+        //        {
+        //            _logger.LogError(
+        //              "❌ Generation returned empty output{RetrySuffix} for question: {Question}",
+        //              retriedEmpty ? " even after retry" : "", question);
+
+        //            yield
+        //            return new StreamChunk
+        //            {
+        //                Type = "error",
+        //                Content = "Generated response was empty"
+        //            };
+        //            yield
+        //            break;
+        //        }
+        //    }
+
+        //    // ============================
+        //    // VERIFICATION
+        //    // ============================
+        //    var verification = await VerifyResponseSafelyAsync(question, responseText, finalChunks, meaiInfo);
+        //    timer.Lap("first verification");
+
+        //    // ✅ NEW: on a grounding failure, retry once with a stronger model before
+        //    // falling back to a refusal. Retrieval already succeeded here (real
+        //    // chunks with real content were found) — the failure mode observed was
+        //    // specifically weaker models (e.g. llama3.1:8b) ignoring good context
+        //    // and filling gaps with training knowledge. A larger, better-calibrated
+        //    // model (configured via GroundingRetryModel, default qwen3.5:27b) either
+        //    // produces a properly grounded answer or honestly admits it lacks the
+        //    // specific information — both are better outcomes than a hallucination,
+        //    // and the honest-admission case is still caught by the same gate below.
+        //    //
+        //    // ✅ CHANGED: was `!verification.IsGrounded` only. A confirmed real
+        //    // case (gemma4:12b, "how many EL will be given in a year") came back
+        //    // grounded=true, hallucination_free=true, complete=false, confidence
+        //    // 0.41 — genuinely relevant content from one retrieved document
+        //    // (02SP_General Information Policy) was in context but never made it
+        //    // into the synthesized answer. NeedsReprocessing was already true
+        //    // (confidence well under the 0.7 threshold — CalculateConfidence
+        //    // halves it specifically for incompleteness), but the old condition's
+        //    // extra `!IsGrounded` requirement meant this exact failure mode never
+        //    // reached the retry logic at all and shipped straight to the user.
+        //    bool usedRetryModel = false;
+        //    // Was silently invisible before: `retried:false` in the client-facing
+        //    // metadata could mean "retry fixed nothing" OR "retry never actually
+        //    // ran" (model not configured, not found on the Ollama host, or the
+        //    // retry call itself errored/returned empty) — three very different
+        //    // failure modes with the same visible symptom. This makes the
+        //    // distinction diagnosable from the metadata event itself instead of
+        //    // requiring server log access every time.
+        //    string? retrySkippedReason = null;
+
+        //    bool resolvedConflict = false;
+
+        //    if (verification != null && verification.IsSourceConflict)
+        //    {
+        //        var conflictNote = verification.Metadata.TryGetValue("grounding_reason", out var cr)
+        //            ? cr?.ToString()
+        //            : null;
+
+        //        _logger.LogWarning(
+        //          "⚠️ Grounding check detected a source CONFLICT (not a hallucination) for '{OriginalModel}' — " +
+        //          "regenerating with the same model but explicit instructions to present both sides. Reason: {Reason}",
+        //          genModel.Name, conflictNote ?? "(no reason given)");
+
+        //        var conflictQuestion = $"{questionForModel}\n\n" +
+        //          "(Note: a verification pass found that the source material may contain CONFLICTING policy " +
+        //          $"provisions on this exact point{(conflictNote != null ? $" — specifically: {conflictNote}" : "")}. " +
+        //          "Do not silently pick one side. Present BOTH provisions explicitly, stating which policy/document " +
+        //          "each comes from, and note which one is more specific to the situation if that's clear from the " +
+        //          "text. If they genuinely conflict for the same person, say so plainly rather than resolving it yourself.)";
+
+        //        var (conflictText, conflictErrored, _) = await GenerateBufferedAsync(genModel.Name!, conflictQuestion);
+
+        //        if (!conflictErrored && !string.IsNullOrWhiteSpace(conflictText))
+        //        {
+        //            var conflictVerification = await VerifyResponseSafelyAsync(question, conflictText, finalChunks, meaiInfo);
+
+        //            if (conflictVerification == null ||
+        //              !conflictVerification.NeedsReprocessing ||
+        //              (!conflictVerification.IsSourceConflict && conflictVerification.IsGrounded && conflictVerification.IsComplete))
+        //            {
+        //                responseText = conflictText;
+        //                verification = conflictVerification ?? verification;
+        //                resolvedConflict = true;
+        //                _logger.LogInformation("✅ Conflict-aware regeneration resolved the issue — both sides now presented explicitly.");
+        //            }
+        //            else
+        //            {
+        //                retrySkippedReason = "conflict_retry_still_conflicted";
+        //            }
+        //        }
+        //        else
+        //        {
+        //            retrySkippedReason = "conflict_retry_call_errored_or_empty";
+        //        }
+        //    }
+
+        //    if (!resolvedConflict && verification != null && verification.NeedsReprocessing &&
+        //      (!verification.IsGrounded || !verification.IsComplete))
+        //    {
+
+        //        if (verification != null && verification.NeedsReprocessing &&
+        //      (!verification.IsGrounded || !verification.IsComplete))
+        //        {
+        //            var retryModelName = _config.GroundingRetryModel;
+
+        //            if (!string.IsNullOrWhiteSpace(retryModelName) &&
+        //              !string.Equals(retryModelName, genModel.Name, StringComparison.OrdinalIgnoreCase))
+        //            {
+        //                _logger.LogWarning(
+        //                  "⚠️ Grounding check failed on '{OriginalModel}' (confidence {Confidence:P0}) — " +
+        //                  "retrying once with '{RetryModel}' before falling back to refusal.",
+        //                  genModel.Name, verification.OverallConfidence, retryModelName);
+
+        //                var retryModelConfig = await _modelManager.GetModelAsync(retryModelName);
+
+        //                if (retryModelConfig != null)
+        //                {
+        //                    var (retryText, retryErrored, _) = await GenerateBufferedAsync(retryModelConfig.Name!);
+
+        //                    if (!retryErrored && !string.IsNullOrWhiteSpace(retryText))
+        //                    {
+        //                        var retryVerification = await VerifyResponseSafelyAsync(question, retryText, finalChunks, meaiInfo);
+
+        //                        // Accept the retry if it's no longer flagged as an ungrounded
+        //                        // hallucination AND is now complete — including the case where
+        //                        // the stronger model honestly says "I don't have that specific
+        //                        // information" rather than fabricating, since that's still
+        //                        // strictly better than the original answer and will itself be
+        //                        // caught downstream if needed. Checking IsComplete here too,
+        //                        // not just IsGrounded — otherwise a retry that's grounded but
+        //                        // still incomplete (e.g. still only partially synthesizes the
+        //                        // retrieved content) would be silently accepted as if the
+        //                        // original problem were fixed.
+        //                        if (retryVerification == null ||
+        //                          !retryVerification.NeedsReprocessing ||
+        //                          (retryVerification.IsGrounded && retryVerification.IsComplete))
+        //                        {
+        //                            responseText = retryText;
+        //                            verification = retryVerification;
+        //                            usedRetryModel = true;
+
+        //                            _logger.LogInformation(
+        //                              "✅ Retry with '{RetryModel}' resolved the grounding issue (confidence {Confidence:P0})",
+        //                              retryModelName, retryVerification?.OverallConfidence ?? 0.0);
+        //                        }
+        //                        else
+        //                        {
+        //                            retrySkippedReason = $"retry_still_ungrounded:{retryModelName}";
+        //                            _logger.LogWarning(
+        //                              "⚠️ Retry with '{RetryModel}' still failed grounding check (confidence {Confidence:P0}) — falling back to refusal.",
+        //                              retryModelName, retryVerification.OverallConfidence);
+        //                        }
+        //                    }
+        //                    else
+        //                    {
+        //                        retrySkippedReason = $"retry_call_errored_or_empty:{retryModelName}";
+        //                        _logger.LogWarning(
+        //                          "⚠️ Grounding retry call to '{RetryModel}' errored or returned empty — falling back to refusal.",
+        //                          retryModelName);
+        //                    }
+        //                }
+        //                else
+        //                {
+        //                    retrySkippedReason = $"retry_model_not_found:{retryModelName}";
+        //                    _logger.LogWarning("Grounding retry model '{RetryModel}' not found — skipping retry.", retryModelName);
+        //                }
+        //            }
+        //            else
+        //            {
+        //                retrySkippedReason = string.IsNullOrWhiteSpace(retryModelName)
+        //                    ? "no_retry_model_configured"
+        //                    : "retry_model_same_as_primary";
+        //            }
+        //        }
+
+        //        if (verification != null)
+        //        {
+        //            yield
+        //            return new StreamChunk
+        //            {
+        //                Type = "metadata",
+        //                Content = JsonSerializer.Serialize(new
+        //                {
+        //                    verified = !verification.NeedsReprocessing,
+        //                    confidence = verification.OverallConfidence,
+        //                    retried = usedRetryModel,
+        //                    // See retrySkippedReason above: null whenever a retry
+        //                    // wasn't needed or succeeded; otherwise one of
+        //                    // no_retry_model_configured / retry_model_same_as_primary /
+        //                    // retry_model_not_found:<name> / retry_call_errored_or_empty:<name> /
+        //                    // retry_still_ungrounded:<name>, so `retried:false` is
+        //                    // diagnosable from this event alone.
+        //                    retry_skipped_reason = retrySkippedReason,
+        //                    quality_checks = new
+        //                    {
+        //                        complete = verification.IsComplete,
+        //                        grounded = verification.IsGrounded,
+        //                        hallucination_free = !verification.HasHallucinations
+        //                    },
+        //                    // Surfaces SelfVerifier's one-line explanation for a
+        //                    // "not grounded" verdict (added alongside the wider
+        //                    // source window / VerifierModel config change) so a
+        //                    // false-negative grounding check is diagnosable from
+        //                    // the browser console instead of requiring server
+        //                    // log access every time.
+        //                    grounding_reason = verification.Metadata.TryGetValue("grounding_reason", out
+        //                        var gr) ? gr : null,
+        //                    is_conflict = verification.IsSourceConflict
+        //                })
+        //            };
+        //        }
+        //    }
+
+        //    string finalAnswer = responseText;
+        //    bool askedClarification = false;
+        //    bool declined = false;
+
+        //    if (verification != null && verification.NeedsReprocessing &&
+        //      (!verification.IsGrounded || !verification.IsComplete))
+        //    {
+        //        _logger.LogWarning(
+        //          "⚠️ Self-verification flagged a low-confidence answer (confidence {Confidence:P0}, grounded={Grounded}, complete={Complete}) even after retry — " +
+        //          "checking whether a clarifying question could resolve this before falling back to refusal.",
+        //          verification.OverallConfidence, verification.IsGrounded, verification.IsComplete);
+
+        //        // ✅ NEW: one shot at asking the user something specific,
+        //        // rather than always giving up with "contact HR". Capped at
+        //        // 1 round per original question so a genuinely unresolvable
+        //        // ambiguity can't turn into an endless back-and-forth.
+        //        const int maxClarificationAttempts = 1;
+        //        string? clarifyingQuestion = null;
+
+        //        if (conversationContext.ClarificationAttemptCount < maxClarificationAttempts)
+        //        {
+        //            var groundingReason =
+        //                verification.Metadata.TryGetValue("grounding_reason", out var reasonValue)
+        //                    ? reasonValue?.ToString() ?? string.Empty
+        //                    : string.Empty;
+
+        //            // Include the verifier's status as well as its explanation. The metadata
+        //            // field may contain only a short label rather than the full reasoning.
+        //            var clarificationFeedback =
+        //                $"IsGrounded: {verification.IsGrounded}\n" +
+        //                $"IsComplete: {verification.IsComplete}\n" +
+        //                $"HasHallucinations: {verification.HasHallucinations}\n" +
+        //                $"IsSourceConflict: {verification.IsSourceConflict}\n" +
+        //                $"Confidence: {verification.OverallConfidence:P0}\n" +
+        //                $"Verifier feedback: {groundingReason}\n" +
+        //                $"Previously generated answer: {responseText}";
+
+        //            _logger.LogInformation(
+        //                "Clarification input for question '{Question}'. " +
+        //                "Grounded={Grounded}; Complete={Complete}; Confidence={Confidence:P0}; " +
+        //                "VerifierFeedback={VerifierFeedback}",
+        //                question,
+        //                verification.IsGrounded,
+        //                verification.IsComplete,
+        //                verification.OverallConfidence,
+        //                string.IsNullOrWhiteSpace(groundingReason)
+        //                    ? "(empty)"
+        //                    : groundingReason.Length > 500
+        //                        ? groundingReason[..500]
+        //                        : groundingReason);
+
+        //            clarifyingQuestion = await TryGenerateClarifyingQuestionAsync(
+        //                question,
+        //                finalChunks,
+        //                genModel,
+        //                clarificationFeedback,
+        //                cancellationToken);
+        //        }
+
+        //        if (clarifyingQuestion != null)
+        //        {
+        //            conversationContext.AwaitingGeneralClarification = true;
+        //            conversationContext.PendingGeneralClarificationQuestion = clarifyingQuestion;
+        //            conversationContext.PendingGeneralClarificationOriginalQuestion = question;
+        //            conversationContext.ClarificationAttemptCount++;
+        //            askedClarification = true;
+        //            _logger.LogInformation($"❓ Asking clarifying question instead of refusing: {clarifyingQuestion}");
+
+        //            finalAnswer = clarifyingQuestion;
+        //        }
+        //        else
+        //        {
+        //            declined = true;
+        //            // ✅ CHANGED: the message used to unconditionally say "not
+        //            // confident ... fully grounded", which is actively
+        //            // misleading when the real failure was incompleteness —
+        //            // the answer WAS grounded in real policy text, it just
+        //            // didn't cover everything relevant that was retrieved.
+        //            // Telling the user to contact HR because of a phantom
+        //            // "grounding" concern when the actual gap is coverage
+        //            // sends them looking for the wrong kind of help.
+        //            finalAnswer = !verification.IsGrounded ?
+        //            $"I want to make sure I give you accurate information, but I'm not confident " +
+        //            $"the answer I generated is fully grounded in {plant}'s policy documents. " +
+        //            $"Please contact your supervisor or HR department for clarification on this matter." :
+        //            $"I found some relevant information, but I'm not confident this answer covers " +
+        //            $"everything {plant}'s policy documents say on this — it may be missing details from " +
+        //            $"one or more of the retrieved sections. Please contact your supervisor or HR department " +
+        //            $"to confirm the complete picture, or try rephrasing your question to be more specific.";
+
+        //            // ============================
+        //            // TRACK: log this refusal for pattern analysis
+        //            // ============================
+        //            // Fire-and-forget — logging a failure must never delay or break
+        //            // the actual refusal already being streamed to the user. This is
+        //            // the data source for the admin failure-review endpoint, and for
+        //            // ResolveGroundingFailuresForQuestionAsync to auto-close once a
+        //            // human correction comes in for the same question later.
+        //            // Track the actual verification failure, not an unrelated empty-generation
+        //            // failure. The metadata reason may be a short label or may be missing.
+        //            var groundingReason = verification.Metadata.TryGetValue(
+        //                "grounding_reason", out var reasonValue)
+        //                    ? reasonValue?.ToString() ?? string.Empty
+        //                    : string.Empty;
+
+        //            if (string.IsNullOrWhiteSpace(groundingReason))
+        //            {
+        //                groundingReason = !verification.IsGrounded
+        //                    ? "ungrounded_answer"
+        //                    : !verification.IsComplete
+        //                        ? "incomplete_answer"
+        //                        : "verification_failed";
+        //            }
+
+        //            _ = _conversationStorage.LogGroundingFailureAsync(new GroundingFailure
+        //            {
+        //                Question = question,
+        //                Plant = plant,
+        //                RetrievedSourcesJson = JsonSerializer.Serialize(
+        //                    finalChunks.Select(c => c.Source).Distinct()),
+        //                GroundingReason = groundingReason,
+        //                Confidence = verification.OverallConfidence,
+        //                GenerationModel = genModel.Name ?? ""
+        //            });
+
+        //            // Stream the refusal that was actually constructed above.
+        //            yield return new StreamChunk
+        //            {
+        //                Type = "response",
+        //                Content = finalAnswer
+        //            };
+
+        //            yield return new StreamChunk
+        //            {
+        //                Type = "complete",
+        //                ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+        //            };
+
+        //            yield break;
+        //        }
+        //    }
+
+        //    // ============================
+        //    // STREAM FINAL (VERIFIED) ANSWER
+        //    // ============================
+
+        //    var quality = AnswerQualityBuilder.Build(verification, askedClarification, declined,
+        //        retrySkippedReason, finalChunks.Select(c => c.Source), plant, admin: true);
+
+        //    timer.Lap("retry / conflict / clarification (after verification)");
+        //    yield return new StreamChunk
+        //    {
+        //        Type = "answer_quality",
+        //        Content = JsonSerializer.Serialize(quality, new JsonSerializerOptions
+        //        {
+        //            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        //            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        //        })
+        //    };
+        //    yield
+        //    return new StreamChunk
+        //    {
+        //        Type = "response",
+        //        Content = finalAnswer
+        //    };
+
+        //    if (verification != null && verification.IsGrounded && verification.IsComplete &&
+        //        !verification.NeedsReprocessing && !declined && !askedClarification &&
+        //        !questionWasMerged && finalChunks.Any())
+        //    {
+        //        _ = _questionLearning.RecordVerifiedAsync(
+        //            question, userId ?? "system",
+        //            finalChunks.Select(c => c.Source), verification.OverallConfidence);
+        //    }
+
+        //    // ============================
+        //    // SAVE TO DATABASE
+        //    // ============================
+        //    _ = SaveConversationSafelyAsync(
+        //      agentContext, question, finalAnswer, finalChunks,
+        //      genModel, embModel, plant, verification, stopwatch.ElapsedMilliseconds);
+
+        //    stopwatch.Stop();
+
+        //    // ============================
+        //    // COMPLETION
+        //    // ============================
+        //    LogAgentCompletion(verification?.OverallConfidence ?? 0.7, stopwatch.ElapsedMilliseconds);
+
+        //    yield
+        //    return new StreamChunk
+        //    {
+        //        Type = "complete",
+        //        ProcessingTimeMs = stopwatch.ElapsedMilliseconds
+        //    };
+        //}
+
+
+
         public async IAsyncEnumerable<StreamChunk> ProcessQueryStreamAsync(
-          string question,
-          string plant,
-          string? generationModel = null,
-          string? embeddingModel = null,
-          // ⏱️ CHANGED: was 20 -- raised so the pipeline has enough real
-          // candidates to work with before reranking/diversification/budget
-          // trimming narrow it down for real. 20 was capping the field
-          // before DiversifyBySource's more generous ceiling (raised
-          // separately) ever got a chance to matter.
-          int maxResults = 40,
-          bool meaiInfo = true,
-          string? sessionId = null,
-          bool useReRanking = true,
-          string? userId = null,
-          // ✅ NEW: previously accepted by the frontend but never actually
-          // wired through — persona shapes the system prompt's tone,
-          // temperature overrides the per-model sampling default.
-          string? persona = null,
-          double? temperature = null,
-          [EnumeratorCancellation] CancellationToken cancellationToken =
-          default)
+  string question,
+  string plant,
+  string? generationModel = null,
+  string? embeddingModel = null,
+  int maxResults = 40,
+  bool meaiInfo = true,
+  string? sessionId = null,
+  bool useReRanking = true,
+  string? userId = null,
+  string? persona = null,
+  double? temperature = null,
+  [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             var stopwatch = Stopwatch.StartNew();
-
-            var timer = new StepTimer(_logger, "stream");
 
             // ============================
             // PRE-FLIGHT VALIDATION
@@ -8732,207 +9968,65 @@ Answer directly without introducing yourself.";
 
             if (!validationResult.Success)
             {
-                yield
-                return new StreamChunk
-                {
-                    Type = "error",
-                    Content = validationResult.ErrorMessage
-                };
-                yield
-                break;
+                yield return new StreamChunk { Type = "error", Content = validationResult.ErrorMessage };
+                yield break;
             }
 
-            timer.Lap("validate + create context");
-
             var agentContext = validationResult.Context!;
-            _logSessionId = agentContext.SessionId;
+            _logSessionId = agentContext.SessionId;   // lets every agent-log entry carry the session id
 
-            // ✅ NEW: same per-request resolution as ProcessQueryAsync — see
-            // that method's comment for why this is safe as instance state
-            // (DynamicRagService is Scoped, one instance per HTTP request).
+            // Per-request state (safe: DynamicRagService is Scoped, one instance per request)
             _currentRequester = await _employeeDirectory.GetEmployeeInfoAsync(userId ?? "system");
-            timer.Lap("employee lookup");
-            // ✅ NEW: does the QUESTION ITSELF name a grade ("benefits for
-            // AM")? If so, that should drive eligibility filtering for this
-            // request regardless of who's actually asking — see
-            // BuildEligibilityClauses.
+
+            // Does the question itself name a grade ("benefits for AM")? Drives eligibility filtering.
             ResolveQueryMentionedGradeRank(question);
 
-            // ✅ CRITICAL: AgentContext is rebuilt from scratch every request
-            // by CreateAgentContextAsync (it reloads History from the DB but
-            // has no persistence for arbitrary flags) — a flag set on it
-            // would vanish by the very next turn. ConversationContext, via
-            // the Conversation singleton's ConcurrentDictionary keyed by
-            // SessionId, is what actually survives across turns — it's what
-            // ProcessQueryAsync already relies on for this exact purpose.
-            // All clarification state below lives here, not on agentContext.
+            // ConversationContext survives across turns (singleton dictionary keyed by session);
+            // AgentContext is rebuilt every request, so all clarification state lives on this one.
             var conversationContext = _conversation.GetOrCreateConversationContext(agentContext.SessionId);
 
-            // ✅ NEW: resolve an answer to a pending designation ask (see the
-            // trigger below). Classifying Direct vs Indirect here also
-            // answers the EXISTING coarse "Supervisor and above / Below
-            // Supervisor" question for free — per the org structure, Jr.
-            // Supervisor and above IS the Indirect category, and below it
-            // IS Direct — so conversationContext.EmployeeGrade is set directly
-            // from this, and the grade-clarification check further below
-            // won't ask again since it only fires when that's still empty.
-
-            //if (conversationContext.AwaitingDesignationClarification)
-            //{
-            //    var designationAnswer = question.Trim();
-            //    conversationContext.AwaitingDesignationClarification = false;
-            //    question = conversationContext.PendingDesignationClarificationOriginalQuestion ?? question;
-            //    conversationContext.PendingDesignationClarificationOriginalQuestion = null;
-
-            //    if (!string.IsNullOrWhiteSpace(designationAnswer))
-            //    {
-            //        var lower = designationAnswer.ToLowerInvariant();
-            //        EmployeeRecord updatedRecord;
-
-            //        if (lower.Contains("direct worker"))
-            //        {
-            //            updatedRecord = new EmployeeRecord
-            //            {
-            //                UserId = _currentRequester!.UserId,
-            //                EmployeeCategory = "Direct",
-            //                DirectSubtype = "Direct Worker"
-            //            };
-            //            conversationContext.EmployeeGrade = "Below Supervisor";
-            //        }
-            //        else if (lower.Contains("administrative staff") || lower.Contains("admin staff"))
-            //        {
-            //            updatedRecord = new EmployeeRecord
-            //            {
-            //                UserId = _currentRequester!.UserId,
-            //                EmployeeCategory = "Direct",
-            //                DirectSubtype = "Administrative Staff"
-            //            };
-            //            conversationContext.EmployeeGrade = "Below Supervisor";
-            //        }
-            //        else
-            //        {
-            //            // Grade only exists on the Indirect side — same
-            //            // structural rule GradeEligibilityService applies
-            //            // when extracting eligibility from policy chunks.
-            //            updatedRecord = new EmployeeRecord
-            //            {
-            //                UserId = _currentRequester!.UserId,
-            //                EmployeeCategory = "Indirect",
-            //                Grade = designationAnswer
-            //            };
-            //            conversationContext.EmployeeGrade = "Supervisor and above";
-            //        }
-
-            //        var persisted = await _employeeDirectory.SetEmployeeInfoAsync(updatedRecord);
-            //        _currentRequester = updatedRecord; // use immediately — don't make them wait a request for their own answer to take effect
-
-            //        _logger.LogInformation(
-            //$"📋 Designation captured for '{updatedRecord.UserId}': Category={updatedRecord.EmployeeCategory}, " +
-            //          $"Grade={updatedRecord.Grade}, DirectSubtype={updatedRecord.DirectSubtype} (persisted={persisted})");
-
-            //        if (!persisted)
-            //            _logger.LogWarning("⚠️ Designation captured but not persisted to disk — will be asked again next session if this keeps happening");
-            //    }
-            //}
-
-            // ✅ CHANGED: an employee with no record at all in the directory
-            // no longer gets asked via a free-text chat question — instead
-            // this signals the frontend to show a structured picker
-            // (dropdown of known designations), which persists the answer
-            // directly through POST /api/rag/employee/designation. No
-            // cross-turn state is needed here anymore: the frontend holds
-            // onto the original question and resubmits it once the picker
-            // is saved, so there's nothing to resolve on a "next turn" —
-            // the very next request will simply have a known _currentRequester.
+            // ============================
+            // DESIGNATION: signal the frontend to show the position picker
+            // ============================
             if (string.IsNullOrEmpty(_currentRequester?.Grade) && string.IsNullOrEmpty(_currentRequester?.EmployeeCategory))
             {
                 _logger.LogInformation($"📋 No designation on file for '{_currentRequester?.UserId}' — signaling frontend to collect it via the position picker");
 
-                yield
-                return new StreamChunk
+                yield return new StreamChunk
                 {
                     Type = "requires_designation",
                     Content = "Please select your position to continue.",
                     PendingQuestion = question
                 };
-                yield
-                return new StreamChunk
-                {
-                    Type = "complete",
-                    ProcessingTimeMs = stopwatch.ElapsedMilliseconds
-                };
-                yield
-                break;
+                yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+                yield break;
             }
 
-            // ✅ NEW: ask an employee with NO record at all in the directory
-            // for their designation, once — this populates the directory
-            // (used for retrieval-time eligibility filtering) so they're
-            // never asked again, in this session or any future one.
-            // Deliberately independent of whether THIS specific question
-            // happens to be grade-specific — unlike the check further below,
-            // the goal here is a complete directory, not just unblocking
-            // one answer.
-            else if (string.IsNullOrEmpty(_currentRequester?.Grade) && string.IsNullOrEmpty(_currentRequester?.EmployeeCategory) &&
-              string.IsNullOrEmpty(conversationContext.EmployeeGrade))
-            {
-                conversationContext.AwaitingDesignationClarification = true;
-                conversationContext.PendingDesignationClarificationOriginalQuestion = question;
-
-                await foreach (var chunk in StreamTextResponse(
-                  "Before I answer — I don't have your position on file yet. Could you tell me your designation or job title " +
-                  "(e.g. \"Deputy Manager\", \"Officer\", \"Direct Worker\", \"Administrative Staff\")? I'll remember it so I don't need to ask again.",
-                  cancellationToken))
-                {
-                    yield
-                    return chunk;
-                }
-                yield
-                return new StreamChunk
-                {
-                    Type = "complete",
-                    ProcessingTimeMs = stopwatch.ElapsedMilliseconds
-                };
-                yield
-                break;
-            }
-
-            // ✅ NEW: if this turn's message is the employee's answer to a
-            // clarifying question asked last turn (see
-            // TryGenerateClarifyingQuestionAsync / the grounding-failure
-            // branch below), combine it with the original question rather
-            // than treating it as a fresh, standalone query — a bare
-            // answer like "the Sanand plant one" means nothing to
-            // retrieval on its own without the question it's answering.
-
+            // ============================
+            // RESOLVE A PENDING GENERAL CLARIFICATION
+            // The employee's reply is merged with the question it answers.
+            // ============================
             bool questionWasMerged = false;
-            if (conversationContext.AwaitingGeneralClarification && !string.IsNullOrWhiteSpace(conversationContext.PendingGeneralClarificationOriginalQuestion))
+            if (conversationContext.AwaitingGeneralClarification &&
+                !string.IsNullOrWhiteSpace(conversationContext.PendingGeneralClarificationOriginalQuestion))
             {
                 var originalQuestion = conversationContext.PendingGeneralClarificationOriginalQuestion;
                 var clarificationAnswer = question;
-                questionWasMerged = true;
 
                 _logger.LogInformation($"✅ Resolving pending clarification. Original: '{originalQuestion}' | Employee answered: '{clarificationAnswer}'");
 
                 question = $"{originalQuestion} (Additional context from employee: {clarificationAnswer})";
-
+                questionWasMerged = true;
 
                 conversationContext.AwaitingGeneralClarification = false;
                 conversationContext.PendingGeneralClarificationQuestion = null;
                 conversationContext.PendingGeneralClarificationOriginalQuestion = null;
-                // Deliberately NOT resetting ClarificationAttemptCount here —
-                // it caps attempts across this whole resolution chain, so if
-                // the re-answer ALSO fails grounding, the cap still applies
-                // before asking a second time rather than looping forever.
+                // ClarificationAttemptCount is deliberately not reset here: it caps attempts across the resolution chain.
             }
 
-            // 🎯 Title-band clarification: a title NAMED IN THE QUESTION (e.g.
-            // "benefits for AM") spans more than one band (e.g. "AM" is both
-            // ManagementStaff and LowerManagement). Resolve a pending answer,
-            // or ask one for the first time, before doing anything else --
-            // same reachability caveat as the grade-clarification block below:
-            // this has to live here, not just in ProcessQueryAsync, or the
-            // live UI never actually triggers it.
+            // ============================
+            // TITLE-BAND CLARIFICATION ("benefits for AM" spans two bands)
+            // ============================
             bool awaitingTitleBandAnswer = false;
             List<string> titleBandOptionsForPrompt = new();
             string? titleBandTitleForPrompt = null;
@@ -8975,30 +10069,20 @@ Answer directly without introducing yourself.";
             {
                 var titleBandOptionsText = string.Join("\n", titleBandOptionsForPrompt
                   .Select((b, i) => $"{i + 1}. {GradeHierarchyService.DisplayName(b)}"));
-                var titleBandPromptText = titleBandTitleForPrompt != null ?
-                  $"'{System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(titleBandTitleForPrompt)}' is used for two different grade bands here. Which one are you asking about?\n\n{titleBandOptionsText}" :
-          $"Sorry, I didn't quite catch that. Which one did you mean?\n\n{titleBandOptionsText}";
+                var titleBandPromptText = titleBandTitleForPrompt != null
+                  ? $"'{System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(titleBandTitleForPrompt)}' is used for two different grade bands here. Which one are you asking about?\n\n{titleBandOptionsText}"
+                  : $"Sorry, I didn't quite catch that. Which one did you mean?\n\n{titleBandOptionsText}";
 
                 await foreach (var chunk in StreamTextResponse(titleBandPromptText, cancellationToken))
-                {
-                    yield
-                    return chunk;
-                }
-                yield
-                return new StreamChunk
-                {
-                    Type = "complete",
-                    ProcessingTimeMs = stopwatch.ElapsedMilliseconds
-                };
-                yield
-                break;
+                    yield return chunk;
+
+                yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+                yield break;
             }
 
-            // 🧑‍💼 Grade clarification — ported from ProcessQueryAsync, which
-            // had this logic but was never actually reachable from the
-            // streaming endpoint the live UI calls. Resolve an answer to a
-            // pending grade question, or pick up a volunteered grade
-            // mentioned unprompted in the question itself.
+            // ============================
+            // GRADE CLARIFICATION (Supervisor and above / below)
+            // ============================
             bool awaitingGradeAnswer = false;
             if (conversationContext.AwaitingGradeClarification)
             {
@@ -9013,9 +10097,7 @@ Answer directly without introducing yourself.";
                 }
                 else
                 {
-                    // Didn't recognize an answer — re-ask rather than silently
-                    // proceeding with a guessed or blended answer.
-                    awaitingGradeAnswer = true;
+                    awaitingGradeAnswer = true;   // re-ask instead of guessing
                 }
             }
             else if (string.IsNullOrEmpty(conversationContext.EmployeeGrade))
@@ -9030,28 +10112,18 @@ Answer directly without introducing yourself.";
                 await foreach (var chunk in StreamTextResponse(
                   "Sorry, I didn't quite catch that. Could you confirm your position so I can give you the correct answer?\n\n1. Supervisor and above\n2. Below Supervisor",
                   cancellationToken))
-                {
-                    yield
-                    return chunk;
-                }
-                yield
-                return new StreamChunk
-                {
-                    Type = "complete",
-                    ProcessingTimeMs = stopwatch.ElapsedMilliseconds
-                };
-                yield
-                break;
+                    yield return chunk;
+
+                yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+                yield break;
             }
 
             if (string.IsNullOrEmpty(conversationContext.EmployeeGrade) && _currentRequester != null)
                 conversationContext.EmployeeGrade = _policyAnalysis.GradeTierForCategory(_currentRequester.EmployeeCategory);
 
-            // 🧭 Policy-variant clarification (e.g. Domestic vs. Foreign Travel) —
-            // resolve a pending answer BEFORE retrieval runs again, so retrieval
-            // below operates on the resumed original question, not the user's
-            // short reply ("1" / "domestic"). rejectedPolicySources carries the
-            // deselected document(s) forward to the post-retrieval filter.
+            // ============================
+            // POLICY-VARIANT CLARIFICATION (e.g. Domestic vs Foreign Travel): resolve a pending answer
+            // ============================
             bool awaitingPolicyVariantAnswer = false;
             List<string> rejectedPolicySources = new();
             if (conversationContext.AwaitingPolicyClarification)
@@ -9081,69 +10153,40 @@ Answer directly without introducing yourself.";
                 await foreach (var chunk in StreamTextResponse(
                   $"Sorry, I didn't quite catch that. Which one did you mean?\n\n{retryOptionsText}",
                   cancellationToken))
-                {
-                    yield
-                    return chunk;
-                }
-                yield
-                return new StreamChunk
-                {
-                    Type = "complete",
-                    ProcessingTimeMs = stopwatch.ElapsedMilliseconds
-                };
-                yield
-                break;
+                    yield return chunk;
+
+                yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+                yield break;
             }
 
             _logger.LogInformation($"📝 Session {agentContext.SessionId} has {agentContext.History.Count} history items");
 
-            if (agentContext.History.Any())
-            {
-                var lastQ = agentContext.History.Last().Question;
-                _logger.LogInformation($"📝 Last question was: {lastQ.Substring(0, Math.Min(50, lastQ.Length))}");
-            }
             var genModel = validationResult.GenerationModel!;
             var embModel = validationResult.EmbeddingModel!;
 
-            yield
-            return new StreamChunk
-            {
-                Type = "status",
-                Content = "Initializing agent..."
-            };
+            yield return new StreamChunk { Type = "status", Content = "Initializing agent..." };
 
             // ============================
-            // CACHE CHECK
+            // CACHE CHECK (appreciated answers / corrections)
             // ============================
             var cacheResult = await CheckCacheAsync(question, generationModel);
 
             if (cacheResult.HasResult)
             {
                 await foreach (var chunk in StreamTextResponse(cacheResult.CachedAnswer!, cancellationToken))
-                {
-                    yield
-                    return chunk;
-                }
+                    yield return chunk;
 
-                yield
-                return new StreamChunk
-                {
-                    Type = "complete",
-                    ProcessingTimeMs = stopwatch.ElapsedMilliseconds
-                };
-                yield
-                break;
+                yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+                yield break;
             }
-            timer.Lap("cache check (appreciated + corrections)");
 
             // ============================
-            // NON-MEAI → DIRECT LLM ONLY
+            // NON-MEAI -> DIRECT LLM (+ optional internet search)
             // ============================
             if (!meaiInfo)
             {
                 await EnsureHistorySeededAsync(agentContext.SessionId);
 
-                // 🌐 Internet search — only when enabled in appsettings (InternetSearch:Enabled)
                 var webResults = new List<WebResult>();
                 if (_webSearch.IsEnabled)
                 {
@@ -9168,7 +10211,6 @@ Answer directly without introducing yourself.";
                     yield return new StreamChunk { Type = "response", Content = token };
                 }
 
-                // Append clickable sources after the answer (also saved with the conversation)
                 if (webResults.Count > 0 && !string.IsNullOrWhiteSpace(full.ToString()))
                 {
                     var sourcesMd = BuildWebSourcesMarkdown(webResults);
@@ -9181,7 +10223,6 @@ Answer directly without introducing yourself.";
 
                 if (!string.IsNullOrWhiteSpace(full.ToString()))
                 {
-
                     _ = SaveConversationSafelyAsync(
                       agentContext, question, full.ToString(),
                       new List<RelevantChunk>(), genModel, embModel,
@@ -9195,12 +10236,7 @@ Answer directly without introducing yourself.";
             // ============================
             // PLANNING
             // ============================
-            yield
-            return new StreamChunk
-            {
-                Type = "status",
-                Content = "Planning execution..."
-            };
+            yield return new StreamChunk { Type = "status", Content = "Planning execution..." };
 
             var planResult = await CreateExecutionPlanAsync(question, agentContext, meaiInfo);
 
@@ -9209,78 +10245,32 @@ Answer directly without introducing yourself.";
                 await foreach (var chunk in ExecuteDirectPathAsync(
                   question, plant, agentContext, genModel, embModel,
                   maxResults, meaiInfo, useReRanking, stopwatch, cancellationToken))
-                {
-                    yield
-                    return chunk;
-                }
-                yield
-                break;
-            }
+                    yield return chunk;
 
-            timer.Lap("planning");
+                yield break;
+            }
 
             var plan = planResult.Plan!;
 
             // ============================
-            // QUESTION REWRITE (display-only)
-            // ============================
-            // What people actually type is often terse/blunt ("AM parking?",
-            // "where park car") -- fine for retrieval, but gives the user no way
-            // to visually confirm it was understood correctly. Show a clean,
-            // complete, plain-English restatement before the answer arrives.
-            // Purely cosmetic: `question` itself still flows unchanged into
-            // retrieval, generation and history everywhere below.
-            //var rewrittenQuestion = await RewriteQuestionPlainEnglishAsync(
-            //  question, agentContext.History, genModel.Name!);
-
-            //if (!string.IsNullOrWhiteSpace(rewrittenQuestion) &&
-            //  !string.Equals(rewrittenQuestion.Trim(), question.Trim(), StringComparison.OrdinalIgnoreCase))
-            //{
-            //    yield
-            //    return new StreamChunk
-            //    {
-            //        Type = "rewritten_question",
-            //        Content = rewrittenQuestion
-            //    };
-            //}
-
-            // ============================
             // RETRIEVAL
             // ============================
-            yield
-            return new StreamChunk
-            {
-                Type = "status",
-                Content = "Searching knowledge base..."
-            };
+            yield return new StreamChunk { Type = "status", Content = "Searching knowledge base..." };
 
             var retrievalResult = await ExecuteRetrievalAsync(
               question, embModel, maxResults, plant, agentContext, useReRanking, plan, genModel, conversationContext.EmployeeGrade);
 
-            timer.Lap("retrieval (total)");
-
             var finalChunks = retrievalResult.Chunks;
             var topicChanged = retrievalResult.TopicChanged;
 
-            // 🪦 Drop chunks describing the OTHER death scenario than the one
-            // asked about — ported alongside the grade check below, same
-            // reasoning as ProcessQueryAsync: structural filtering here, not
-            // a prompt instruction, so a mismatched chunk can't reach the
-            // model at all.
+            // Drop chunks describing the other death scenario (own vs family member's)
             finalChunks = _policyAnalysis.FilterScenarioMismatchedChunks(finalChunks, question);
 
-            // If we just resumed from a resolved policy-variant clarification,
-            // strip the deselected policy's chunks out of this fresh retrieval
-            // before anything downstream (grade check, generation) sees them.
             if (rejectedPolicySources.Any())
             {
+                // just resumed from a resolved policy-variant clarification
                 finalChunks = _policyAnalysis.FilterToSelectedPolicyVariant(finalChunks, rejectedPolicySources);
             }
-            // Otherwise, check whether THIS retrieval freshly surfaced two
-            // sibling policy documents (e.g. Domestic vs. Foreign Travel) that
-            // the question doesn't disambiguate — same idea as the grade
-            // check below, but for picking the right POLICY rather than the
-            // right PROVISION within one policy.
             else
             {
                 var decision = _policyAnalysis.EvaluatePolicyVariant(finalChunks, question, conversationContext.PreferredPolicyQualifier);
@@ -9292,11 +10282,6 @@ Answer directly without introducing yourself.";
                 }
 
                 var policyOptions = decision.AskOptions;
-                if (policyOptions != null && !QuestionMentionsPolicyFamily(question, policyOptions.Select(o => o.SourceFile)))
-                {
-                    _logger.LogInformation("🧭 Policy-variant prompt skipped: question doesn't mention the policy family");
-                    policyOptions = null;
-                }
                 if (policyOptions != null)
                 {
                     _logger.LogInformation($"🧭 Policy-variant ambiguity detected for session {agentContext.SessionId} — asking user to pick one");
@@ -9308,28 +10293,14 @@ Answer directly without introducing yourself.";
                     await foreach (var chunk in StreamTextResponse(
                       $"This question could fall under more than one policy. Which one applies to you?\n\n{optionsText}",
                       cancellationToken))
-                    {
-                        yield
-                        return chunk;
-                    }
-                    yield
-                    return new StreamChunk
-                    {
-                        Type = "complete",
-                        ProcessingTimeMs = stopwatch.ElapsedMilliseconds
-                    };
-                    yield
-                    break;
+                        yield return chunk;
+
+                    yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+                    yield break;
                 }
             }
 
-            // 🧑‍💼 If retrieved content spans both grade tiers and we still
-            // don't know the employee's grade, pause and ask rather than
-            // generating an answer that guesses or blends both grades'
-            // provisions. Checked AFTER retrieval, not on the raw question,
-            // since "grade-specific" depends on the matched POLICY, not the
-            // question's wording. This existed in ProcessQueryAsync but was
-            // never reachable from this streaming method until now.
+            // Retrieved content spans both grade tiers and the grade is still unknown: ask
             if (string.IsNullOrEmpty(conversationContext.EmployeeGrade) && _policyAnalysis.HasGradeSpecificContent(finalChunks))
             {
                 _logger.LogInformation($"🧑‍💼 Grade-specific policy content detected for session {agentContext.SessionId} — asking user to clarify position");
@@ -9339,18 +10310,10 @@ Answer directly without introducing yourself.";
                 await foreach (var chunk in StreamTextResponse(
                   "This policy has different provisions depending on your grade. Could you let me know your position?\n\n1. Supervisor and above\n2. Below Supervisor",
                   cancellationToken))
-                {
-                    yield
-                    return chunk;
-                }
-                yield
-                return new StreamChunk
-                {
-                    Type = "complete",
-                    ProcessingTimeMs = stopwatch.ElapsedMilliseconds
-                };
-                yield
-                break;
+                    yield return chunk;
+
+                yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+                yield break;
             }
 
             // ============================
@@ -9358,24 +10321,17 @@ Answer directly without introducing yourself.";
             // ============================
             if (finalChunks.Any())
             {
-                yield
-                return new StreamChunk
+                yield return new StreamChunk
                 {
                     Type = "sources",
                     Sources = finalChunks.Select(c => c.Source).Distinct().ToList()
                 };
 
-                // ✅ NEW: turn the wait into something meaningful instead of a
-                // generic spinner — we already know which policies matched,
-                // so show that instead of hiding it. Capped at 6 and lightly
-                // paced (not real per-policy work — retrieval already
-                // finished) purely so each name is readable rather than
-                // flashing past; the actual "sources" event above already
-                // carries the full, uncapped list for citations.
-                var statusTemplates = new[] {
-          "📄 Extracting details from {0}...",
-          "🔍 Reading {0}...",
-          "📚 Checking {0}..."
+                var statusTemplates = new[]
+                {
+            "📄 Extracting details from {0}...",
+            "🔍 Reading {0}...",
+            "📚 Checking {0}..."
         };
                 var displaySourceNames = finalChunks
                   .Select(c => System.IO.Path.GetFileNameWithoutExtension(c.Source ?? "")
@@ -9387,8 +10343,7 @@ Answer directly without introducing yourself.";
 
                 for (int i = 0; i < displaySourceNames.Count; i++)
                 {
-                    yield
-                    return new StreamChunk
+                    yield return new StreamChunk
                     {
                         Type = "status",
                         Content = string.Format(statusTemplates[i % statusTemplates.Length], displaySourceNames[i])
@@ -9404,51 +10359,44 @@ Answer directly without introducing yourself.";
 
                 if (combinedAnnexureLinks.Any())
                 {
-                    yield
-                    return new StreamChunk
-                    {
-                        Type = "links",
-                        AnnexureLinks = combinedAnnexureLinks
-                    };
+                    yield return new StreamChunk { Type = "links", AnnexureLinks = combinedAnnexureLinks };
                 }
             }
 
             // ============================
-            // RESPONSE GENERATION (buffered — see verification block below)
+            // RESPONSE GENERATION (buffered: verification runs before anything is shown)
             // ============================
-            yield
-            return new StreamChunk
-            {
-                Type = "status",
-                Content = "Generating response..."
-            };
+            yield return new StreamChunk { Type = "status", Content = "Generating response..." };
 
-            // Once known, fold the grade into the question text the model
-            // actually sees — kept separate from `question` itself so
-            // conversation history/follow-up detection elsewhere continues
-            // to operate on the employee's original wording, not this
-            // annotated form. Same pattern as ProcessQueryAsync.
-            var questionForModel = string.IsNullOrEmpty(conversationContext.EmployeeGrade) ?
-              question :
-              $"{question}\n\n(For context: I am {conversationContext.EmployeeGrade}. Only use the policy provisions that apply to this grade; ignore provisions written for the other grade.)";
+            var questionForModel = string.IsNullOrEmpty(conversationContext.EmployeeGrade)
+              ? question
+              : $"{question}\n\n(For context: I am {conversationContext.EmployeeGrade}. Only use the policy provisions that apply to this grade; ignore provisions written for the other grade.)";
 
+            // timeoutSeconds is used for retries on larger models so one slow model can't hang the request
             async Task<(string Text, bool Errored, string? ErrorContent)> GenerateBufferedAsync(
-                             string modelName, string? questionOverride = null, int? timeoutSeconds = null)
+                string modelName, string? questionOverride = null, int? timeoutSeconds = null)
             {
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 if (timeoutSeconds.HasValue) cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds.Value));
 
                 var sb = new StringBuilder();
-                await foreach (var token in GenerateResponseFromContext(
-                  questionOverride ?? questionForModel, modelName, agentContext, finalChunks, meaiInfo, plant,
-                  persona, temperature, topicChanged, cts.Token))
+                try
                 {
-                    if (token.StartsWith("__ERROR__:"))
-                        return (sb.ToString(), true, token[10..]);
-                    sb.Append(token);
+                    await foreach (var token in GenerateResponseFromContext(
+                      questionOverride ?? questionForModel, modelName, agentContext, finalChunks, meaiInfo, plant,
+                      persona, temperature, topicChanged, cts.Token))
+                    {
+                        if (token.StartsWith("__ERROR__:"))
+                            return (sb.ToString(), true, token[10..]);
+                        sb.Append(token);
+                    }
+                }
+                catch (OperationCanceledException) when (timeoutSeconds.HasValue && !cancellationToken.IsCancellationRequested)
+                {
+                    return (sb.ToString(), true, $"timed out after {timeoutSeconds}s");
                 }
 
-                // A timeout ends the stream quietly with partial text: report it as a failure, not as an answer
+                // a timeout can also end the stream quietly with partial text
                 if (timeoutSeconds.HasValue && cts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
                     return (sb.ToString(), true, $"timed out after {timeoutSeconds}s");
 
@@ -9459,41 +10407,18 @@ Answer directly without introducing yourself.";
 
             if (generationErrored)
             {
-                yield
-                return new StreamChunk
-                {
-                    Type = "error",
-                    Content = generationErrorContent
-                };
-                yield
-                break;
+                yield return new StreamChunk { Type = "error", Content = generationErrorContent };
+                yield break;
             }
 
-            timer.Lap("generation");
+            // ---- empty output: retry once with the retry model, then fail gently ----
             if (string.IsNullOrWhiteSpace(responseText))
             {
-                // ✅ CHANGED: was an immediate hard "error" event with no
-                // retry at all — a harsher failure mode than an ungrounded
-                // or incomplete answer gets (those retry with a stronger
-                // model first; this didn't retry at all). An empty
-                // generation is at least as recoverable as those cases —
-                // confirmed in production: a 10-source, broad-topic query
-                // (spanning Company Car, Mediclaim, Apprentice Scheme, GPA,
-                // health checkup, Trainee Scheme, Superannuation, Anti
-                // Trust, and two ISMS policies) produced zero output tokens
-                // from the primary model, most likely from being
-                // overwhelmed trying to synthesize too many unrelated
-                // documents in one pass — exactly the kind of case a
-                // stronger model is more likely to handle. Reusing the same
-                // GroundingRetryModel config and gate as the grounding/
-                // completeness retry above, rather than a hard failure the
-                // user has no way to recover from except retyping the
-                // question and hoping for a different result.
                 var retryModelName = _config.GroundingRetryModel;
                 var retriedEmpty = false;
 
                 if (!string.IsNullOrWhiteSpace(retryModelName) &&
-                  !string.Equals(retryModelName, genModel.Name, StringComparison.OrdinalIgnoreCase))
+                    !string.Equals(retryModelName, genModel.Name, StringComparison.OrdinalIgnoreCase))
                 {
                     _logger.LogWarning(
                       "⚠️ Generation returned empty output from '{OriginalModel}' — retrying once with '{RetryModel}' before failing.",
@@ -9522,66 +10447,79 @@ Answer directly without introducing yourself.";
                     }
                 }
 
-                // Only hard-fail if the retry either wasn't attempted (no
-                // retry model configured/found) or also came back empty —
-                // otherwise responseText now holds the successful retry's
-                // content and execution falls through to verification below
-                // as normal.
                 if (string.IsNullOrWhiteSpace(responseText))
                 {
                     _logger.LogError(
                       "❌ Generation returned empty output{RetrySuffix} for question: {Question}",
                       retriedEmpty ? " even after retry" : "", question);
 
-                    yield
-                    return new StreamChunk
+                    _ = _conversationStorage.LogGroundingFailureAsync(new GroundingFailure
                     {
-                        Type = "error",
-                        Content = "Generated response was empty"
+                        Question = question,
+                        Plant = plant,
+                        RetrievedSourcesJson = JsonSerializer.Serialize(finalChunks.Select(c => c.Source).Distinct()),
+                        GroundingReason = "generation_empty",
+                        Confidence = 0,
+                        GenerationModel = genModel.Name ?? ""
+                    });
+
+                    yield return new StreamChunk
+                    {
+                        Type = "response",
+                        Content = "I couldn't generate an answer right now. Please try again in a moment, or contact HR if it's urgent."
                     };
-                    yield
-                    break;
+                    yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+                    yield break;
                 }
+            }
+
+            // ============================
+            // THE MODEL ASKED FOR MISSING INFORMATION INSTEAD OF ANSWERING
+            // (system prompt rule 9: reply "CLARIFY: <question>")
+            // ============================
+            if (TryExtractClarification(responseText, out var modelClarifyQuestion))
+            {
+                if (conversationContext.ClarificationAttemptCount < 2)
+                {
+                    conversationContext.AwaitingGeneralClarification = true;
+                    conversationContext.PendingGeneralClarificationQuestion = modelClarifyQuestion;
+                    conversationContext.PendingGeneralClarificationOriginalQuestion = question;
+                    conversationContext.ClarificationAttemptCount++;
+
+                    _logger.LogInformation("🙋 Model asked for clarification: '{Q}' (original question: '{Orig}')",
+                        modelClarifyQuestion, question);
+
+                    await foreach (var chunk in StreamTextResponse(modelClarifyQuestion, cancellationToken))
+                        yield return chunk;
+
+                    _ = SaveConversationSafelyAsync(agentContext, question, modelClarifyQuestion, finalChunks,
+                        genModel, embModel, plant, null, stopwatch.ElapsedMilliseconds);
+
+                    yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+                    yield break;
+                }
+
+                // Already asked twice: force an answer with stated assumptions instead of looping
+                _logger.LogInformation("🙋 Clarification cap reached — forcing an answer with assumptions");
+                var (forced, forcedErrored, _) = await GenerateBufferedAsync(
+                    genModel.Name!,
+                    questionForModel + "\n\n(Do not ask any more questions. State the assumptions you are making and answer now.)");
+
+                responseText = (!forcedErrored && !string.IsNullOrWhiteSpace(forced) && !TryExtractClarification(forced, out _))
+                    ? forced
+                    : "I still need a few more details to answer this accurately. Please share them in one message, or contact HR.";
             }
 
             // ============================
             // VERIFICATION
             // ============================
             var verification = await VerifyResponseSafelyAsync(question, responseText, finalChunks, meaiInfo);
-            timer.Lap("first verification");
 
-            // ✅ NEW: on a grounding failure, retry once with a stronger model before
-            // falling back to a refusal. Retrieval already succeeded here (real
-            // chunks with real content were found) — the failure mode observed was
-            // specifically weaker models (e.g. llama3.1:8b) ignoring good context
-            // and filling gaps with training knowledge. A larger, better-calibrated
-            // model (configured via GroundingRetryModel, default qwen3.5:27b) either
-            // produces a properly grounded answer or honestly admits it lacks the
-            // specific information — both are better outcomes than a hallucination,
-            // and the honest-admission case is still caught by the same gate below.
-            //
-            // ✅ CHANGED: was `!verification.IsGrounded` only. A confirmed real
-            // case (gemma4:12b, "how many EL will be given in a year") came back
-            // grounded=true, hallucination_free=true, complete=false, confidence
-            // 0.41 — genuinely relevant content from one retrieved document
-            // (02SP_General Information Policy) was in context but never made it
-            // into the synthesized answer. NeedsReprocessing was already true
-            // (confidence well under the 0.7 threshold — CalculateConfidence
-            // halves it specifically for incompleteness), but the old condition's
-            // extra `!IsGrounded` requirement meant this exact failure mode never
-            // reached the retry logic at all and shipped straight to the user.
             bool usedRetryModel = false;
-            // Was silently invisible before: `retried:false` in the client-facing
-            // metadata could mean "retry fixed nothing" OR "retry never actually
-            // ran" (model not configured, not found on the Ollama host, or the
-            // retry call itself errored/returned empty) — three very different
-            // failure modes with the same visible symptom. This makes the
-            // distinction diagnosable from the metadata event itself instead of
-            // requiring server log access every time.
-            string? retrySkippedReason = null;
-
+            string? retrySkippedReason = null;   // makes "retried:false" diagnosable from the metadata event
             bool resolvedConflict = false;
 
+            // ---- source CONFLICT (not a hallucination): regenerate with the same model, present both sides ----
             if (verification != null && verification.IsSourceConflict)
             {
                 var conflictNote = verification.Metadata.TryGetValue("grounding_reason", out var cr)
@@ -9607,8 +10545,8 @@ Answer directly without introducing yourself.";
                     var conflictVerification = await VerifyResponseSafelyAsync(question, conflictText, finalChunks, meaiInfo);
 
                     if (conflictVerification == null ||
-                      !conflictVerification.NeedsReprocessing ||
-                      (!conflictVerification.IsSourceConflict && conflictVerification.IsGrounded && conflictVerification.IsComplete))
+                        !conflictVerification.NeedsReprocessing ||
+                        (!conflictVerification.IsSourceConflict && conflictVerification.IsGrounded && conflictVerification.IsComplete))
                     {
                         responseText = conflictText;
                         verification = conflictVerification ?? verification;
@@ -9626,89 +10564,74 @@ Answer directly without introducing yourself.";
                 }
             }
 
+            // ---- ungrounded or incomplete: retry once with the stronger model ----
             if (!resolvedConflict && verification != null && verification.NeedsReprocessing &&
-              (!verification.IsGrounded || !verification.IsComplete))
+                (!verification.IsGrounded || !verification.IsComplete))
             {
+                var retryModelName = _config.GroundingRetryModel;
 
-                if (verification != null && verification.NeedsReprocessing &&
-              (!verification.IsGrounded || !verification.IsComplete))
+                if (!string.IsNullOrWhiteSpace(retryModelName) &&
+                    !string.Equals(retryModelName, genModel.Name, StringComparison.OrdinalIgnoreCase))
                 {
-                    var retryModelName = _config.GroundingRetryModel;
+                    _logger.LogWarning(
+                      "⚠️ Grounding check failed on '{OriginalModel}' (confidence {Confidence:P0}) — " +
+                      "retrying once with '{RetryModel}' before falling back to refusal.",
+                      genModel.Name, verification.OverallConfidence, retryModelName);
 
-                    if (!string.IsNullOrWhiteSpace(retryModelName) &&
-                      !string.Equals(retryModelName, genModel.Name, StringComparison.OrdinalIgnoreCase))
+                    var retryModelConfig = await _modelManager.GetModelAsync(retryModelName);
+
+                    if (retryModelConfig != null)
                     {
-                        _logger.LogWarning(
-                          "⚠️ Grounding check failed on '{OriginalModel}' (confidence {Confidence:P0}) — " +
-                          "retrying once with '{RetryModel}' before falling back to refusal.",
-                          genModel.Name, verification.OverallConfidence, retryModelName);
+                        var (retryText, retryErrored, _) = await GenerateBufferedAsync(retryModelConfig.Name!, timeoutSeconds: 90);
 
-                        var retryModelConfig = await _modelManager.GetModelAsync(retryModelName);
-
-                        if (retryModelConfig != null)
+                        if (!retryErrored && !string.IsNullOrWhiteSpace(retryText))
                         {
-                            var (retryText, retryErrored, _) = await GenerateBufferedAsync(retryModelConfig.Name!);
+                            var retryVerification = await VerifyResponseSafelyAsync(question, retryText, finalChunks, meaiInfo);
 
-                            if (!retryErrored && !string.IsNullOrWhiteSpace(retryText))
+                            if (retryVerification == null ||
+                                !retryVerification.NeedsReprocessing ||
+                                (retryVerification.IsGrounded && retryVerification.IsComplete))
                             {
-                                var retryVerification = await VerifyResponseSafelyAsync(question, retryText, finalChunks, meaiInfo);
+                                responseText = retryText;
+                                verification = retryVerification;
+                                usedRetryModel = true;
 
-                                // Accept the retry if it's no longer flagged as an ungrounded
-                                // hallucination AND is now complete — including the case where
-                                // the stronger model honestly says "I don't have that specific
-                                // information" rather than fabricating, since that's still
-                                // strictly better than the original answer and will itself be
-                                // caught downstream if needed. Checking IsComplete here too,
-                                // not just IsGrounded — otherwise a retry that's grounded but
-                                // still incomplete (e.g. still only partially synthesizes the
-                                // retrieved content) would be silently accepted as if the
-                                // original problem were fixed.
-                                if (retryVerification == null ||
-                                  !retryVerification.NeedsReprocessing ||
-                                  (retryVerification.IsGrounded && retryVerification.IsComplete))
-                                {
-                                    responseText = retryText;
-                                    verification = retryVerification;
-                                    usedRetryModel = true;
-
-                                    _logger.LogInformation(
-                                      "✅ Retry with '{RetryModel}' resolved the grounding issue (confidence {Confidence:P0})",
-                                      retryModelName, retryVerification?.OverallConfidence ?? 0.0);
-                                }
-                                else
-                                {
-                                    retrySkippedReason = $"retry_still_ungrounded:{retryModelName}";
-                                    _logger.LogWarning(
-                                      "⚠️ Retry with '{RetryModel}' still failed grounding check (confidence {Confidence:P0}) — falling back to refusal.",
-                                      retryModelName, retryVerification.OverallConfidence);
-                                }
+                                _logger.LogInformation(
+                                  "✅ Retry with '{RetryModel}' resolved the grounding issue (confidence {Confidence:P0})",
+                                  retryModelName, retryVerification?.OverallConfidence ?? 0.0);
                             }
                             else
                             {
-                                retrySkippedReason = $"retry_call_errored_or_empty:{retryModelName}";
+                                retrySkippedReason = $"retry_still_ungrounded:{retryModelName}";
                                 _logger.LogWarning(
-                                  "⚠️ Grounding retry call to '{RetryModel}' errored or returned empty — falling back to refusal.",
-                                  retryModelName);
+                                  "⚠️ Retry with '{RetryModel}' still failed grounding check (confidence {Confidence:P0}) — falling back to refusal.",
+                                  retryModelName, retryVerification.OverallConfidence);
                             }
                         }
                         else
                         {
-                            retrySkippedReason = $"retry_model_not_found:{retryModelName}";
-                            _logger.LogWarning("Grounding retry model '{RetryModel}' not found — skipping retry.", retryModelName);
+                            retrySkippedReason = $"retry_call_errored_or_empty:{retryModelName}";
+                            _logger.LogWarning(
+                              "⚠️ Grounding retry call to '{RetryModel}' errored, timed out or returned empty — falling back to refusal.",
+                              retryModelName);
                         }
                     }
                     else
                     {
-                        retrySkippedReason = string.IsNullOrWhiteSpace(retryModelName)
-                            ? "no_retry_model_configured"
-                            : "retry_model_same_as_primary";
+                        retrySkippedReason = $"retry_model_not_found:{retryModelName}";
+                        _logger.LogWarning("Grounding retry model '{RetryModel}' not found — skipping retry.", retryModelName);
                     }
+                }
+                else
+                {
+                    retrySkippedReason = string.IsNullOrWhiteSpace(retryModelName)
+                        ? "no_retry_model_configured"
+                        : "retry_model_same_as_primary";
                 }
 
                 if (verification != null)
                 {
-                    yield
-                    return new StreamChunk
+                    yield return new StreamChunk
                     {
                         Type = "metadata",
                         Content = JsonSerializer.Serialize(new
@@ -9716,12 +10639,6 @@ Answer directly without introducing yourself.";
                             verified = !verification.NeedsReprocessing,
                             confidence = verification.OverallConfidence,
                             retried = usedRetryModel,
-                            // See retrySkippedReason above: null whenever a retry
-                            // wasn't needed or succeeded; otherwise one of
-                            // no_retry_model_configured / retry_model_same_as_primary /
-                            // retry_model_not_found:<name> / retry_call_errored_or_empty:<name> /
-                            // retry_still_ungrounded:<name>, so `retried:false` is
-                            // diagnosable from this event alone.
                             retry_skipped_reason = retrySkippedReason,
                             quality_checks = new
                             {
@@ -9729,77 +10646,43 @@ Answer directly without introducing yourself.";
                                 grounded = verification.IsGrounded,
                                 hallucination_free = !verification.HasHallucinations
                             },
-                            // Surfaces SelfVerifier's one-line explanation for a
-                            // "not grounded" verdict (added alongside the wider
-                            // source window / VerifierModel config change) so a
-                            // false-negative grounding check is diagnosable from
-                            // the browser console instead of requiring server
-                            // log access every time.
-                            grounding_reason = verification.Metadata.TryGetValue("grounding_reason", out
-                                var gr) ? gr : null,
+                            grounding_reason = verification.Metadata.TryGetValue("grounding_reason", out var gr) ? gr : null,
                             is_conflict = verification.IsSourceConflict
                         })
                     };
                 }
             }
 
+            // ============================
+            // FINAL ANSWER DECISION
+            // ============================
             string finalAnswer = responseText;
             bool askedClarification = false;
             bool declined = false;
 
             if (verification != null && verification.NeedsReprocessing &&
-              (!verification.IsGrounded || !verification.IsComplete))
+                (!verification.IsGrounded || !verification.IsComplete))
             {
                 _logger.LogWarning(
                   "⚠️ Self-verification flagged a low-confidence answer (confidence {Confidence:P0}, grounded={Grounded}, complete={Complete}) even after retry — " +
                   "checking whether a clarifying question could resolve this before falling back to refusal.",
                   verification.OverallConfidence, verification.IsGrounded, verification.IsComplete);
 
-                // ✅ NEW: one shot at asking the user something specific,
-                // rather than always giving up with "contact HR". Capped at
-                // 1 round per original question so a genuinely unresolvable
-                // ambiguity can't turn into an endless back-and-forth.
                 const int maxClarificationAttempts = 1;
                 string? clarifyingQuestion = null;
 
+                var verifierReason = verification.Metadata.TryGetValue(
+                    "grounding_reason", out var reason)
+                    ? reason?.ToString() ?? string.Empty
+                    : !verification.IsComplete
+                    ? "The answer may be incomplete. Determine whether a missing employee-specific fact can be clarified."
+                    : !verification.IsGrounded
+                    ? "The answer is not sufficiently grounded in the retrieved policy evidence. Determine whether a missing employee-specific fact can resolve the issue."
+                    : "The answer failed verification. Determine whether an employee-specific clarification would materially improve it.";
+
                 if (conversationContext.ClarificationAttemptCount < maxClarificationAttempts)
                 {
-                    var groundingReason =
-                        verification.Metadata.TryGetValue("grounding_reason", out var reasonValue)
-                            ? reasonValue?.ToString() ?? string.Empty
-                            : string.Empty;
-
-                    // Include the verifier's status as well as its explanation. The metadata
-                    // field may contain only a short label rather than the full reasoning.
-                    var clarificationFeedback =
-                        $"IsGrounded: {verification.IsGrounded}\n" +
-                        $"IsComplete: {verification.IsComplete}\n" +
-                        $"HasHallucinations: {verification.HasHallucinations}\n" +
-                        $"IsSourceConflict: {verification.IsSourceConflict}\n" +
-                        $"Confidence: {verification.OverallConfidence:P0}\n" +
-                        $"Verifier feedback: {groundingReason}\n" +
-                        $"Previously generated answer: {responseText}";
-
-                    _logger.LogInformation(
-                        "Clarification input for question '{Question}'. " +
-                        "Grounded={Grounded}; Complete={Complete}; Confidence={Confidence:P0}; " +
-                        "VerifierFeedback={VerifierFeedback}",
-                        question,
-                        verification.IsGrounded,
-                        verification.IsComplete,
-                        verification.OverallConfidence,
-                        string.IsNullOrWhiteSpace(groundingReason)
-                            ? "(empty)"
-                            : groundingReason.Length > 500
-                                ? groundingReason[..500]
-                                : groundingReason);
-
-                    clarifyingQuestion = await TryGenerateClarifyingQuestionAsync(
-                        question,
-                        finalChunks,
-                        genModel,
-                        clarificationFeedback,
-                        cancellationToken);
+                    clarifyingQuestion = await TryGenerateClarifyingQuestionAsync(question, finalChunks, genModel, verifierReason,cancellationToken);
                 }
 
                 if (clarifyingQuestion != null)
@@ -9809,90 +10692,54 @@ Answer directly without introducing yourself.";
                     conversationContext.PendingGeneralClarificationOriginalQuestion = question;
                     conversationContext.ClarificationAttemptCount++;
                     askedClarification = true;
+
                     _logger.LogInformation($"❓ Asking clarifying question instead of refusing: {clarifyingQuestion}");
 
                     finalAnswer = clarifyingQuestion;
                 }
+                else if (questionWasMerged && !string.IsNullOrWhiteSpace(responseText) && !verification.HasHallucinations)
+                {
+                    // The employee just answered our clarifying question: show the answer, clearly marked
+                    // as unverified, instead of refusing right after they spent a turn helping us.
+                    finalAnswer = responseText +
+                        "\n\n> ⚠️ I could not fully verify this calculation against the policy text. " +
+                        "Please confirm the figure with HR before relying on it.";
+                }
                 else
                 {
                     declined = true;
-                    // ✅ CHANGED: the message used to unconditionally say "not
-                    // confident ... fully grounded", which is actively
-                    // misleading when the real failure was incompleteness —
-                    // the answer WAS grounded in real policy text, it just
-                    // didn't cover everything relevant that was retrieved.
-                    // Telling the user to contact HR because of a phantom
-                    // "grounding" concern when the actual gap is coverage
-                    // sends them looking for the wrong kind of help.
-                    finalAnswer = !verification.IsGrounded ?
-                    $"I want to make sure I give you accurate information, but I'm not confident " +
-                    $"the answer I generated is fully grounded in {plant}'s policy documents. " +
-                    $"Please contact your supervisor or HR department for clarification on this matter." :
-                    $"I found some relevant information, but I'm not confident this answer covers " +
-                    $"everything {plant}'s policy documents say on this — it may be missing details from " +
-                    $"one or more of the retrieved sections. Please contact your supervisor or HR department " +
-                    $"to confirm the complete picture, or try rephrasing your question to be more specific.";
 
-                    // ============================
-                    // TRACK: log this refusal for pattern analysis
-                    // ============================
-                    // Fire-and-forget — logging a failure must never delay or break
-                    // the actual refusal already being streamed to the user. This is
-                    // the data source for the admin failure-review endpoint, and for
-                    // ResolveGroundingFailuresForQuestionAsync to auto-close once a
-                    // human correction comes in for the same question later.
-                    // Track the actual verification failure, not an unrelated empty-generation
-                    // failure. The metadata reason may be a short label or may be missing.
-                    var groundingReason = verification.Metadata.TryGetValue(
-                        "grounding_reason", out var reasonValue)
-                            ? reasonValue?.ToString() ?? string.Empty
-                            : string.Empty;
+                    finalAnswer = !verification.IsGrounded
+                      ? $"I want to make sure I give you accurate information, but I'm not confident " +
+                        $"the answer I generated is fully grounded in {plant}'s policy documents. " +
+                        $"Please contact your supervisor or HR department for clarification on this matter."
+                      : $"I found some relevant information, but I'm not confident this answer covers " +
+                        $"everything {plant}'s policy documents say on this — it may be missing details from " +
+                        $"one or more of the retrieved sections. Please contact your supervisor or HR department " +
+                        $"to confirm the complete picture, or try rephrasing your question to be more specific.";
 
-                    if (string.IsNullOrWhiteSpace(groundingReason))
-                    {
-                        groundingReason = !verification.IsGrounded
-                            ? "ungrounded_answer"
-                            : !verification.IsComplete
-                                ? "incomplete_answer"
-                                : "verification_failed";
-                    }
+                    var groundingReason = verification.Metadata.TryGetValue("grounding_reason", out var gr2)
+                      ? gr2?.ToString() ?? ""
+                      : (!verification.IsComplete ? "incomplete_answer" : "");
 
                     _ = _conversationStorage.LogGroundingFailureAsync(new GroundingFailure
                     {
                         Question = question,
                         Plant = plant,
-                        RetrievedSourcesJson = JsonSerializer.Serialize(
-                            finalChunks.Select(c => c.Source).Distinct()),
+                        RetrievedSourcesJson = JsonSerializer.Serialize(finalChunks.Select(c => c.Source).Distinct()),
                         GroundingReason = groundingReason,
                         Confidence = verification.OverallConfidence,
                         GenerationModel = genModel.Name ?? ""
                     });
-
-                    // Stream the refusal that was actually constructed above.
-                    yield return new StreamChunk
-                    {
-                        Type = "response",
-                        Content = finalAnswer
-                    };
-
-                    yield return new StreamChunk
-                    {
-                        Type = "complete",
-                        ProcessingTimeMs = stopwatch.ElapsedMilliseconds
-                    };
-
-                    yield break;
                 }
             }
 
             // ============================
             // STREAM FINAL (VERIFIED) ANSWER
             // ============================
-
             var quality = AnswerQualityBuilder.Build(verification, askedClarification, declined,
                 retrySkippedReason, finalChunks.Select(c => c.Source), plant, admin: true);
 
-            timer.Lap("retry / conflict / clarification (after verification)");
             yield return new StreamChunk
             {
                 Type = "answer_quality",
@@ -9902,13 +10749,12 @@ Answer directly without introducing yourself.";
                     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
                 })
             };
-            yield
-            return new StreamChunk
-            {
-                Type = "response",
-                Content = finalAnswer
-            };
 
+            yield return new StreamChunk { Type = "response", Content = finalAnswer };
+
+            // ============================
+            // LEARNING: only clean, verified, first-turn answers (never merged, clarified, or refused ones)
+            // ============================
             if (verification != null && verification.IsGrounded && verification.IsComplete &&
                 !verification.NeedsReprocessing && !declined && !askedClarification &&
                 !questionWasMerged && finalChunks.Any())
@@ -9927,17 +10773,39 @@ Answer directly without introducing yourself.";
 
             stopwatch.Stop();
 
+            // A normal answer ends any clarification chain, so the next question can ask again
+            if (!askedClarification && !conversationContext.AwaitingGeneralClarification)
+                conversationContext.ClarificationAttemptCount = 0;
+
             // ============================
             // COMPLETION
             // ============================
             LogAgentCompletion(verification?.OverallConfidence ?? 0.7, stopwatch.ElapsedMilliseconds);
 
-            yield
-            return new StreamChunk
+            yield return new StreamChunk
             {
                 Type = "complete",
                 ProcessingTimeMs = stopwatch.ElapsedMilliseconds
             };
+        }
+
+        private static readonly Regex _clarifyRegex = new(
+    @"^[\s\*\`""'>#_\-]*CLARIFY\s*[:：]\s*\**\s*(.+?)(?:\r?\n\s*\r?\n|$)",
+    RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+
+        private static bool TryExtractClarification(string text, out string question)
+        {
+            question = "";
+            if (string.IsNullOrWhiteSpace(text)) return false;
+
+            var m = _clarifyRegex.Match(text.TrimStart());
+            if (!m.Success) return false;
+
+            var q = m.Groups[1].Value.Trim().Trim('*', '`', '"', ' ');
+            if (q.Length < 8 || q.Length > 400) return false;
+
+            question = q;
+            return true;
         }
 
         public async IAsyncEnumerable<StreamChunk> ProcessQueryStreamWithAttachmentsAsync(
