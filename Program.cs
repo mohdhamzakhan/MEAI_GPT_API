@@ -157,7 +157,11 @@ builder.Services.Configure<AnnexureLinkOptions>(
 builder.Services.AddSingleton<MEAI_GPT_API.Service.AnnexureLinkService>();
 
 builder.Services.AddDbContextFactory<ConversationDbContext>(options =>
-    options.UseSqlite("Data Source=conversations.db"));
+    options.UseSqlite("Data Source=conversations.db;Mode=ReadWriteCreate;Cache=Shared;Default Timeout=30",
+        sqliteOptions =>
+        {
+            sqliteOptions.CommandTimeout(30);
+        }));
 builder.Services.AddSingleton<IDocumentProcessor, DocumentProcessor>();
 builder.Services.AddSingleton<ICacheManager, CacheManager>();
 builder.Services.AddSingleton<IMetricsCollector, MetricsCollector>();
