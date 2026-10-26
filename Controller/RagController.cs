@@ -1299,14 +1299,33 @@ namespace MEAI_GPT_API.Controller
             try
             {
                 var messages = await _conversationStorage.GetSessionMessagesAsync(sessionId);
+
+                var isAdmin = true;
+                foreach (var m in messages)
+                {
+                    if (!isAdmin || string.IsNullOrWhiteSpace(m.AnswerQualityJson)) continue;
+
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(m.AnswerQualityJson);
+                        m.AnswerQuality = doc.RootElement.Clone();
+                    }
+                    catch (JsonException)
+                    {
+                        // malformed stored value: skip it instead of failing the whole session
+                    }
+                }
+
                 return Ok(messages);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to retrieve session messages");
-                return StatusCode(500, new { error = ex.Message });
+                return StatusCode(500, new { error = "Failed to retrieve session messages." });
             }
         }
+
+
 
         [HttpDelete("sessions/{sessionId}")]
         public async Task<IActionResult> DeleteSession(string sessionId)
@@ -1417,12 +1436,17 @@ namespace MEAI_GPT_API.Controller
 
         public class ConversationMessage
         {
+            public int Id { get; set; }
             public string Question { get; set; } = string.Empty;
             public string Answer { get; set; } = string.Empty;
             public DateTime CreatedAt { get; set; }
             public string CorrectedAnswer { get; set; } = string.Empty;
             public bool IsFromCorrection { get; set; } = false;
             public bool WasAppreciated { get; set; } = false;
+            [JsonIgnore] 
+            public string? AnswerQualityJson { get; set; }
+
+            public JsonElement? AnswerQuality { get; set; }
 
         }
 

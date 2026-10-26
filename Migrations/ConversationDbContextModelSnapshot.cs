@@ -31,6 +31,9 @@ namespace MEAI_GPT_API.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("AnswerQualityJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<double>("Confidence")
                         .HasColumnType("REAL");
 
@@ -186,6 +189,9 @@ namespace MEAI_GPT_API.Migrations
                     b.Property<double>("Confidence")
                         .HasColumnType("REAL");
 
+                    b.Property<int?>("ConversationEntryId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
@@ -215,6 +221,9 @@ namespace MEAI_GPT_API.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT")
                         .HasDefaultValue("[]");
+
+                    b.Property<string>("SessionId")
+                        .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 

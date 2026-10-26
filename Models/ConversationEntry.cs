@@ -34,6 +34,7 @@ namespace MEAI_GPT_API.Models
         public int? FollowUpToId { get; set; }
         public string? Plant { get; set; }
 
+        public string? AnswerQualityJson { get; set; }
         // Model information
         [MaxLength(100)]
         public string GenerationModel { get; set; } = string.Empty;

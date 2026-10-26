@@ -10742,6 +10742,7 @@ Reply with ONLY this JSON: {{""missing_input"": true or false, ""question"": ""<
             // FINAL ANSWER DECISION
             // ============================
             string finalAnswer = responseText;
+            GroundingFailure? pendingFailure = null;
             bool askedClarification = false;
             bool declined = false;
 
@@ -10755,8 +10756,6 @@ Reply with ONLY this JSON: {{""missing_input"": true or false, ""question"": ""<
 
                 const int maxClarificationAttempts = 1;
                 string? clarifyingQuestion = null;
-
-                
 
                 if (conversationContext.ClarificationAttemptCount < maxClarificationAttempts)
                 {
@@ -10782,20 +10781,27 @@ Reply with ONLY this JSON: {{""missing_input"": true or false, ""question"": ""<
 
                     finalAnswer = clarifyingQuestion;
                 }
-                else if (questionWasMerged && !string.IsNullOrWhiteSpace(responseText) && !verification.HasHallucinations)
+                else if (verification.IsGrounded && !verification.HasHallucinations)
                 {
-                    // The employee just answered our clarifying question: show the answer, clearly marked
-                    // as unverified, instead of refusing right after they spent a turn helping us.
-                    finalAnswer = responseText +
-                        "\n\n> ⚠️ I could not fully verify this calculation against the policy text. " +
-                        "Please confirm the figure with HR before relying on it.";
-                }
-                else
-                {
-                    if (questionWasMerged && !string.IsNullOrWhiteSpace(responseText) && !verification.HasHallucinations)
+                    // Honest but incomplete (typically "the policy doesn't define X"), or the employee just
+                    // answered our question: don't refuse, answer under stated assumptions.
+                    var (assumed, assumedErrored, _) = await GenerateBufferedAsync(
+                        genModel.Name!,
+                        questionForModel +
+                        "\n\n(The policy may not fix every detail. Do not stop at 'not specified' and do not ask questions. " +
+                        "State each assumption you make, show the working for each reasonable option side by side, and say " +
+                        "that the policy does not fix it so HR should confirm.)",
+                        timeoutSeconds: 60);
+
+                    if (!assumedErrored && !string.IsNullOrWhiteSpace(assumed) && !TryExtractClarification(assumed, out _))
                     {
-                        // The user just answered our clarifying question. Show the answer, clearly marked as unverified,
-                        // instead of refusing right after they spent a turn helping us.
+                        finalAnswer = assumed +
+                            "\n\n> ⚠️ Some details are not fixed by the policy text, so the figures above rest on the stated assumptions. " +
+                            "Please confirm the final amount with HR.";
+                    }
+                    else if (questionWasMerged && !string.IsNullOrWhiteSpace(responseText))
+                    {
+                        // the employee just answered our question, so show the earlier answer, marked as unverified
                         finalAnswer = responseText +
                             "\n\n> ⚠️ I could not fully verify this calculation against the policy text. " +
                             "Please confirm the figure with HR before relying on it.";
@@ -10803,29 +10809,40 @@ Reply with ONLY this JSON: {{""missing_input"": true or false, ""question"": ""<
                     else
                     {
                         declined = true;
-
-                        finalAnswer = !verification.IsGrounded ?
-                            $"I want to make sure I give you accurate information, but I'm not confident " +
-                            $"the answer I generated is fully grounded in {plant}'s policy documents. " +
-                            $"Please contact your supervisor or HR department for clarification on this matter." :
-                            $"I found some relevant information, but I'm not confident this answer covers " +
-                            $"everything {plant}'s policy documents say on this — it may be missing details from " +
-                            $"one or more of the retrieved sections. Please contact your supervisor or HR department " +
-                            $"to confirm the complete picture, or try rephrasing your question to be more specific.";
-
-                        var groundingReason = verification.Metadata.TryGetValue("grounding_reason", out var gr2) ?
-                            gr2?.ToString() ?? "" : (!verification.IsComplete ? "incomplete_answer" : "");
-
-                        _ = _conversationStorage.LogGroundingFailureAsync(new GroundingFailure
-                        {
-                            Question = question,
-                            Plant = plant,
-                            RetrievedSourcesJson = JsonSerializer.Serialize(finalChunks.Select(c => c.Source).Distinct()),
-                            GroundingReason = groundingReason,
-                            Confidence = verification.OverallConfidence,
-                            GenerationModel = genModel.Name ?? ""
-                        });
+                        finalAnswer = "I found related policy text but couldn't complete this reliably. " +
+                                      "Please contact HR to confirm.";
                     }
+                }
+                else
+                {
+                    // ungrounded or hallucinating: refuse
+                    declined = true;
+
+                    finalAnswer = !verification.IsGrounded ?
+                        $"I want to make sure I give you accurate information, but I'm not confident " +
+                        $"the answer I generated is fully grounded in {plant}'s policy documents. " +
+                        $"Please contact your supervisor or HR department for clarification on this matter." :
+                        $"I found some relevant information, but I'm not confident this answer covers " +
+                        $"everything {plant}'s policy documents say on this — it may be missing details from " +
+                        $"one or more of the retrieved sections. Please contact your supervisor or HR department " +
+                        $"to confirm the complete picture, or try rephrasing your question to be more specific.";
+                }
+
+                // log a failure whenever the answer was refused or came from the fallback path
+                if (declined)
+                {
+                    var groundingReason = verification.Metadata.TryGetValue("grounding_reason", out var gr2) ?
+                        gr2?.ToString() ?? "" : (!verification.IsComplete ? "incomplete_answer" : "");
+
+                    pendingFailure = new GroundingFailure
+                    {
+                        Question = question,
+                        Plant = plant,
+                        RetrievedSourcesJson = JsonSerializer.Serialize(finalChunks.Select(c => c.Source).Distinct()),
+                        GroundingReason = groundingReason,
+                        Confidence = verification.OverallConfidence,
+                        GenerationModel = genModel.Name ?? ""
+                    };
                 }
             }
 
@@ -10835,16 +10852,13 @@ Reply with ONLY this JSON: {{""missing_input"": true or false, ""question"": ""<
             var quality = AnswerQualityBuilder.Build(verification, askedClarification, declined,
                 retrySkippedReason, finalChunks.Select(c => c.Source), plant, admin: true);
 
-            yield return new StreamChunk
+            var qualityJson = JsonSerializer.Serialize(quality, new JsonSerializerOptions
             {
-                Type = "answer_quality",
-                Content = JsonSerializer.Serialize(quality, new JsonSerializerOptions
-                {
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-                })
-            };
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+            });
 
+            yield return new StreamChunk { Type = "answer_quality", Content = qualityJson };
             yield return new StreamChunk { Type = "response", Content = finalAnswer };
 
             // ============================
@@ -10860,11 +10874,12 @@ Reply with ONLY this JSON: {{""missing_input"": true or false, ""question"": ""<
             }
 
             // ============================
-            // SAVE TO DATABASE
+            // SAVE TO DATABASE (conversation + answer quality + failure link, in one go)
             // ============================
             _ = SaveConversationSafelyAsync(
               agentContext, question, finalAnswer, finalChunks,
-              genModel, embModel, plant, verification, stopwatch.ElapsedMilliseconds);
+              genModel, embModel, plant, verification, stopwatch.ElapsedMilliseconds,
+              qualityJson, pendingFailure);
 
             stopwatch.Stop();
 
@@ -13388,7 +13403,8 @@ RULES:
           ModelConfiguration embModel,
           string plant,
           VerificationResult? verification,
-          long processingTime)
+          long processingTime, string? answerQualityJson = null,          // 👈 new
+          GroundingFailure? failure = null)
         {
             // Use a dedicated scope — this is the key fix for DbContext concurrency
             await using
@@ -13423,11 +13439,19 @@ RULES:
                     RelevantChunksCount = chunks.Count,
                     Sources = chunks.Select(c => c.Source).Distinct().ToList(),
                     IsFromCorrection = false,
-                    Plant = plant ?? "unknown"
+                    Plant = plant ?? "unknown",
+                    AnswerQualityJson = answerQualityJson
                 };
 
                 await storage.SaveConversationAsync(entry);
 
+
+                if (failure != null && entry.Id > 0)
+                {
+                    failure.ConversationEntryId = entry.Id;
+                    failure.SessionId = dbSession.SessionId;
+                    await storage.LogGroundingFailureAsync(failure);
+                }
                 // Update the centralised in-memory history AFTER the DB write succeeds
                 _historyService.AddTurn(context.SessionId, question, answer,
                   chunks.Select(c => c.Source).Distinct().ToList());

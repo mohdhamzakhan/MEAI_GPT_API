@@ -48,5 +48,7 @@ namespace MEAI_GPT_API.Models
         // "still open" from "already fixed" failures without deleting the
         // historical record.
         public bool ResolvedByCorrection { get; set; } = false;
+        public int? ConversationEntryId { get; set; }
+        public string? SessionId { get; set; }
     }
 }
