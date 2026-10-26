@@ -64,6 +64,10 @@ namespace MEAI_GPT_API.Data
                       .HasColumnType("TEXT")
                       .HasDefaultValue("[]");
 
+                // NEW: Answer quality JSON
+                entity.Property(e => e.AnswerQualityJson)
+                    .HasColumnType("TEXT");
+
                 entity.Property(e => e.Question)
                       .HasColumnType("TEXT");
 
@@ -97,6 +101,15 @@ namespace MEAI_GPT_API.Data
                 entity.Property(e => e.RetrievedSourcesJson)
                       .HasColumnType("TEXT")
                       .HasDefaultValue("[]");
+
+                // NEW: ConversationEntryId column
+                entity.Property(e => e.ConversationEntryId)
+                    .IsRequired(false);
+
+                // NEW: SessionId column
+                entity.Property(e => e.SessionId)
+                    .HasColumnType("TEXT")
+                    .IsRequired(false);
             });
 
             // ConversationSession configuration
