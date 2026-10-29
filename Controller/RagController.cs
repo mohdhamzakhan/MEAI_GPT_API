@@ -3,6 +3,7 @@ using MEAI_GPT_API.Service;
 using MEAI_GPT_API.Service.Interface;
 using MEAI_GPT_API.Service.Models;
 using MEAI_GPT_API.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
@@ -37,6 +38,7 @@ namespace MEAI_GPT_API.Controller
         {
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
         };
+        private readonly IImageGenerationService _imageGeneration;
 
         [ActivatorUtilitiesConstructor]
         public RagController(
@@ -50,7 +52,8 @@ namespace MEAI_GPT_API.Controller
         Microsoft.Extensions.Options.IOptions<AccessControlOptions> accessControl,
         IEmployeeDirectoryService employeeDirectory,
         GradeHierarchyService gradeHierarchy,
-        AttachmentProcessor attachmentProcessor)
+        AttachmentProcessor attachmentProcessor,
+        IImageGenerationService imageGeneration)
         {
             _ragService = ragService;
             _codingService = codingService;
@@ -63,6 +66,7 @@ namespace MEAI_GPT_API.Controller
             _employeeDirectory = employeeDirectory;
             _gradeHierarchy = gradeHierarchy;
             _attachmentProcessor = attachmentProcessor;
+            _imageGeneration = imageGeneration;
         }
         [HttpPost("query")]
         //public async Task<IActionResult> Query([FromBody] QueryRequest request, [FromServices] IBackgroundTaskQueue taskQueue)
@@ -1293,6 +1297,38 @@ namespace MEAI_GPT_API.Controller
             }
         }
 
+        //[HttpGet("sessions/{sessionId}/messages")]
+        //public async Task<ActionResult<List<ConversationMessage>>> GetSessionMessages(string sessionId)
+        //{
+        //    try
+        //    {
+        //        var messages = await _conversationStorage.GetSessionMessagesAsync(sessionId);
+
+        //        var isAdmin = true;
+        //        foreach (var m in messages)
+        //        {
+        //            if (!isAdmin || string.IsNullOrWhiteSpace(m.AnswerQualityJson)) continue;
+
+        //            try
+        //            {
+        //                using var doc = JsonDocument.Parse(m.AnswerQualityJson);
+        //                m.AnswerQuality = doc.RootElement.Clone();
+        //            }
+        //            catch (JsonException)
+        //            {
+        //                // malformed stored value: skip it instead of failing the whole session
+        //            }
+        //        }
+
+        //        return Ok(messages);
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        _logger.LogError(ex, "Failed to retrieve session messages");
+        //        return StatusCode(500, new { error = "Failed to retrieve session messages." });
+        //    }
+        //}
+
         [HttpGet("sessions/{sessionId}/messages")]
         public async Task<ActionResult<List<ConversationMessage>>> GetSessionMessages(string sessionId)
         {
@@ -1300,10 +1336,9 @@ namespace MEAI_GPT_API.Controller
             {
                 var messages = await _conversationStorage.GetSessionMessagesAsync(sessionId);
 
-                var isAdmin = true;
                 foreach (var m in messages)
                 {
-                    if (!isAdmin || string.IsNullOrWhiteSpace(m.AnswerQualityJson)) continue;
+                    if (string.IsNullOrWhiteSpace(m.AnswerQualityJson)) continue;
 
                     try
                     {
@@ -1324,7 +1359,6 @@ namespace MEAI_GPT_API.Controller
                 return StatusCode(500, new { error = "Failed to retrieve session messages." });
             }
         }
-
 
 
         [HttpDelete("sessions/{sessionId}")]
@@ -1423,6 +1457,58 @@ namespace MEAI_GPT_API.Controller
             }
         }
 
+        // Lets the UI hide the image feature when it's switched off in appsettings
+        [HttpGet("image/status")]
+        public IActionResult GetImageStatus()
+        {
+            return Ok(new { enabled = _imageGeneration.IsEnabled });
+        }
+
+        [HttpPost("image/generate")]
+        public async Task<IActionResult> GenerateImage([FromBody] ImageGenerateRequest request, CancellationToken ct)
+        {
+            if (!_imageGeneration.IsEnabled)
+                return NotFound(new { error = "Image generation is not enabled." });
+
+            if (request == null || string.IsNullOrWhiteSpace(request.Prompt))
+                return BadRequest(new { error = "Prompt is required." });
+
+            var user = User.Identity?.Name ?? "unknown";
+
+            // keep sizes sane here as well as in the Python service
+            var width = Math.Clamp(request.Width, 256, 1280);
+            var height = Math.Clamp(request.Height, 256, 1280);
+
+            _logger.LogInformation("🖼️ Image request from {User}: {Chars} chars, {W}x{H}",
+                user, request.Prompt.Length, width, height);
+
+            try
+            {
+                var png = await _imageGeneration.GenerateAsync(request.Prompt.Trim(), width, height, ct);
+
+                Response.Headers["Cache-Control"] = "no-store";
+                return File(png, "image/png");
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+            catch (TimeoutException ex)
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = ex.Message });
+            }
+            catch (OperationCanceledException)
+            {
+                // the browser closed the request or the generation timed out
+                return StatusCode(StatusCodes.Status408RequestTimeout, new { error = "Image generation was cancelled or timed out." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Image generation failed for {User}", user);
+                return StatusCode(StatusCodes.Status502BadGateway, new { error = "Image generation failed." });
+            }
+        }
+
         // Add these DTOs at the end of the file
         public class SessionSummary
         {
@@ -1478,6 +1564,12 @@ namespace MEAI_GPT_API.Controller
             public List<string>? Ids { get; set; }
             public List<string>? Documents { get; set; }
             public List<Dictionary<string, object>>? Metadatas { get; set; }
+        }
+        public class ImageGenerateRequest
+        {
+            public string Prompt { get; set; } = string.Empty;
+            public int Width { get; set; } = 1024;
+            public int Height { get; set; } = 1024;
         }
     }
 }

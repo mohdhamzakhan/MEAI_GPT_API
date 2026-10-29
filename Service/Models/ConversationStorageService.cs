@@ -492,7 +492,9 @@ namespace MEAI_GPT_API.Services
                     CreatedAt = e.CreatedAt,
                     CorrectedAnswer = e.CorrectedAnswer,
                     IsFromCorrection = e.IsFromCorrection,
-                    WasAppreciated = e.WasAppreciated
+                    WasAppreciated = e.WasAppreciated,
+                    Id = e.Id,
+                    AnswerQualityJson=e.AnswerQualityJson
                 })
                 .ToListAsync();
 

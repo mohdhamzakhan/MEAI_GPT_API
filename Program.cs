@@ -326,6 +326,9 @@ builder.Services.AddScoped<IModelManager>(provider =>
 
     return new ModelManager(httpClient, logger, configOptions);
 });
+builder.Services.Configure<ImageGenerationOptions>(builder.Configuration.GetSection("ImageGeneration"));
+builder.Services.AddHttpClient("ImageGen", c => c.Timeout = Timeout.InfiniteTimeSpan);  // the per-request token controls the timeout
+builder.Services.AddSingleton<IImageGenerationService, ImageGenerationService>();
 builder.Services.Configure<AutoLearningOptions>(builder.Configuration.GetSection("AutoLearning"));
 builder.Services.AddScoped<QuestionLearningService>();
 builder.Services.AddSingleton<DynamicCollectionManager>(provider =>
