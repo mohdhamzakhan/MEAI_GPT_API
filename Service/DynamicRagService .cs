@@ -10938,6 +10938,10 @@ Reply with ONLY this JSON: {{""missing_input"": true or false, ""question"": ""<
             // Vision-capable model when images are present (move the name to config)
             var generationModel = images.Any() ? "nemotron3:33b" : null;
 
+   //         var generationModel = images.Any()
+   //? "llama3.2-vision:90b"
+   //: "nemotron3:33b";
+
             var validation = await ValidateAndInitializeAsync(
                 question, plant, sessionId, userId, generationModel, null, ct);
 
