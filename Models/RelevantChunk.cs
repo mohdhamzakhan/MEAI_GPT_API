@@ -69,5 +69,6 @@
         /// the server path isn't reachable — never a guessed path.
         /// </summary>
         public Dictionary<string, string>? AnnexureLinks { get; set; }
+        public string PlantTag { get; set; } = "";
     }
 }

@@ -331,6 +331,10 @@ builder.Services.AddHttpClient("ImageGen", c => c.Timeout = Timeout.InfiniteTime
 builder.Services.AddSingleton<IImageGenerationService, ImageGenerationService>();
 builder.Services.Configure<AutoLearningOptions>(builder.Configuration.GetSection("AutoLearning"));
 builder.Services.AddScoped<QuestionLearningService>();
+builder.Services.AddScoped<PosterCopyService>();
+builder.Services.Configure<ImageWorkspaceOptions>(builder.Configuration.GetSection("ImageWorkspace"));
+builder.Services.AddSingleton<ImageLibraryService>();
+builder.Services.AddScoped<ImageVisionService>();
 builder.Services.AddSingleton<DynamicCollectionManager>(provider =>
 {
     var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();

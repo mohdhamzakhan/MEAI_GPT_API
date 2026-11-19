@@ -39,6 +39,9 @@ namespace MEAI_GPT_API.Controller
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
         };
         private readonly IImageGenerationService _imageGeneration;
+        private readonly PosterCopyService _poster;
+        private readonly ImageLibraryService _imageLibrary;
+        private readonly ImageVisionService _imageVision;
 
         [ActivatorUtilitiesConstructor]
         public RagController(
@@ -53,7 +56,10 @@ namespace MEAI_GPT_API.Controller
         IEmployeeDirectoryService employeeDirectory,
         GradeHierarchyService gradeHierarchy,
         AttachmentProcessor attachmentProcessor,
-        IImageGenerationService imageGeneration)
+        IImageGenerationService imageGeneration,
+        PosterCopyService poster,
+        ImageLibraryService imageLibrary,
+        ImageVisionService imageVision)
         {
             _ragService = ragService;
             _codingService = codingService;
@@ -67,6 +73,9 @@ namespace MEAI_GPT_API.Controller
             _gradeHierarchy = gradeHierarchy;
             _attachmentProcessor = attachmentProcessor;
             _imageGeneration = imageGeneration;
+            _poster = poster;
+            _imageLibrary = imageLibrary;
+            _imageVision = imageVision;
         }
         [HttpPost("query")]
         //public async Task<IActionResult> Query([FromBody] QueryRequest request, [FromServices] IBackgroundTaskQueue taskQueue)
@@ -1509,6 +1518,169 @@ namespace MEAI_GPT_API.Controller
             }
         }
 
+        [HttpPost("image/compose")]
+        public async Task<IActionResult> ComposeImage([FromBody] ImageComposeRequest request, CancellationToken ct)
+        {
+            if (!_imageGeneration.IsEnabled)
+                return NotFound(new { error = "Image generation is not enabled." });
+            if (request == null)
+                return BadRequest(new { error = "Request body is required." });
+
+            request.Width = Math.Clamp(request.Width, 256, 1280);
+            request.Height = Math.Clamp(request.Height, 256, 1280);
+            if (request.Position is not ("top" or "center" or "bottom")) request.Position = "bottom";
+
+            try
+            {
+                var png = await _imageGeneration.ComposeAsync(request, ct);
+                Response.Headers["Cache-Control"] = "no-store";
+                return File(png, "image/png");
+            }
+            catch (ArgumentException ex) { return BadRequest(new { error = ex.Message }); }
+            catch (TimeoutException ex) { return StatusCode(503, new { error = ex.Message }); }
+            catch (OperationCanceledException) { return StatusCode(408, new { error = "Image generation timed out." }); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Image compose failed");
+                return StatusCode(502, new { error = "Image generation failed." });
+            }
+        }
+
+        [HttpPost("image/draft-copy")]
+        public async Task<IActionResult> DraftPosterCopy([FromBody] PosterDraftRequest request, CancellationToken ct)
+        {
+            if (!_imageGeneration.IsEnabled) return NotFound(new { error = "Image generation is not enabled." });
+            if (request == null || string.IsNullOrWhiteSpace(request.Brief) || request.Brief.Length > 500)
+                return BadRequest(new { error = "A brief is required (max 500 characters)." });
+
+            var language = request.Language is "Hindi" or "Gujarati" ? request.Language : "English";
+
+            try
+            {
+                var copy = await _poster.DraftAsync(request.Brief.Trim(), language, request.Model ?? "gemma4:12b", ct);
+                return Ok(copy);
+            }
+            catch (OperationCanceledException) { return StatusCode(408, new { error = "Timed out." }); }
+            catch (InvalidOperationException ex) { return StatusCode(502, new { error = ex.Message }); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Poster copy draft failed");
+                return StatusCode(502, new { error = "Couldn't draft the text." });
+            }
+        }
+
+        public class ImageAskRequest { public string SessionId { get; set; } = ""; public List<string> ImageIds { get; set; } = new(); public string Question { get; set; } = ""; public string? Model { get; set; } }
+        public class ImageEditRequest { public string SessionId { get; set; } = ""; public string ImageId { get; set; } = ""; public string Instruction { get; set; } = ""; }
+        public class ImageOverlayRequest { public string SessionId { get; set; } = ""; public string ImageId { get; set; } = ""; public string Title { get; set; } = ""; public string? Subtitle { get; set; } public string? Footer { get; set; } public string Position { get; set; } = "bottom"; }
+
+        private string CurrentUser() => User.Identity?.Name ?? "system";
+
+        private async Task<IActionResult> RunImageAction(Func<Task<IActionResult>> action)
+        {
+            try { return await action(); }
+            catch (ArgumentException ex) { return BadRequest(new { error = ex.Message }); }
+            catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+            catch (TimeoutException ex) { return StatusCode(503, new { error = ex.Message }); }
+            catch (OperationCanceledException) { return StatusCode(408, new { error = "The request timed out." }); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Image action failed");
+                return StatusCode(502, new { error = "Image action failed." });
+            }
+        }
+
+        [HttpPost("image/upload")]
+        [Consumes("multipart/form-data")]
+        [RequestSizeLimit(15_000_000)]
+        public Task<IActionResult> UploadImage([FromForm] string sessionId, IFormFile file, CancellationToken ct) =>
+            RunImageAction(async () =>
+            {
+                if (file == null || file.Length == 0) return BadRequest(new { error = "No file uploaded." });
+                if (file.Length > 12L * 1024 * 1024) return BadRequest(new { error = "File is larger than 12 MB." });
+
+                byte[] raw;
+                using (var ms = new MemoryStream()) { await file.CopyToAsync(ms, ct); raw = ms.ToArray(); }
+
+                var clean = await _imageGeneration.NormalizeAsync(raw, ct);   // validates it is a real image, strips EXIF/GPS
+                var rec = await _imageLibrary.SaveAsync(sessionId, CurrentUser(), "uploaded", null,
+                    Path.GetFileName(file.FileName), clean);
+                return Ok(rec);
+            });
+
+        [HttpGet("image/list")]
+        public IActionResult ListImages([FromQuery] string sessionId)
+        {
+            try { return Ok(_imageLibrary.List(sessionId, CurrentUser())); }
+            catch (ArgumentException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        [HttpGet("image/file/{imageId}")]
+        public async Task<IActionResult> GetImageFile(string imageId, [FromQuery] string sessionId)
+        {
+            try
+            {
+                var found = await _imageLibrary.GetAsync(sessionId, CurrentUser(), imageId);
+                if (found == null) return NotFound();
+                Response.Headers["Cache-Control"] = "private, no-store";
+                return File(found.Value.Bytes, "image/png");
+            }
+            catch (ArgumentException) { return BadRequest(); }
+        }
+
+
+        [HttpPost("image/ask")]
+        public Task<IActionResult> AskAboutImage([FromBody] ImageAskRequest r, CancellationToken ct) =>
+            RunImageAction(async () =>
+            {
+                if (string.IsNullOrWhiteSpace(r.Question) || r.Question.Length > 1000)
+                    return BadRequest(new { error = "A question is required (max 1000 characters)." });
+                if (r.ImageIds == null || r.ImageIds.Count == 0 || r.ImageIds.Count > 3)
+                    return BadRequest(new { error = "Select 1 to 3 images." });
+
+                var images = new List<byte[]>();
+                foreach (var id in r.ImageIds.Distinct())
+                {
+                    var found = await _imageLibrary.GetAsync(r.SessionId, CurrentUser(), id);
+                    if (found == null) return NotFound(new { error = "One of the images was not found." });
+                    images.Add(found.Value.Bytes);
+                }
+
+                var answer = await _imageVision.AskAsync(r.Question.Trim(), images, r.Model ?? "gemma4:12b", ct);
+                return Ok(new { answer });
+            });
+
+        [HttpPost("image/edit")]
+        public Task<IActionResult> EditImage([FromBody] ImageEditRequest r, CancellationToken ct) =>
+            RunImageAction(async () =>
+            {
+                if (string.IsNullOrWhiteSpace(r.Instruction) || r.Instruction.Length > 500)
+                    return BadRequest(new { error = "Describe the change (max 500 characters)." });
+
+                var src = await _imageLibrary.GetAsync(r.SessionId, CurrentUser(), r.ImageId);
+                if (src == null) return NotFound(new { error = "Image not found." });
+
+                var png = await _imageGeneration.EditAsync(src.Value.Bytes, r.Instruction.Trim(), ct);
+                var rec = await _imageLibrary.SaveAsync(r.SessionId, CurrentUser(), "edited", r.ImageId, r.Instruction.Trim(), png);
+                return Ok(rec);
+            });
+
+
+        [HttpPost("image/overlay")]
+        public Task<IActionResult> OverlayText([FromBody] ImageOverlayRequest r, CancellationToken ct) =>
+            RunImageAction(async () =>
+            {
+                if (string.IsNullOrWhiteSpace(r.Title) || r.Title.Length > 120)
+                    return BadRequest(new { error = "Title is required (max 120 characters)." });
+
+                var src = await _imageLibrary.GetAsync(r.SessionId, CurrentUser(), r.ImageId);
+                if (src == null) return NotFound(new { error = "Image not found." });
+
+                var png = await _imageGeneration.OverlayAsync(src.Value.Bytes, r.Title.Trim(), r.Subtitle, r.Footer,
+                    r.Position is "top" or "center" or "bottom" ? r.Position : "bottom", ct);
+                var rec = await _imageLibrary.SaveAsync(r.SessionId, CurrentUser(), "text-added", r.ImageId, r.Title.Trim(), png);
+                return Ok(rec);
+            });
+
         // Add these DTOs at the end of the file
         public class SessionSummary
         {
@@ -1570,6 +1742,12 @@ namespace MEAI_GPT_API.Controller
             public string Prompt { get; set; } = string.Empty;
             public int Width { get; set; } = 1024;
             public int Height { get; set; } = 1024;
+        }
+        public class PosterDraftRequest
+        {
+            public string Brief { get; set; } = "";
+            public string Language { get; set; } = "English";   // English | Hindi | Gujarati
+            public string? Model { get; set; }
         }
     }
 }

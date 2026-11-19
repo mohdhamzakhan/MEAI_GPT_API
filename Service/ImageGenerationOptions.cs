@@ -15,6 +15,18 @@ namespace MEAI_GPT_API.Service
         public int MaxPromptChars { get; set; } = 500;
     }
 
+    public class ImageComposeRequest
+    {
+        public string Scene { get; set; } = "";
+        public string Title { get; set; } = "";
+        public string? Subtitle { get; set; }
+        public string? Footer { get; set; }
+        public string Position { get; set; } = "bottom";
+        public bool Panel { get; set; } = true;
+        public int Width { get; set; } = 1024;
+        public int Height { get; set; } = 1024;
+    }
+
     public interface IImageGenerationService
     {
         bool IsEnabled { get; }
@@ -24,6 +36,10 @@ namespace MEAI_GPT_API.Service
             int width,
             int height,
             CancellationToken ct);
+        Task<byte[]> ComposeAsync(ImageComposeRequest request, CancellationToken ct);
+        Task<byte[]> NormalizeAsync(byte[] image, CancellationToken ct);
+        Task<byte[]> EditAsync(byte[] image, string prompt, CancellationToken ct);
+        Task<byte[]> OverlayAsync(byte[] image, string title, string? subtitle, string? footer, string position, CancellationToken ct);
     }
 
     public class ImageGenerationService : IImageGenerationService
@@ -44,30 +60,36 @@ namespace MEAI_GPT_API.Service
             _opts = opts;
             _log = log;
         }
-
+        private const int MaxTotalPromptChars = 1000;
         public bool IsEnabled => _opts.CurrentValue.Enabled;
 
 
-private const string SafetyAndQualityPrefix = """
-Generate professional, high-quality images.
-
-SAFETY: Reject pornography, explicit sexual content,
-sexualized minors, non-consensual intimate imagery,
-and sexual deepfakes.
-
-STRICT TEXT-FREE RULE:
-Generate images containing NO text whatsoever.
-Do not draw letters, words, numbers, symbols,
-logos, captions, signs, labels, or watermarks.
-Do not simulate handwriting, typography, or writing.
-Keep posters, banners, screens, and central areas
-completely free of text and lettering.
-Create only the requested visual artwork.
-If the request asks for text, represent its intended
-meaning through visuals without drawing the text.
-
+        private const string SafetyAndQualityPrefix = """
+Generate professional, high-quality visual artwork.
+SAFETY: Reject explicit sexual content, sexualized minors,
+non-consensual intimate imagery, and sexual deepfakes.
 USER REQUEST:
 """;
+
+        private string BuildSafePrompt(string prompt)
+        {
+            if (string.IsNullOrWhiteSpace(prompt))
+                throw new ArgumentException("Prompt cannot be empty.");
+
+            string trimmedPrompt = prompt.Trim();
+
+            int availableChars =
+                MaxTotalPromptChars - SafetyAndQualityPrefix.Length - 1;
+
+            if (trimmedPrompt.Length > availableChars)
+            {
+                throw new ArgumentException(
+                    $"Prompt cannot exceed {availableChars} characters " +
+                    "because safety instructions are included.");
+            }
+
+            return $"{SafetyAndQualityPrefix}\n{trimmedPrompt}";
+        }
 
         public async Task<byte[]> GenerateAsync(
             string prompt,
@@ -141,7 +163,16 @@ USER REQUEST:
                 //    "Generate the requested image while following the " +
                 //    "content-safety and image-quality instructions above.";
 
-                string safePrompt = SafetyAndQualityPrefix + prompt.Trim();
+                const int maxTotalPromptChars = 1000;
+
+                string safePrompt = BuildSafePrompt(prompt);
+
+                if (safePrompt.Length > maxTotalPromptChars)
+                {
+                    throw new ArgumentException(
+                        $"The complete prompt, including safety instructions, " +
+                        $"must not exceed {maxTotalPromptChars} characters.");
+                }
 
                 var endpoint = $"{o.BaseUrl.TrimEnd('/')}/generate";
 
@@ -196,6 +227,193 @@ USER REQUEST:
             {
                 _gate.Release();
             }
+        }
+
+        public async Task<byte[]> ComposeAsync(
+            ImageComposeRequest r,
+            CancellationToken ct)
+        {
+            var o = _opts.CurrentValue;
+
+            if (!o.Enabled)
+                throw new InvalidOperationException(
+                    "Image generation is disabled.");
+
+            if (string.IsNullOrWhiteSpace(r.Scene) ||
+                r.Scene.Length > o.MaxPromptChars)
+            {
+                throw new ArgumentException(
+                    $"Scene description must be 1-{o.MaxPromptChars} characters.");
+            }
+
+            if (string.IsNullOrWhiteSpace(r.Title) ||
+                r.Title.Length > 120)
+            {
+                throw new ArgumentException(
+                    "Title is required (max 120 characters).");
+            }
+
+            if (!await _gate.WaitAsync(TimeSpan.FromSeconds(60), ct))
+            {
+                throw new TimeoutException(
+                    "Image generator is busy. Please try again shortly.");
+            }
+
+            try
+            {
+                using var cts =
+                    CancellationTokenSource.CreateLinkedTokenSource(ct);
+
+                cts.CancelAfter(TimeSpan.FromSeconds(o.TimeoutSeconds));
+
+                var http = _factory.CreateClient("ImageGen");
+
+                var url = $"{o.BaseUrl.TrimEnd('/')}/compose";
+
+                var safeScene = BuildSafePrompt(r.Scene.Trim());
+
+                var payload = new
+                {
+                    prompt = safeScene,
+                    title = r.Title.Trim(),
+
+                    subtitle = string.IsNullOrWhiteSpace(r.Subtitle)
+                        ? null
+                        : r.Subtitle.Trim(),
+
+                    footer = string.IsNullOrWhiteSpace(r.Footer)
+                        ? null
+                        : r.Footer.Trim(),
+
+                    position = r.Position,
+                    panel = r.Panel,
+                    width = r.Width,
+                    height = r.Height
+                };
+
+                _log.LogInformation(
+                    "Calling image composition service at {Url}. " +
+                    "Dimensions: {Width}x{Height}, Position: {Position}",
+                    url,
+                    r.Width,
+                    r.Height,
+                    r.Position);
+
+                using var resp = await http.PostAsJsonAsync(
+                    url,
+                    payload,
+                    cts.Token);
+
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var body = await resp.Content.ReadAsStringAsync(
+                        CancellationToken.None);
+
+                    _log.LogError(
+                        "Image service returned HTTP {StatusCode}. " +
+                        "URL: {Url}. Response: {Body}",
+                        (int)resp.StatusCode,
+                        url,
+                        body);
+
+                    throw new HttpRequestException(
+                        $"Image service returned HTTP {(int)resp.StatusCode}: {body}");
+                }
+
+                var contentType = resp.Content.Headers.ContentType?.MediaType;
+
+                if (!string.Equals(
+                        contentType,
+                        "image/png",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    var body = await resp.Content.ReadAsStringAsync(
+                        CancellationToken.None);
+
+                    _log.LogError(
+                        "Image service returned unexpected content type {ContentType}. " +
+                        "Response: {Body}",
+                        contentType,
+                        body);
+
+                    throw new InvalidOperationException(
+                        $"Expected image/png but received {contentType ?? "unknown content type"}.");
+                }
+
+                var bytes = await resp.Content.ReadAsByteArrayAsync(cts.Token);
+
+                if (bytes.Length == 0)
+                {
+                    throw new InvalidOperationException(
+                        "Image service returned an empty PNG.");
+                }
+
+                _log.LogInformation(
+                    "Image composition completed successfully. Output size: {Bytes} bytes.",
+                    bytes.Length);
+
+                return bytes;
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                _log.LogError(
+                    "Image composition exceeded the configured timeout of {TimeoutSeconds} seconds.",
+                    o.TimeoutSeconds);
+
+                throw new TimeoutException(
+                    $"Image generation exceeded the timeout of {o.TimeoutSeconds} seconds.");
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        public Task<byte[]> NormalizeAsync(byte[] image, CancellationToken ct) =>
+    PostImageAsync("/normalize", image, new(), gpu: false, ct);
+
+        public Task<byte[]> EditAsync(byte[] image, string prompt, CancellationToken ct) =>
+            PostImageAsync("/edit", image, new() { ["prompt"] = prompt }, gpu: true, ct);
+
+        public Task<byte[]> OverlayAsync(byte[] image, string title, string? subtitle, string? footer, string position, CancellationToken ct)
+        {
+            var f = new Dictionary<string, string> { ["title"] = title, ["position"] = position };
+            if (!string.IsNullOrWhiteSpace(subtitle)) f["subtitle"] = subtitle;
+            if (!string.IsNullOrWhiteSpace(footer)) f["footer"] = footer;
+            return PostImageAsync("/overlay", image, f, gpu: false, ct);
+        }
+
+        private async Task<byte[]> PostImageAsync(string path, byte[] image, Dictionary<string, string> fields, bool gpu, CancellationToken ct)
+        {
+            var o = _opts.CurrentValue;
+            if (!o.Enabled) throw new InvalidOperationException("Image generation is disabled.");
+
+            if (gpu && !await _gate.WaitAsync(TimeSpan.FromSeconds(60), ct))
+                throw new TimeoutException("Image generator is busy. Please try again shortly.");
+            try
+            {
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(TimeSpan.FromSeconds(o.TimeoutSeconds));
+
+                using var form = new MultipartFormDataContent();
+                var part = new ByteArrayContent(image);
+                part.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+                form.Add(part, "image", "image.png");
+                foreach (var kv in fields) form.Add(new StringContent(kv.Value), kv.Key);
+
+                var http = _factory.CreateClient("ImageGen");
+                using var resp = await http.PostAsync($"{o.BaseUrl.TrimEnd('/')}{path}", form, cts.Token);
+
+                if (resp.StatusCode == System.Net.HttpStatusCode.BadRequest)
+                    throw new ArgumentException("That file could not be read as an image.");
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _log.LogError("Image service {Path} returned {Status}", path, (int)resp.StatusCode);
+                    throw new HttpRequestException($"Image service error {(int)resp.StatusCode}");
+                }
+                return await resp.Content.ReadAsByteArrayAsync(cts.Token);
+            }
+            finally { if (gpu) _gate.Release(); }
         }
     }
 }

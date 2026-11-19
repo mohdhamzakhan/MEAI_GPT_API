@@ -4238,6 +4238,7 @@ Answer directly without introducing yourself.";
                       var stProp) ? stProp.GetString() : null,
                     AnnexureRefs = string.IsNullOrEmpty(annexureRefsMeta) ? null : annexureRefsMeta,
                     AnnexureLinks = annexureLinks,
+                    PlantTag = metadata.TryGetProperty("plant", out var pl) ? pl.GetString() : null,
                 });
             }
 
@@ -4343,13 +4344,36 @@ Answer directly without introducing yourself.";
                     candidates = await SearchGeneral(query, embeddingModel, candidatePoolSize, normalizedPlant, collectionId, query);
                 }
 
-                // 3. Baseline Thresholding: Filter out extremely low-quality matches early
-                // This prevents garbage data from wasting processing time in your hybrid/reranking steps.
-                var highQualityCandidates = candidates
-                  .Where(c => c.Similarity >= 0.25) // Filter out low-quality matches
-                  .OrderByDescending(c => c.Similarity) // <-- GUARANTEE highest similarity at the top
-                  .Take(maxResults * 2) // Return a rich pool for upstream steps
-                  .ToList();
+                // 3. Baseline thresholding on RAW similarity (quality gate),
+                //    ranking on RelevanceScore (boosted), with a reserved share for common policies.
+                var qualified = candidates
+                    .Where(c => c.Similarity >= 0.25)
+                    .OrderByDescending(c => c.RelevanceScore)
+                    .ToList();
+
+                var poolSize = maxResults * 2;
+                var commonTags = new[] { "centralized", "context", "general", "additional_source" };
+
+                bool IsCommon(RelevantChunk c) =>
+                    c.Source != null &&
+                    (c.Source.Contains("centralized", StringComparison.OrdinalIgnoreCase) ||
+                     c.Source.Contains("abbreviation", StringComparison.OrdinalIgnoreCase) ||
+                     c.Source.Contains("organization", StringComparison.OrdinalIgnoreCase) ||
+                     (c.PolicyType != null && commonTags.Any(t => c.PolicyType.Contains(t, StringComparison.OrdinalIgnoreCase))));
+
+                // reserve about 30% of the pool for common chunks, if they exist
+                var reserved = qualified.Where(IsCommon).Take(Math.Max(poolSize * 3 / 10, 5)).ToList();
+                var reservedSet = new HashSet<string>(reserved.Select(c => c.Text));
+
+                var highQualityCandidates = reserved
+                    .Concat(qualified.Where(c => !reservedSet.Contains(c.Text)))
+                    .Take(poolSize)
+                    .OrderByDescending(c => c.RelevanceScore)
+                    .ToList();
+
+                _logger.LogInformation(
+                    "🔍 Candidate pool: {Total} qualified, {Common} common, {Final} kept",
+                    qualified.Count, qualified.Count(IsCommon), highQualityCandidates.Count);
 
                 return highQualityCandidates;
             }
@@ -5802,7 +5826,321 @@ Answer directly without introducing yourself.";
             return clauses;
         }
 
-        private async Task<List<RelevantChunk>> PerformChromaSearch(string query, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId)
+        //private async Task<List<RelevantChunk>> PerformChromaSearch(string query, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId)
+        //{
+        //    try
+        //    {
+        //        var queryEmbedding = await GetQueryEmbeddingAsync(query, embeddingModel);
+        //        if (queryEmbedding.Count == 0)
+        //        {
+        //            _logger.LogError($"❌ Failed to generate embedding for query: {query}");
+        //            return new List<RelevantChunk>();
+        //        }
+
+        //        var normalizedPlant = plant.ToLowerInvariant();
+        //        var plantClause = new Dictionary<string,
+        //          object> {
+        //    {
+        //      "$or",
+        //      new List < Dictionary < string,
+        //      object >> {
+        //        new Dictionary < string,
+        //        object > {
+        //          {
+        //            "plant",
+        //            normalizedPlant
+        //          }
+        //        },
+        //        new Dictionary < string,
+        //        object > {
+        //          {
+        //            "plant",
+        //            "centralized"
+        //          }
+        //        },
+        //        new Dictionary < string,
+        //        object > {
+        //          {
+        //            "plant",
+        //            "context"
+        //          }
+        //        },
+        //        new Dictionary < string,
+        //        object > {
+        //          {
+        //            "plant",
+        //            "general"
+        //          }
+        //        },
+        //        new Dictionary < string,
+        //        object > {
+        //          {
+        //            "plant",
+        //            "additional_source"
+        //          }
+        //        }
+        //      }
+        //    }
+        //  };
+
+        //        // ✅ NEW: combine plant filtering with eligibility filtering
+        //        // (grade/employee_category/direct_subtype) for the currently
+        //        // resolved requester, if any. A request with no resolved
+        //        // requester (unauthenticated, unknown userId, etc.) falls
+        //        // through to plant-only filtering exactly as before —
+        //        // eligibility clauses are additive, never a replacement.
+        //        var eligibilityClauses = BuildEligibilityClauses();
+        //        var whereFilter = eligibilityClauses.Count > 0 ?
+        //          new Dictionary<string,
+        //          object> {
+        //    {
+        //      "$and",
+        //      new List < Dictionary < string,
+        //      object >> (eligibilityClauses.Prepend(plantClause))
+        //    }
+        //          } :
+        //          plantClause;
+
+        //        var searchData = new
+        //        {
+        //            query_embeddings = new List<List<float>> {
+        //      queryEmbedding
+        //    },
+        //            n_results = maxResults,
+        //            include = new[] {
+        //      "documents",
+        //      "metadatas",
+        //      "distances"
+        //    },
+        //            where = whereFilter
+        //        };
+
+        //        using
+        //        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        //        var response = await _chromaClient.PostAsJsonAsync(
+        //  $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+        //          searchData, cts.Token);
+
+        //        if (!response.IsSuccessStatusCode)
+        //        {
+        //            var errorContent = await response.Content.ReadAsStringAsync();
+        //            _logger.LogError($"❌ ChromaDB search failed: {response.StatusCode} - {errorContent}");
+        //            return new List<RelevantChunk>();
+        //        }
+
+        //        var responseContent = await response.Content.ReadAsStringAsync();
+        //        using
+        //        var doc = JsonDocument.Parse(responseContent);
+        //        return ParseSearchResults(doc.RootElement, maxResults, plant, query);
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        _logger.LogError(ex, $"❌ PerformChromaSearch failed for query: {query}");
+        //        return new List<RelevantChunk>();
+        //    }
+        //}
+        //private async Task<List<RelevantChunk>> SearchGeneral(string query, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId, string originalQuery)
+        //{
+        //    try
+        //    {
+        //        // General search without section-specific filtering
+        //        _logger.LogInformation($"🔍 Performing general search for: {query}");
+
+        //        var queryEmbedding = await GetQueryEmbeddingAsync(query, embeddingModel);
+        //        if (queryEmbedding.Count == 0)
+        //        {
+        //            return new List<RelevantChunk>();
+        //        }
+
+        //        var normalizedPlant = plant.ToLowerInvariant();
+
+        //        // Broader search criteria for general queries
+        //        var plantClause = new Dictionary<string,
+        //          object> {
+        //    {
+        //      "$or",
+        //      new List < Dictionary < string,
+        //      object >> {
+        //        new Dictionary < string,
+        //        object > {
+        //          {
+        //            "plant",
+        //            normalizedPlant
+        //          }
+        //        },
+        //        new Dictionary < string,
+        //        object > {
+        //          {
+        //            "plant",
+        //            "centralized"
+        //          }
+        //        },
+        //        new Dictionary < string,
+        //        object > {
+        //          {
+        //            "plant",
+        //            "context"
+        //          }
+        //        },
+        //        new Dictionary < string,
+        //        object > {
+        //          {
+        //            "plant",
+        //            "general"
+        //          }
+        //        },
+        //        new Dictionary < string,
+        //        object > {
+        //          {
+        //            "plant",
+        //            "additional_source"
+        //          }
+        //        }
+        //      }
+        //    }
+        //  };
+
+        //        // ✅ NEW: same eligibility-clause combination as
+        //        // PerformChromaSearch — see BuildEligibilityClauses for the
+        //        // "don't silently default" reasoning.
+        //        var eligibilityClauses = BuildEligibilityClauses();
+        //        var whereFilter = eligibilityClauses.Count > 0 ?
+        //          new Dictionary<string,
+        //          object> {
+        //    {
+        //      "$and",
+        //      new List < Dictionary < string,
+        //      object >> (eligibilityClauses.Prepend(plantClause))
+        //    }
+        //          } :
+        //          plantClause;
+
+        //        var searchData = new
+        //        {
+        //            query_embeddings = new List<List<float>> {
+        //      queryEmbedding
+        //    },
+        //            n_results = Math.Min(maxResults * 2, 50), // Get more results for general search
+        //            include = new[] {
+        //      "documents",
+        //      "metadatas",
+        //      "distances"
+        //    },
+        //            where = whereFilter
+        //        };
+
+        //        var response = await _chromaClient.PostAsJsonAsync(
+        //  $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+        //          searchData);
+
+        //        if (response.IsSuccessStatusCode)
+        //        {
+        //            var responseContent = await response.Content.ReadAsStringAsync();
+        //            using
+        //            var doc = JsonDocument.Parse(responseContent);
+        //            var results = ParseSearchResults(doc.RootElement, maxResults, plant, originalQuery);
+
+        //            _logger.LogInformation($"🔍 General search found {results.Count} results");
+        //            return results;
+        //        }
+
+        //        return new List<RelevantChunk>();
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        _logger.LogError(ex, $"❌ General search failed: {ex.Message}");
+        //        return new List<RelevantChunk>();
+        //    }
+        //}
+
+        // ── Helpers (add above PerformChromaSearch) ──────────────────────────────
+
+        // Plant tags that mean "common to all plants".
+        private static readonly string[] CommonPlantTags =
+            { "centralized", "context", "general", "additional_source" };
+
+        // Builds the Chroma where-clause: plant filter + eligibility clauses.
+        private Dictionary<string, object> BuildWhere(object plantFilter)
+        {
+            var plantClause = new Dictionary<string, object> { { "plant", plantFilter } };
+            var eligibility = BuildEligibilityClauses();
+
+            return eligibility.Count > 0
+                ? new Dictionary<string, object>
+                  {
+              { "$and", new List<Dictionary<string, object>>(eligibility.Prepend(plantClause)) }
+                  }
+                : plantClause;
+        }
+
+        // One Chroma query with a given where-clause.
+        private async Task<List<RelevantChunk>> QueryChromaAsync(
+            List<float> queryEmbedding,
+            Dictionary<string, object> where,
+            int nResults,
+            string plant,
+            string originalQuery,
+            string collectionId)
+        {
+            var searchData = new
+            {
+                query_embeddings = new List<List<float>> { queryEmbedding },
+                n_results = nResults,
+                include = new[] { "documents", "metadatas", "distances" },
+                where
+            };
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var response = await _chromaClient.PostAsJsonAsync(
+                $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
+                searchData, cts.Token);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var err = await response.Content.ReadAsStringAsync();
+                _logger.LogError($"❌ ChromaDB search failed: {response.StatusCode} - {err}");
+                return new List<RelevantChunk>();
+            }
+
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            return ParseSearchResults(doc.RootElement, nResults, plant, originalQuery);
+        }
+
+        // Runs plant-specific and common pools separately, then merges them,
+        // so plant files can't crowd out common policies.
+        private async Task<List<RelevantChunk>> SearchPlantAndCommonAsync(
+            List<float> queryEmbedding,
+            int maxResults,
+            string plant,
+            string originalQuery,
+            string collectionId)
+        {
+            var normalizedPlant = plant.ToLowerInvariant();
+            var perPool = Math.Min(Math.Max(maxResults / 2, 8), 50);
+
+            var plantWhere = BuildWhere(normalizedPlant);
+            var commonWhere = BuildWhere(new Dictionary<string, object> { { "$in", CommonPlantTags } });
+
+            // Sequential: your Chroma client is shared and the embedding is already computed.
+            var plantResults = await QueryChromaAsync(queryEmbedding, plantWhere, perPool, plant, originalQuery, collectionId);
+            var commonResults = await QueryChromaAsync(queryEmbedding, commonWhere, perPool, plant, originalQuery, collectionId);
+
+            _logger.LogInformation(
+                "🔍 Pool results for plant '{Plant}': plant-specific={P}, common={C}",
+                normalizedPlant, plantResults.Count, commonResults.Count);
+
+            return plantResults.Concat(commonResults)
+                .GroupBy(c => c.Text)
+                .Select(g => g.OrderByDescending(c => c.RelevanceScore).First())
+                .OrderByDescending(c => c.RelevanceScore)
+                .Take(maxResults)
+                .ToList();
+        }
+
+        // ── PerformChromaSearch ──────────────────────────────────────────────────
+        private async Task<List<RelevantChunk>> PerformChromaSearch(
+            string query, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId)
         {
             try
             {
@@ -5813,101 +6151,7 @@ Answer directly without introducing yourself.";
                     return new List<RelevantChunk>();
                 }
 
-                var normalizedPlant = plant.ToLowerInvariant();
-                var plantClause = new Dictionary<string,
-                  object> {
-            {
-              "$or",
-              new List < Dictionary < string,
-              object >> {
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    normalizedPlant
-                  }
-                },
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    "centralized"
-                  }
-                },
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    "context"
-                  }
-                },
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    "general"
-                  }
-                },
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    "additional_source"
-                  }
-                }
-              }
-            }
-          };
-
-                // ✅ NEW: combine plant filtering with eligibility filtering
-                // (grade/employee_category/direct_subtype) for the currently
-                // resolved requester, if any. A request with no resolved
-                // requester (unauthenticated, unknown userId, etc.) falls
-                // through to plant-only filtering exactly as before —
-                // eligibility clauses are additive, never a replacement.
-                var eligibilityClauses = BuildEligibilityClauses();
-                var whereFilter = eligibilityClauses.Count > 0 ?
-                  new Dictionary<string,
-                  object> {
-            {
-              "$and",
-              new List < Dictionary < string,
-              object >> (eligibilityClauses.Prepend(plantClause))
-            }
-                  } :
-                  plantClause;
-
-                var searchData = new
-                {
-                    query_embeddings = new List<List<float>> {
-              queryEmbedding
-            },
-                    n_results = maxResults,
-                    include = new[] {
-              "documents",
-              "metadatas",
-              "distances"
-            },
-                    where = whereFilter
-                };
-
-                using
-                var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                var response = await _chromaClient.PostAsJsonAsync(
-          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
-                  searchData, cts.Token);
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    var errorContent = await response.Content.ReadAsStringAsync();
-                    _logger.LogError($"❌ ChromaDB search failed: {response.StatusCode} - {errorContent}");
-                    return new List<RelevantChunk>();
-                }
-
-                var responseContent = await response.Content.ReadAsStringAsync();
-                using
-                var doc = JsonDocument.Parse(responseContent);
-                return ParseSearchResults(doc.RootElement, maxResults, plant, query);
+                return await SearchPlantAndCommonAsync(queryEmbedding, maxResults, plant, query, collectionId);
             }
             catch (Exception ex)
             {
@@ -5915,112 +6159,23 @@ Answer directly without introducing yourself.";
                 return new List<RelevantChunk>();
             }
         }
-        private async Task<List<RelevantChunk>> SearchGeneral(string query, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId, string originalQuery)
+
+        // ── SearchGeneral ────────────────────────────────────────────────────────
+        private async Task<List<RelevantChunk>> SearchGeneral(
+            string query, ModelConfiguration embeddingModel, int maxResults, string plant, string collectionId, string originalQuery)
         {
             try
             {
-                // General search without section-specific filtering
                 _logger.LogInformation($"🔍 Performing general search for: {query}");
 
                 var queryEmbedding = await GetQueryEmbeddingAsync(query, embeddingModel);
                 if (queryEmbedding.Count == 0)
-                {
                     return new List<RelevantChunk>();
-                }
 
-                var normalizedPlant = plant.ToLowerInvariant();
+                var results = await SearchPlantAndCommonAsync(queryEmbedding, maxResults, plant, originalQuery, collectionId);
 
-                // Broader search criteria for general queries
-                var plantClause = new Dictionary<string,
-                  object> {
-            {
-              "$or",
-              new List < Dictionary < string,
-              object >> {
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    normalizedPlant
-                  }
-                },
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    "centralized"
-                  }
-                },
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    "context"
-                  }
-                },
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    "general"
-                  }
-                },
-                new Dictionary < string,
-                object > {
-                  {
-                    "plant",
-                    "additional_source"
-                  }
-                }
-              }
-            }
-          };
-
-                // ✅ NEW: same eligibility-clause combination as
-                // PerformChromaSearch — see BuildEligibilityClauses for the
-                // "don't silently default" reasoning.
-                var eligibilityClauses = BuildEligibilityClauses();
-                var whereFilter = eligibilityClauses.Count > 0 ?
-                  new Dictionary<string,
-                  object> {
-            {
-              "$and",
-              new List < Dictionary < string,
-              object >> (eligibilityClauses.Prepend(plantClause))
-            }
-                  } :
-                  plantClause;
-
-                var searchData = new
-                {
-                    query_embeddings = new List<List<float>> {
-              queryEmbedding
-            },
-                    n_results = Math.Min(maxResults * 2, 50), // Get more results for general search
-                    include = new[] {
-              "documents",
-              "metadatas",
-              "distances"
-            },
-                    where = whereFilter
-                };
-
-                var response = await _chromaClient.PostAsJsonAsync(
-          $"/api/v2/tenants/{_chromaOptions.Tenant}/databases/{_chromaOptions.Database}/collections/{collectionId}/query",
-                  searchData);
-
-                if (response.IsSuccessStatusCode)
-                {
-                    var responseContent = await response.Content.ReadAsStringAsync();
-                    using
-                    var doc = JsonDocument.Parse(responseContent);
-                    var results = ParseSearchResults(doc.RootElement, maxResults, plant, originalQuery);
-
-                    _logger.LogInformation($"🔍 General search found {results.Count} results");
-                    return results;
-                }
-
-                return new List<RelevantChunk>();
+                _logger.LogInformation($"🔍 General search found {results.Count} results");
+                return results;
             }
             catch (Exception ex)
             {
@@ -11701,9 +11856,9 @@ Reply with ONLY this JSON: {{""missing_input"": true or false, ""question"": ""<
 
             var questionLower = question.ToLowerInvariant();
             var targetPolicy = policyKeywords
-              .FirstOrDefault(kvp =>
-                kvp.Value.Any(keyword => questionLower.Contains(keyword)))
-              .Key;
+    .FirstOrDefault(kvp => kvp.Value.Any(k =>
+        Regex.IsMatch(questionLower, $@"\b{Regex.Escape(k)}\b")))
+    .Key;
 
             if (string.IsNullOrEmpty(targetPolicy))
                 return chunks;
@@ -11711,8 +11866,9 @@ Reply with ONLY this JSON: {{""missing_input"": true or false, ""question"": ""<
             _logger.LogInformation("Filtering for policy type: {Policy}", targetPolicy);
 
             var filtered = chunks
-              .Where(c => c.Source.ToLowerInvariant().Contains(targetPolicy))
-              .ToList();
+     .Where(c => c.Source.ToLowerInvariant().Contains(targetPolicy)
+              || string.Equals(c.PlantTag, "centralized", StringComparison.OrdinalIgnoreCase))
+     .ToList();
 
             // If filtering left too few results, pad with highest-RelevanceScore chunks
             if (filtered.Count < 3)
