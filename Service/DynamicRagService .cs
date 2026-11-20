@@ -12214,6 +12214,32 @@ Rewritten question:";
             }
         }
 
+        public async Task<List<string>> TraceRetrievalAsync(string question, string plant, string userId)
+        {
+            var report = new List<string>();
+            void Stage(string name, List<RelevantChunk> c) => report.Add(
+                $"{name}: {c.Count} chunks | centralized={c.Count(x => string.Equals(x.PlantTag, "centralized", StringComparison.OrdinalIgnoreCase))}" +
+                $" | {string.Join(" | ", c.Select(x => x.Source).Distinct().Take(6))}");
+
+            _currentRequester = await _employeeDirectory.GetEmployeeInfoAsync(userId);
+            ResolveQueryMentionedGradeRank(question);
+            report.Add($"requester: category={_currentRequester?.EmployeeCategory}, grade={_currentRequester?.Grade}, " +
+                       $"queryRank={_queryMentionedGradeRank}, ambiguousTitle={_pendingAmbiguousGradeMention?.Title}");
+
+            var emb = await _modelManager.GetModelAsync(_config.DefaultEmbeddingModel!);
+            Stage("1 raw search", await SearchChromaDBAsync(question, emb!, 40, plant));
+
+            var ctx = _conversation.GetOrCreateConversationContext("trace-" + Guid.NewGuid());
+            var expanded = await GetRelevantChunksWithExpansionAsync(question, emb!, 40, true, ctx, false, emb!, plant);
+            Stage("2 expansion + anchors", expanded);
+
+            var f1 = FilterByPolicyIntent(expanded, question); Stage("3 policy-intent", f1);
+            var f2 = _policyAnalysis.FilterScenarioMismatchedChunks(f1, question); Stage("4 scenario filter", f2);
+            var f3 = DiversifyBySource(f2, 30, 5); Stage("5 diversify", f3);
+            report.Add($"6 coverage gate passes: {_policyAnalysis.CheckPolicyCoverage(f3, question)}");
+            return report;
+        }
+
         private async Task<RetrievalResult> ExecuteRetrievalAsync(
           string question,
           ModelConfiguration embModel,

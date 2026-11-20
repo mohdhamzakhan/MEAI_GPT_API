@@ -211,21 +211,45 @@ namespace MEAI_GPT_API.Controller
             using var embedDoc = JsonDocument.Parse(await embedResp.Content.ReadAsStringAsync());
             var queryEmbedding = embedDoc.RootElement.GetProperty("embedding").EnumerateArray().Select(e => e.GetDouble()).ToArray();
 
-            var results = new List<(string? SourceFile, double Similarity, string Preview)>();
+            //var results = new List<(string? SourceFile, double Similarity, string Preview)>();
+            //for (int i = 0; i < docsEl.Count; i++)
+            //{
+            //    var chunkEmbedding = embeddingsEl[i].EnumerateArray().Select(e => e.GetDouble()).ToArray();
+            //    var similarity = CosineSimilarity(queryEmbedding, chunkEmbedding);
+            //    var sourceFile = metaEl2[i].TryGetProperty("source_file", out var sfv) ? sfv.GetString() : "unknown";
+            //    var text = docsEl[i].GetString() ?? "";
+
+            //    results.Add((sourceFile, Math.Round(similarity, 4), text.Length > 111111200 ? text[..200] : text));
+            //}
+
+            //var ordered = results
+            //    .OrderByDescending(r => r.Similarity)
+            //    .Select(r => new { r.SourceFile, similarity = r.Similarity, preview = r.Preview })
+            //    .ToList();
+
+            var results = new List<object>();
             for (int i = 0; i < docsEl.Count; i++)
             {
                 var chunkEmbedding = embeddingsEl[i].EnumerateArray().Select(e => e.GetDouble()).ToArray();
-                var similarity = CosineSimilarity(queryEmbedding, chunkEmbedding);
-                var sourceFile = metaEl2[i].TryGetProperty("source_file", out var sfv) ? sfv.GetString() : "unknown";
+                var similarity = Math.Round(CosineSimilarity(queryEmbedding, chunkEmbedding), 4);
+                var m = metaEl2[i];
+                string? Str(string k) => m.TryGetProperty(k, out var v) ? v.ToString() : null;
                 var text = docsEl[i].GetString() ?? "";
 
-                results.Add((sourceFile, Math.Round(similarity, 4), text.Length > 111111200 ? text[..200] : text));
+                results.Add(new
+                {
+                    sourceFile = Str("source_file"),
+                    similarity,
+                    plant = Str("plant"),
+                    gradeMinRank = Str("grade_min_rank"),   // missing => Chroma excludes it once eligibility filters apply
+                    gradeMaxRank = Str("grade_max_rank"),
+                    employeeCategory = Str("employee_category"),
+                    directSubtype = Str("direct_subtype"),
+                    preview = text.Length > 111111200 ? text[..200] : text
+                });
             }
 
-            var ordered = results
-                .OrderByDescending(r => r.Similarity)
-                .Select(r => new { r.SourceFile, similarity = r.Similarity, preview = r.Preview })
-                .ToList();
+            var ordered = results.OrderByDescending(r => ((dynamic)r).similarity).ToList();
 
             return Ok(new
             {
@@ -237,6 +261,16 @@ namespace MEAI_GPT_API.Controller
                 // typically makes it into the final diversified pool
                 chunks = ordered
             });
+        }
+
+        // GET /api/diagnostics/trace?plant=Sanand&userId=hamza.khan&question=...
+        [HttpGet("trace")]
+        public async Task<IActionResult> Trace([FromQuery] string plant, [FromQuery] string userId, [FromQuery] string question)
+        {
+            if (_ragService is not DynamicRagService rag)
+                return StatusCode(500, new { error = "IRAGService is not DynamicRagService" });
+
+            return Ok(await rag.TraceRetrievalAsync(question, plant, userId));
         }
 
         private HttpClient _chromaClient() => _httpClientFactory.CreateClient("ChromaDB");
