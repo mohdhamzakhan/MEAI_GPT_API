@@ -175,11 +175,9 @@ namespace MEAI_GPT_API.Service
 
             bool ClearsGuaranteeBar(RelevantChunk c)
             {
-                if (c.AnchorSource != "DocumentRouter") return true; // deterministic: unconditional, as before
-                // No rerank score available (reranker call failed/skipped) --
-                // fall back to trusting the upstream guarantee rather than
-                // silently dropping it.
-                return !c.RerankScore.HasValue || c.RerankScore.Value >= routerAnchorMinRerankScore;
+                if (!c.RerankScore.HasValue) return true;                 // reranker unavailable: trust upstream
+                var floor = c.AnchorSource == "DocumentRouter" ? 0.30 : 0.10;
+                return c.RerankScore.Value >= floor;
             }
 
             var guaranteed = chunks

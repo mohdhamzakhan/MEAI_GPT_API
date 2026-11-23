@@ -212,7 +212,13 @@ namespace MEAI_GPT_API.Services
                 _logger.LogWarning(ex, "Failed to resolve grade mention in question — continuing without it");
             }
         }
+        // Topics whose provisions are typically grade-gated. Tune this list to your policies.
+        private static readonly Regex GradeGatedTopics = new(
+            @"\b(benefits?|allowances?|entitle\w*|eligib\w*|car|vehicle|loan|parking|mobile|laptop|travel|hotel|reimburs\w*|perquisites?|housing|medical|insurance|leave|lta|incentive|bonus)\b",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        private static bool IsGradeGatedQuestion(string question) =>
+            !string.IsNullOrWhiteSpace(question) && GradeGatedTopics.IsMatch(question);
         private string? ResolveTitleBandAnswer(string answer, List<string> options)
         {
             if (string.IsNullOrWhiteSpace(answer) || options == null || options.Count == 0) return null;
@@ -498,15 +504,19 @@ namespace MEAI_GPT_API.Services
                     // per-chunk here (not via the shared madeTriggerCall flag
                     // below) since a file can have many chunks each needing
                     // their own throttle, not just one delay for the whole file.
-                    var chunksForEligibility = _textChunking.ChunkText(content, filePath);
-                    foreach (var chunk in chunksForEligibility)
+                    if (!IsCentralizedFile(filePath))
                     {
-                        var (_, madeEligibilityCall) = await _gradeEligibilityService.GetOrExtractAsync(filePath, chunk.Text);
-                        if (madeEligibilityCall)
+                        var chunksForEligibility = _textChunking.ChunkText(content, filePath);
+                        foreach (var chunk in chunksForEligibility)
                         {
-                            await Task.Delay(triggerGenDelayMs);
+                            var (_, madeEligibilityCall) = await _gradeEligibilityService.GetOrExtractAsync(filePath, chunk.Text);
+                            if (madeEligibilityCall)
+                            {
+                                await Task.Delay(triggerGenDelayMs);
+                            }
                         }
                     }
+
                 }
                 catch (Exception ex)
                 {
@@ -1274,7 +1284,7 @@ namespace MEAI_GPT_API.Services
                           "Clarification Needed", stopwatch.ElapsedMilliseconds, 1.0, dbSession.SessionId);
                     }
                 }
-                else if (_pendingAmbiguousGradeMention != null)
+                else if (_pendingAmbiguousGradeMention != null && IsGradeGatedQuestion(question))
                 {
                     var title = _pendingAmbiguousGradeMention.Title;
                     var options = _pendingAmbiguousGradeMention.Bands;
@@ -1291,6 +1301,13 @@ namespace MEAI_GPT_API.Services
                     return CreateSuccessResponse(
             $"'{title}' is used for two different grade bands here. Which one are you asking about?\n\n{optionsText}",
                       "Clarification Needed", stopwatch.ElapsedMilliseconds, 1.0, dbSession.SessionId);
+                }
+                else if (_pendingAmbiguousGradeMention != null)
+                {
+                    _logger.LogInformation(
+                        "🎯 Ambiguous title '{Title}' ignored: question isn't about a grade-gated topic",
+                        _pendingAmbiguousGradeMention.Title);
+                    _pendingAmbiguousGradeMention = null;   // fall through to normal retrieval, using the requester's own grade
                 }
 
                 if (context.AwaitingGradeClarification)
@@ -3629,9 +3646,9 @@ Answer directly without introducing yourself.";
                   object>>();
                 foreach (var c in successfulChunks)
                 {
-                    if (IsContextFile(c.SourceFile))
+                    if (IsContextFile(c.SourceFile) || IsCentralizedFile(c.SourceFile))
                     {
-                        // no grade/category restrictions
+                        // no grade/category restrictions, and no LLM extraction call
                         metadatas.Add(CreateChunkMetadata(c.SourceFile, lastModified, model.Name, c.Text, plant, c.SectionId, c.Title));
                         continue;
                     }
@@ -4061,6 +4078,9 @@ Answer directly without introducing yourself.";
                 var policyType = _policyAnalysis.DeterminePolicyType(
                   metadata, sourceFile, currentPlant);
 
+                var chunkPlant = metadata.TryGetProperty("plant", out var plTag) ? plTag.GetString() : null;
+                var isCentralized = string.Equals(chunkPlant, "centralized", StringComparison.OrdinalIgnoreCase);
+
                 // ── Relevance score (ranking only, never shown to user) ──────────────
                 // Start from the raw similarity so the scale is anchored in reality,
                 // then apply additive boosts.  We track the boost total separately
@@ -4113,6 +4133,10 @@ Answer directly without introducing yourself.";
                 {
                     boost += 0.60; // strong boost for exact phrase match
                 }
+
+                // shared Centralized policies count as "this plant's" for every plant
+                if (lowerSource.Contains(currentPlant.ToLowerInvariant()) || isCentralized)
+                    boost += 0.10;
 
                 // ✅ NEW: exact metadata match for annexure references. This is
                 // a much stronger, more reliable signal than embedding similarity
@@ -4189,9 +4213,8 @@ Answer directly without introducing yourself.";
 
                 // General policy-document signal (weaker)
                 var isPolicyDocument =
-                  lowerSource.Contains("policy") ||
-                  lowerSource.Contains("hr") ||
-                  documentText.Contains("policy", StringComparison.OrdinalIgnoreCase);
+                         lowerSource.Contains("policy") || lowerSource.Contains("hr") || isCentralized ||
+                         documentText.Contains("policy", StringComparison.OrdinalIgnoreCase);
 
                 if (isPolicyDocument)
                 {
@@ -4227,6 +4250,7 @@ Answer directly without introducing yourself.";
 
                 relevantChunks.Add(new RelevantChunk
                 {
+                    Id = ComputeContentHash(sourceFile + documentText)[..16],
                     Text = documentText,
                     Source = sourceFile,
                     Similarity = rawSimilarity, // ← always the raw cosine value
@@ -4238,7 +4262,7 @@ Answer directly without introducing yourself.";
                       var stProp) ? stProp.GetString() : null,
                     AnnexureRefs = string.IsNullOrEmpty(annexureRefsMeta) ? null : annexureRefsMeta,
                     AnnexureLinks = annexureLinks,
-                    PlantTag = metadata.TryGetProperty("plant", out var pl) ? pl.GetString() : null,
+                    PlantTag = chunkPlant
                 });
             }
 
@@ -4921,7 +4945,7 @@ Answer directly without introducing yourself.";
             }
 
             // Plant classification (existing logic)
-            
+
             if (fileName.Contains("abbreviation") || fileName.Contains("context"))
             {
                 metadata["plant"] = "context";
@@ -5361,73 +5385,85 @@ Answer directly without introducing yourself.";
                 // sacrificing every other query.
                 List<RelevantChunk> SelectWithGuaranteedAnchors(List<RelevantChunk> candidatePool)
                 {
-                    const double anchorGuaranteeFloor = 0.35; // below this, treat as noise even if an anchor search technically returned it
-                                                              // DocumentRouterService is an LLM guessing from title text alone --
-                                                              // meaningfully lower precision than the deterministic keyword/topic
-                                                              // matches (confirmed: it can return a topically-adjacent but wrong
-                                                              // title, e.g. "Long Association Policy" for a resignation question,
-                                                              // as its second pick alongside a correct one). Router-only matches
-                                                              // need a materially higher score before they earn a guaranteed slot,
-                                                              // rather than being treated identically to deterministic matches.
-                    const double routerOnlyGuaranteeFloor = 0.55;
-                    const int maxChunksPerGuaranteedDocument = 3; // enough to cover multiple sections of the SAME correct document (e.g. No Dues form, annexures, notice period), not just one generic chunk
-                    const int maxDistinctGuaranteedDocuments = 4; // raised from 2 after a real incident: a resignation question genuinely spans 3+ policies (ISMS, Settlement, Office Computers Usage via cross-reference) -- 2 was cutting off legitimately relevant documents, not just false positives
-                    const int maxTotalGuaranteedSlots = 8; // raised proportionally with maxDistinctGuaranteedDocuments above
+                    // Gates use RAW cosine similarity. RelevanceScore carries plant/filename/anchor
+                    // boosts, so it is only used for ordering, never to decide who gets a guaranteed slot.
+                    const double anchorMinRaw = 0.40;          // deterministic anchors (topic anchor / trigger / learned)
+                    const double routerOnlyMinRaw = 0.55;      // LLM-router guesses must earn it
+                    const double strongRawMin = 0.60;          // best raw matches always get in
+                    const int maxStrongRaw = 8;
+                    const int maxChunksPerGuaranteedDocument = 3;
+                    const int maxDistinctGuaranteedDocuments = 4;
+                    const int maxTotalGuaranteedSlots = 8;
 
-                    var dedupedAnchorTexts = new HashSet<string>(anchorMatchedChunks.Select(c => c.Text));
+                    var topRaw = candidatePool.Count > 0 ? candidatePool.Max(c => c.Similarity) : 0;
+                    double Rel(RelevantChunk c) => topRaw > 0 ? c.Similarity / topRaw : 0;
+                    _logger.LogInformation("📏 Top raw similarity in pool: {Top:F3} (cosine would be ~0.7 for a strong hit)", topRaw);
 
-                    double FloorFor(RelevantChunk c) =>
-                      routerOnlyAnchorTexts.Contains(c.Text) ? routerOnlyGuaranteeFloor : anchorGuaranteeFloor;
+                    const double anchorMinRel = 0.75;     // deterministic anchors
+                    const double routerMinRel = 0.90;     // router / auto-learned guesses
+                    const double strongRel = 0.85;        // best matches always get in
 
-                    // Grouped by document, not a flat top-N overall: a flat
-                    // cap picks by score across every anchor-matched
-                    // document combined, which in production let a single
-                    // low-information chunk from the RIGHT document (e.g.
-                    // an "effective from [date]" clause) share space with an
-                    // unrelated document that also matched a different
-                    // anchor, instead of surfacing enough of the right
-                    // document's actual content to answer the question.
+                    var anchorTexts = new HashSet<string>(anchorMatchedChunks.Select(c => c.Text));
+                    bool IsRouterOnly(RelevantChunk c) => routerOnlyAnchorTexts.Contains(c.Text);
+
+                    // Anchor-matched chunks, grouped by document so one correct document can
+                    // contribute several sections instead of one generic clause.
+                    //var guaranteed = candidatePool
+                    //    .Where(c => anchorTexts.Contains(c.Text) &&
+                    //                c.Similarity >= (IsRouterOnly(c) ? routerOnlyMinRaw : anchorMinRaw))
+                    //    .GroupBy(c => c.Source)
+                    //    .OrderByDescending(g => g.Max(c => c.Similarity))
+                    //    .Take(maxDistinctGuaranteedDocuments)
+                    //    .SelectMany(g => g.OrderByDescending(c => c.Similarity).Take(maxChunksPerGuaranteedDocument))
+                    //    .Take(maxTotalGuaranteedSlots)
+                    //    .ToList();
+
                     var guaranteed = candidatePool
-                      .Where(c => dedupedAnchorTexts.Contains(c.Text) && c.RelevanceScore >= FloorFor(c))
-                      .GroupBy(c => c.Source)
-                      .OrderByDescending(g => g.Max(c => c.RelevanceScore)) // prioritize whichever matched document scored highest overall
-                      .Take(maxDistinctGuaranteedDocuments)
-                      .SelectMany(g => g.OrderByDescending(c => c.RelevanceScore).Take(maxChunksPerGuaranteedDocument))
-                      .Take(maxTotalGuaranteedSlots)
-                      .ToList();
+                        .Where(c => anchorTexts.Contains(c.Text) && Rel(c) >= (IsRouterOnly(c) ? routerMinRel : anchorMinRel))
+                        .GroupBy(c => c.Source)
+                        .OrderByDescending(g => g.Max(c => c.Similarity))
+                        .Take(maxDistinctGuaranteedDocuments)
+                        .SelectMany(g => g.OrderByDescending(c => c.Similarity).Take(maxChunksPerGuaranteedDocument))
+                        .Take(maxTotalGuaranteedSlots)
+                        .ToList();
 
-                    // Tag these so RerankerService.RerankAsync can re-reserve
-                    // their slot after its own re-scoring -- without this,
-                    // the guarantee only holds until reranking runs, then
-                    // gets silently discarded by the cross-encoder's
-                    // independent judgment (confirmed in production logs).
-                    // AnchorSource records WHICH tier granted the slot, so
-                    // RerankerService can keep treating the two tiers
-                    // differently rather than flattening the distinction
-                    // right after this method returns.
+                    // Tag them so RerankerService re-reserves their slot after re-scoring.
                     foreach (var c in guaranteed)
                     {
                         c.IsAnchorGuaranteed = true;
-                        c.AnchorSource = routerOnlyAnchorTexts.Contains(c.Text) ? "DocumentRouter" : "Deterministic";
+                        c.AnchorSource = IsRouterOnly(c) ? "DocumentRouter" : "Deterministic";
                     }
 
-                    var remainingSlots = maxResults - guaranteed.Count;
-                    var guaranteedTexts = new HashSet<string>(guaranteed.Select(c => c.Text));
+                    var taken = new HashSet<string>(guaranteed.Select(c => c.Text));
+
+                    // Strongest raw matches always get in, so boosts on weaker chunks can't bury them.
+                    // Deliberately NOT tagged IsAnchorGuaranteed, so they don't become "PRIMARY SOURCE".
+                    //var strongRaw = candidatePool
+                    //    .Where(c => !taken.Contains(c.Text) && c.Similarity >= strongRawMin)
+                    //    .OrderByDescending(c => c.Similarity)
+                    //    .Take(maxStrongRaw)
+                    //    .ToList();
+
+                    var strongRaw = candidatePool
+                        .Where(c => !taken.Contains(c.Text) && Rel(c) >= strongRel)
+                        .OrderByDescending(c => c.Similarity)
+                        .Take(8)
+                        .ToList();
+                    foreach (var c in strongRaw) taken.Add(c.Text);
 
                     var filler = candidatePool
-                      .Where(c => !guaranteedTexts.Contains(c.Text))
-                      .OrderByDescending(c => c.RelevanceScore)
-                      .Take(Math.Max(0, remainingSlots))
-                      .ToList();
+                        .Where(c => !taken.Contains(c.Text))
+                        .OrderByDescending(c => c.RelevanceScore)
+                        .Take(Math.Max(0, maxResults - guaranteed.Count - strongRaw.Count))
+                        .ToList();
 
-                    if (guaranteed.Any())
-                    {
-                        _logger.LogInformation(
-                          "🎯 Guaranteed {Count} anchor-matched chunk(s) a reserved slot instead of relying on score alone: {Sources}",
-                          guaranteed.Count, string.Join(", ", guaranteed.Select(c => c.Source).Distinct()));
-                    }
+                    _logger.LogInformation(
+                        "🎯 Selection: {G} anchor-guaranteed [{GS}], {S} strong-raw [{SS}], {F} filler",
+                        guaranteed.Count, string.Join(", ", guaranteed.Select(c => c.Source).Distinct()),
+                        strongRaw.Count, string.Join(", ", strongRaw.Select(c => c.Source).Distinct()),
+                        filler.Count);
 
-                    return guaranteed.Concat(filler).ToList();
+                    return guaranteed.Concat(strongRaw).Concat(filler).ToList();
                 }
 
                 List<RelevantChunk> uniqueChunks;
@@ -6060,10 +6096,29 @@ Answer directly without introducing yourself.";
             { "centralized", "context", "general", "additional_source" };
 
         // Builds the Chroma where-clause: plant filter + eligibility clauses.
-        private Dictionary<string, object> BuildWhere(object plantFilter)
+        //private Dictionary<string, object> BuildWhere(object plantFilter)
+        //{
+        //    var plantClause = new Dictionary<string, object> { { "plant", plantFilter } };
+        //    var eligibility = BuildEligibilityClauses();
+
+        //    return eligibility.Count > 0
+        //        ? new Dictionary<string, object>
+        //          {
+        //      { "$and", new List<Dictionary<string, object>>(eligibility.Prepend(plantClause)) }
+        //          }
+        //        : plantClause;
+        //}
+
+        // Shared policies are never grade-gated.
+        private static readonly string[] GradeExemptTags = { "centralized", "context" };
+        private static readonly string[] GradeCheckedCommonTags = { "general", "additional_source" };
+
+        private Dictionary<string, object> BuildWhere(object plantFilter, bool applyEligibility = true)
         {
             var plantClause = new Dictionary<string, object> { { "plant", plantFilter } };
-            var eligibility = BuildEligibilityClauses();
+            var eligibility = applyEligibility
+                ? BuildEligibilityClauses()
+                : new List<Dictionary<string, object>>();
 
             return eligibility.Count > 0
                 ? new Dictionary<string, object>
@@ -6071,6 +6126,35 @@ Answer directly without introducing yourself.";
               { "$and", new List<Dictionary<string, object>>(eligibility.Prepend(plantClause)) }
                   }
                 : plantClause;
+        }
+
+        private async Task<List<RelevantChunk>> SearchPlantAndCommonAsync(
+            List<float> queryEmbedding, int maxResults, string plant, string originalQuery, string collectionId)
+        {
+            var normalizedPlant = plant.ToLowerInvariant();
+            var perPool = Math.Min(Math.Max(maxResults / 2, 8), 50);
+
+            // plant-specific: grade/category checked
+            var plantWhere = BuildWhere(normalizedPlant, applyEligibility: true);
+            // Centralized + context: NO grade/category check
+            var exemptWhere = BuildWhere(new Dictionary<string, object> { { "$in", GradeExemptTags } }, applyEligibility: false);
+            // general/additional_source: still checked
+            var otherCommonWhere = BuildWhere(new Dictionary<string, object> { { "$in", GradeCheckedCommonTags } }, applyEligibility: true);
+
+            var plantResults = await QueryChromaAsync(queryEmbedding, plantWhere, perPool, plant, originalQuery, collectionId);
+            var exemptResults = await QueryChromaAsync(queryEmbedding, exemptWhere, perPool, plant, originalQuery, collectionId);
+            var otherResults = await QueryChromaAsync(queryEmbedding, otherCommonWhere, Math.Max(perPool / 2, 4), plant, originalQuery, collectionId);
+
+            _logger.LogInformation(
+                "🔍 Pools for '{Plant}': plant-specific={P}, centralized/context (no grade check)={E}, other common={O}",
+                normalizedPlant, plantResults.Count, exemptResults.Count, otherResults.Count);
+
+            return plantResults.Concat(exemptResults).Concat(otherResults)
+                .GroupBy(c => c.Text)
+                .Select(g => g.OrderByDescending(c => c.RelevanceScore).First())
+                .OrderByDescending(c => c.RelevanceScore)
+                .Take(maxResults)
+                .ToList();
         }
 
         // One Chroma query with a given where-clause.
@@ -6109,34 +6193,34 @@ Answer directly without introducing yourself.";
 
         // Runs plant-specific and common pools separately, then merges them,
         // so plant files can't crowd out common policies.
-        private async Task<List<RelevantChunk>> SearchPlantAndCommonAsync(
-            List<float> queryEmbedding,
-            int maxResults,
-            string plant,
-            string originalQuery,
-            string collectionId)
-        {
-            var normalizedPlant = plant.ToLowerInvariant();
-            var perPool = Math.Min(Math.Max(maxResults / 2, 8), 50);
+        //private async Task<List<RelevantChunk>> SearchPlantAndCommonAsync(
+        //    List<float> queryEmbedding,
+        //    int maxResults,
+        //    string plant,
+        //    string originalQuery,
+        //    string collectionId)
+        //{
+        //    var normalizedPlant = plant.ToLowerInvariant();
+        //    var perPool = Math.Min(Math.Max(maxResults / 2, 8), 50);
 
-            var plantWhere = BuildWhere(normalizedPlant);
-            var commonWhere = BuildWhere(new Dictionary<string, object> { { "$in", CommonPlantTags } });
+        //    var plantWhere = BuildWhere(normalizedPlant);
+        //    var commonWhere = BuildWhere(new Dictionary<string, object> { { "$in", CommonPlantTags } });
 
-            // Sequential: your Chroma client is shared and the embedding is already computed.
-            var plantResults = await QueryChromaAsync(queryEmbedding, plantWhere, perPool, plant, originalQuery, collectionId);
-            var commonResults = await QueryChromaAsync(queryEmbedding, commonWhere, perPool, plant, originalQuery, collectionId);
+        //    // Sequential: your Chroma client is shared and the embedding is already computed.
+        //    var plantResults = await QueryChromaAsync(queryEmbedding, plantWhere, perPool, plant, originalQuery, collectionId);
+        //    var commonResults = await QueryChromaAsync(queryEmbedding, commonWhere, perPool, plant, originalQuery, collectionId);
 
-            _logger.LogInformation(
-                "🔍 Pool results for plant '{Plant}': plant-specific={P}, common={C}",
-                normalizedPlant, plantResults.Count, commonResults.Count);
+        //    _logger.LogInformation(
+        //        "🔍 Pool results for plant '{Plant}': plant-specific={P}, common={C}",
+        //        normalizedPlant, plantResults.Count, commonResults.Count);
 
-            return plantResults.Concat(commonResults)
-                .GroupBy(c => c.Text)
-                .Select(g => g.OrderByDescending(c => c.RelevanceScore).First())
-                .OrderByDescending(c => c.RelevanceScore)
-                .Take(maxResults)
-                .ToList();
-        }
+        //    return plantResults.Concat(commonResults)
+        //        .GroupBy(c => c.Text)
+        //        .Select(g => g.OrderByDescending(c => c.RelevanceScore).First())
+        //        .OrderByDescending(c => c.RelevanceScore)
+        //        .Take(maxResults)
+        //        .ToList();
+        //}
 
         // ── PerformChromaSearch ──────────────────────────────────────────────────
         private async Task<List<RelevantChunk>> PerformChromaSearch(
@@ -6314,6 +6398,8 @@ Answer directly without introducing yourself.";
         Path.GetFullPath(Path.GetDirectoryName(filePath)!).TrimEnd(Path.DirectorySeparatorChar),
         Path.GetFullPath(_chromaOptions.ContextFolder).TrimEnd(Path.DirectorySeparatorChar),
         StringComparison.OrdinalIgnoreCase);
+        private static bool IsCentralizedFile(string filePath) =>
+    filePath.Split('/', '\\').Any(p => p.Equals("Centralized", StringComparison.OrdinalIgnoreCase));
         public async Task InitializeAsync()
         {
             lock (_systemInitLock)
@@ -10271,7 +10357,7 @@ Reply with ONLY this JSON: {{""missing_input"": true or false, ""question"": ""<
                     titleBandOptionsForPrompt = conversationContext.PendingTitleBandOptions;
                 }
             }
-            else if (_pendingAmbiguousGradeMention != null)
+            else if (_pendingAmbiguousGradeMention != null && IsGradeGatedQuestion(question))
             {
                 var title = _pendingAmbiguousGradeMention.Title;
                 var options = _pendingAmbiguousGradeMention.Bands;
@@ -10285,6 +10371,13 @@ Reply with ONLY this JSON: {{""missing_input"": true or false, ""question"": ""<
                 awaitingTitleBandAnswer = true;
                 titleBandOptionsForPrompt = options;
                 titleBandTitleForPrompt = title;
+            }
+            else if (_pendingAmbiguousGradeMention != null)
+            {
+                _logger.LogInformation(
+                    "🎯 Ambiguous title '{Title}' ignored: question isn't about a grade-gated topic",
+                    _pendingAmbiguousGradeMention.Title);
+                _pendingAmbiguousGradeMention = null;   // fall through to normal retrieval, using the requester's own grade
             }
 
             if (awaitingTitleBandAnswer)
@@ -11093,9 +11186,9 @@ Reply with ONLY this JSON: {{""missing_input"": true or false, ""question"": ""<
             // Vision-capable model when images are present (move the name to config)
             var generationModel = images.Any() ? "nemotron3:33b" : null;
 
-   //         var generationModel = images.Any()
-   //? "llama3.2-vision:90b"
-   //: "nemotron3:33b";
+            //         var generationModel = images.Any()
+            //? "llama3.2-vision:90b"
+            //: "nemotron3:33b";
 
             var validation = await ValidateAndInitializeAsync(
                 question, plant, sessionId, userId, generationModel, null, ct);
@@ -12239,6 +12332,12 @@ Rewritten question:";
             report.Add($"6 coverage gate passes: {_policyAnalysis.CheckPolicyCoverage(f3, question)}");
             return report;
         }
+        private void LogStage(string stage, List<RelevantChunk> chunks) =>
+    _logger.LogInformation(
+        "🧪 [{Stage}] {Count} chunks | centralized={C} | {Sources}",
+        stage, chunks.Count,
+        chunks.Count(x => string.Equals(x.PlantTag, "centralized", StringComparison.OrdinalIgnoreCase)),
+        string.Join(" | ", chunks.Select(x => x.Source).Distinct().Take(8)));
 
         private async Task<RetrievalResult> ExecuteRetrievalAsync(
           string question,
@@ -12248,19 +12347,11 @@ Rewritten question:";
           AgentContext context,
           bool useReRanking,
           ExecutionPlan plan,
-          // 🆕 The generation model's real context window, used to trim the
-          // final chunk set by an actual token budget rather than a flat
-          // headcount. Optional so existing/other callers that don't have a
-          // generation model handy still compile; falls back to the
-          // smallest configured model's window (conservative) if omitted.
           ModelConfiguration? genModel = null,
           string? gradeTier = null)
         {
             var timer = new StepTimer(_logger, "retrieval");
-            var result = new RetrievalResult
-            {
-                Chunks = new List<RelevantChunk>()
-            };
+            var result = new RetrievalResult { Chunks = new List<RelevantChunk>() };
 
             try
             {
@@ -12270,21 +12361,16 @@ Rewritten question:";
 
                 if (sectionQuery != null)
                 {
-                    _logger.LogInformation(
-                      "🎯 Detected {Kind} query: {Num}",
-                      sectionQuery.ReferenceType,
-                      sectionQuery.SectionNumber);
+                    _logger.LogInformation("🎯 Detected {Kind} query: {Num}",
+                      sectionQuery.ReferenceType, sectionQuery.SectionNumber);
 
                     var collectionId = await _collectionManager.GetOrCreateCollectionAsync(embModel);
-                    chunks = await SearchForSpecificSection(
-                      sectionQuery, embModel, maxResults, plant, collectionId);
+                    chunks = await SearchForSpecificSection(sectionQuery, embModel, maxResults, plant, collectionId);
                 }
                 else
                 {
-                    // Get or create conversation context for the session
                     var conversationContext = _conversation.GetOrCreateConversationContext(context.SessionId);
 
-                    // Populate conversation context with history from agent context
                     conversationContext.History = context.History.Select(h => new ConversationTurn
                     {
                         Question = h.Question,
@@ -12293,90 +12379,76 @@ Rewritten question:";
                         Sources = h.Sources
                     }).ToList();
 
-                    // ✅ NEW: detect a genuine topic change and reset topic-tracking context
-                    // before deciding how to anchor retrieval. Without this, BuildContextualQuery
-                    // below would keep anchoring every follow-up to whatever topic was discussed
-                    // first in the session, even after the user has clearly moved on to something
-                    // unrelated — this mirrors the same check already used in the non-streaming
-                    // path (ProcessQueryAsync), just wired into the streaming path too.
+                    // Genuine topic change: reset retrieval anchoring and tell generation to drop history.
                     if (_conversationAnalysis.IsTopicChanged(question, conversationContext))
                     {
-                        _logger.LogInformation(
-                          "🔄 Topic changed for session {SessionId}; resetting retrieval context",
-                          context.SessionId);
+                        _logger.LogInformation("🔄 Topic changed for session {SessionId}; resetting retrieval context", context.SessionId);
                         ClearContext(conversationContext);
-                        // ✅ NEW: this used to only affect retrieval anchoring
-                        // (via the now-cleared conversationContext.History
-                        // feeding BuildContextualQuery below). It never
-                        // reached generation, which re-populates
-                        // conversationContext.History from the full,
-                        // untouched agentContext.History moments later —
-                        // so the model still saw the prior topic's Q&A
-                        // regardless. Recording it here lets it actually
-                        // reach BuildMessageList.
                         result.TopicChanged = true;
                     }
 
-                    // ✅ NEW: anchor follow-up questions to the prior turn's topic before
-                    // retrieval. "please tell me more about the reimbursement..." on its
-                    // own reads as a generic reimbursement query and can drift to unrelated
-                    // documents (e.g. Refreshment Reimbursement Policy) instead of staying
-                    // on the actual topic (Foreign Travel Policy, Section 6). Only fires
-                    // when IsTopicChanged (above) did NOT reset the context, and only when
-                    // the current question actually contains a continuation/pronoun signal —
-                    // a genuinely new question is passed through unchanged.
+                    // Anchor follow-ups to the prior turn's topic (unchanged if not a follow-up).
                     var retrievalQuery = _conversationAnalysis.BuildContextualQuery(question, conversationContext.History);
-
                     if (retrievalQuery != question)
                     {
-                        _logger.LogInformation(
-                          "🔗 Follow-up detected — anchoring retrieval query to prior topic: '{Query}'",
+                        _logger.LogInformation("🔗 Follow-up detected — anchoring retrieval query to prior topic: '{Query}'",
                           retrievalQuery.Length > 120 ? retrievalQuery.Substring(0, 120) + "..." : retrievalQuery);
                     }
 
-                    // Expand query
-                    var expandedQuery = _abbreviationService.ExpandQuery(question);
-
-                    // ✅ CHANGED: pass retrievalQuery (topic-anchored, or unchanged if not a
-                    // follow-up / topic reset) instead of raw question for the vector search
-                    // only. The original `question` still flows unchanged into generation,
-                    // verification, and saving — only retrieval benefits from the extra context.
                     chunks = await GetRelevantChunksWithExpansionAsync(
-                      retrievalQuery,
-                      embModel,
-                      maxResults,
-                      true,
-                      conversationContext,
-                      false,
-                      embModel,
-                      plant
-                    );
+                      retrievalQuery, embModel, maxResults, true, conversationContext, false, embModel, plant);
                 }
+                LogStage("expansion + anchors", chunks);
 
                 chunks = FilterByPolicyIntent(chunks, question);
+                LogStage("policy-intent filter", chunks);
                 timer.Lap("search + expansion (GetRelevantChunksWithExpansionAsync)");
 
-                // Apply BM25
+                // ── Hybrid merge (vector + BM25) ────────────────────────────────────
                 var bm25Chunks = _bm25Service.Rank(question, chunks, maxResults * 2);
                 timer.Lap("filter + BM25");
-                var hybridChunks = chunks
+
+                // Dedupe by TEXT, not Id (Id isn't guaranteed to be set/unique on every path).
+                // chunks come first, so a vector-search instance wins over its BM25 twin.
+                var merged = chunks
                   .Concat(bm25Chunks)
-                  .GroupBy(c => c.Id)
+                  .GroupBy(c => c.Text)
                   .Select(g => g.First())
+                  .ToList();
+
+                var byScore = merged
                   .OrderByDescending(c => c.RelevanceScore + (c.Bm25Score * 0.5))
                   .Take(maxResults)
                   .ToList();
 
+                // A strong raw match must not be cut here just because boosted/BM25 scores
+                // on weaker chunks outrank it.
+                var scoredSet = new HashSet<string>(byScore.Select(c => c.Text));
+                //var protectedRaw = merged
+                //  .Where(c => !scoredSet.Contains(c.Text) && c.Similarity >= 0.60)
+                //  .OrderByDescending(c => c.Similarity)
+                //  .Take(8)
+                //  .ToList();
+
+                var topRawMerged = merged.Count > 0 ? merged.Max(c => c.Similarity) : 0;
+                var protectedRaw = merged
+                    .Where(c => !scoredSet.Contains(c.Text) && topRawMerged > 0 && c.Similarity / topRawMerged >= 0.85)
+                    .OrderByDescending(c => c.Similarity)
+                    .Take(8)
+                    .ToList();
+
+                var hybridChunks = byScore.Concat(protectedRaw).ToList();
+                LogStage("hybrid merge", hybridChunks);
+
+                // ── Rerank ──────────────────────────────────────────────────────────
                 if (useReRanking && hybridChunks.Count > 3)
                 {
                     try
                     {
-                        // ⏱️ CHANGED: was topK: 20 -- raised alongside
-                        // maxResults so reranking doesn't discard candidates
-                        // before DiversifyBySource's raised ceiling (30) and
-                        // the token-budget trim below get a chance to use them.
                         hybridChunks = await _rerankerService.RerankAsync(
-                          question, hybridChunks, "qllama/bge-reranker-v2-m3:f16", topK: 40);
+                          question, hybridChunks, "qllama/bge-reranker-v2-m3:f16",
+                          topK: Math.Max(40, hybridChunks.Count));
+                        LogStage("rerank", hybridChunks);
                     }
                     catch (Exception ex)
                     {
@@ -12384,84 +12456,52 @@ Rewritten question:";
                     }
                 }
                 timer.Lap("rerank");
-                // ✅ CHANGED: was a flat hybridChunks.Take(8) — that let a
-                // broad question's entire chunk budget get consumed by
-                // whichever 2-3 policies scored highest, silently dropping
-                // relevant content from the rest. Caps at 3 chunks per
-                // source and 14 total, giving room for ~5+ distinct
-                // policies on a broad question while still letting a
-                // genuinely narrow single-policy question use more of its
-                // budget on that one document via the backfill step.
-                // ⏱️ CHANGED: was DiversifyBySource(hybridChunks, maxTotal: 14,
-                // maxPerSource: 3) -- raised further per an explicit request to
-                // prioritize completeness over speed. Raising the headcount
-                // alone would just move the truncation problem downstream
-                // though: SystemPromptBuilder's chunk loops have no token-
-                // budget check of their own (plain `foreach` over every
-                // chunk), so a generous-but-unbounded chunk count here could
-                // overflow the model's actual context window instead of
-                // being silently dropped -- same failure mode as the
-                // embedding-truncation bug fixed earlier, just relocated.
-                // So: raise the ceiling generously (30 total, 5 per source --
-                // enough for ~6 distinct policies on a broad question), then
-                // immediately trim by a REAL token budget below, which is the
-                // actual safety net.
+
+                // ── Grade-tier filter, diversify, token budget ─────────────────────
                 hybridChunks = _policyAnalysis.FilterToGradeTierSources(hybridChunks, gradeTier);
                 var diversified = DiversifyBySource(hybridChunks, maxTotal: 30, maxPerSource: 5);
+                LogStage("diversified", diversified);
                 timer.Lap("diversify + token budget");
-                // 🆕 Temporary diagnostic: list every chunk that survived
-                // diversification, before the token-budget trim below decides
-                // which of them actually reach generation. This is what tells
-                // us whether a chunk that's missing from the final answer
-                // (e.g. a specific policy the person expected to see) never
-                // entered the pool at all (a Router/embedding recall problem)
-                // versus entered but got cut by the budget (a context-size
-                // problem). Safe to remove once this is confirmed either way.
-                _logger.LogInformation(
-                  "📋 Diversified pool ({Count} chunks, pre-budget-cut): {Sources}",
-                  diversified.Count,
-                  string.Join(", ", diversified.Select((c, i) => $"[{i + 1}] {c.Source} (sim={c.Similarity:F3})")));
 
-                // 🆕 Token-budget trim: keep chunks (already ordered by
-                // relevance from DiversifyBySource) until the model's real
-                // context window would be exceeded, rather than an arbitrary
-                // count. Reserves ~40% of the window for the system prompt,
-                // conversation history, the question, and the model's own
-                // output -- this is the single place that governs "how much
-                // retrieved content can this specific model actually use",
-                // so SystemPromptBuilder's per-query-type branches don't each
-                // need their own copy of this logic.
+                // Real token budget for this model's context window (~60% for chunks).
                 var contextWindow = genModel?.MaxContextLength ?? 4096;
-                var chunkTokenBudget = (int)(contextWindow * 0.6);
+                var remainingBudget = (int)(contextWindow * 0.6);
                 var budgetedChunks = new List<RelevantChunk>();
+                var skippedForBudget = 0;
 
                 foreach (var chunk in diversified)
                 {
                     var chunkTokens = _stringProcessor.EstimateTokenCount(chunk.Text);
-                    if (budgetedChunks.Count > 0 && chunkTokens > chunkTokenBudget)
+
+                    // Always keep the first chunk; afterwards skip anything that doesn't fit
+                    // but keep scanning, so a smaller lower-ranked chunk can still use the room.
+                    if (budgetedChunks.Count > 0 && chunkTokens > remainingBudget)
                     {
-                        _logger.LogInformation(
-              $"📎 Kept {budgetedChunks.Count}/{diversified.Count} diversified chunks " + $"(context budget of {(int)(contextWindow * 0.6)} tokens for '{genModel?.Name ?? " unknown model "}' reached)");
-                        break;
+                        skippedForBudget++;
+                        continue;
                     }
+
                     budgetedChunks.Add(chunk);
-                    chunkTokenBudget -= chunkTokens;
+                    remainingBudget -= chunkTokens;
+                }
+
+                if (skippedForBudget > 0)
+                {
+                    _logger.LogInformation(
+                      "📎 Kept {Kept}/{Total} chunks; {Skipped} skipped by the {Budget}-token budget for '{Model}'",
+                      budgetedChunks.Count, diversified.Count, skippedForBudget,
+                      (int)(contextWindow * 0.6), genModel?.Name ?? "unknown model");
                 }
 
                 result.Chunks = budgetedChunks;
+                LogStage("final (to generation)", result.Chunks);
 
-                // Added for hallucination debugging: the earlier log lines
-                // (raw=/boosted= scores) only show similarity numbers, not
-                // what's actually IN the chunk — so there was no way to
-                // check whether a hallucinated entity (e.g. "MEA",
-                // "Passport Seva Kendra") genuinely wasn't in the retrieved
-                // text, or was there but got embellished/misread by the
-                // generation model. This logs the actual content sent to
-                // the LLM for direct comparison against its output.
                 foreach (var c in result.Chunks)
                 {
                     var preview = c.Text.Length > 300 ? c.Text.Substring(0, 300) + "..." : c.Text;
-                    _logger.LogInformation("📄 Chunk fed to generation [{Source}, sim={Similarity:F3}]: {Preview}", c.Source, c.Similarity, preview);
+                    _logger.LogInformation(
+                      "📄 Chunk fed to generation [{Source}, sim={Similarity:F3}, rerank={Rerank}, anchor={Anchor}]: {Preview}",
+                      c.Source, c.Similarity, c.RerankScore?.ToString("F3") ?? "-", c.IsAnchorGuaranteed, preview);
                 }
 
                 _agentLogger.LogDecision(new AgentDecision
@@ -12470,10 +12510,12 @@ Rewritten question:";
                     DecisionMade = $"Retrieved {result.Chunks.Count} chunks",
                     Confidence = result.Chunks.Any() ? result.Chunks.Average(c => c.Similarity) : 0.0
                 });
+
                 _logger.LogInformation(
-                        "⏱️ [retrieval] summary: {Calls} Chroma searches took {SearchMs} ms in total (this INCLUDES their embeddings and {SectionMs} ms of section-detect); " +
-                        "{Misses} embedding cache misses took {MissMs} ms inside Ollama",
-                        _searchCalls, _searchMs, _sectionDetectMs, _embedMisses, _embedMissMs);
+                  "⏱️ [retrieval] summary: {Calls} Chroma searches took {SearchMs} ms in total (includes their embeddings and {SectionMs} ms of section-detect); " +
+                  "{Misses} embedding cache misses took {MissMs} ms inside Ollama",
+                  _searchCalls, _searchMs, _sectionDetectMs, _embedMisses, _embedMissMs);
+
                 return result;
             }
             catch (Exception ex)
@@ -12488,7 +12530,7 @@ Rewritten question:";
                     Confidence = 0.0
                 });
 
-                return result; // Return empty chunks
+                return result;
             }
         }
 

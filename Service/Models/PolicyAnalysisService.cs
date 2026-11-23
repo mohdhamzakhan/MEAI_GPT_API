@@ -346,7 +346,8 @@ namespace MEAI_GPT_API.Service.Models
                 @"direct\s*category",
             }),
         };
-
+        private static bool IsCentralized(RelevantChunk c) =>
+    string.Equals(c.PlantTag, "centralized", StringComparison.OrdinalIgnoreCase);
         /// <summary>
         /// True when the retrieved chunks contain provisions for BOTH grade
         /// tiers (e.g. a chunk mentioning "Jr. Supervisor & above" AND
@@ -356,6 +357,7 @@ namespace MEAI_GPT_API.Service.Models
         /// </summary>
         public bool HasGradeSpecificContent(List<RelevantChunk> chunks)
         {
+            chunks = chunks?.Where(c => !IsCentralized(c)).ToList();
             if (chunks == null || !chunks.Any()) return false;
 
             var combinedText = string.Join(" ", chunks.Select(c => c.Text)).ToLowerInvariant();
@@ -525,6 +527,7 @@ namespace MEAI_GPT_API.Service.Models
             var kept = new List<RelevantChunk>();
             foreach (var c in chunks)
             {
+                if (IsCentralized(c)) { kept.Add(c); continue; }
                 var chunkScope = ClassifyChunkSubjectScope(c);
                 bool mismatched = chunkScope != null && chunkScope != queryScope;
                 if (mismatched)
@@ -782,8 +785,9 @@ namespace MEAI_GPT_API.Service.Models
 
         public List<RelevantChunk> FilterToGradeTierSources(List<RelevantChunk> chunks, string? tierLabel)
         {
-            if (string.IsNullOrEmpty(tierLabel) || chunks == null || chunks.Count == 0 ||
-                !GradeTiers.Any(t => t.Label == tierLabel)) return chunks;
+            if(string.IsNullOrEmpty(tierLabel) || chunks == null || chunks.Count == 0 ||
+                        !GradeTiers.Any(t => t.Label == tierLabel)) return chunks;
+
 
             bool Matches(string name, string label) =>
                 GradeTiers.Where(t => t.Label == label)
@@ -792,6 +796,7 @@ namespace MEAI_GPT_API.Service.Models
             var other = GradeTiers.First(t => t.Label != tierLabel).Label;
             var kept = chunks.Where(c =>
             {
+                if (IsCentralized(c)) return true;            // never dropped
                 var name = System.IO.Path.GetFileName(c.Source ?? "");
                 return !(Matches(name, other) && !Matches(name, tierLabel));
             }).ToList();

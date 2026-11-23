@@ -21,18 +21,34 @@ namespace MEAI_GPT_API.Service.Models
 
         // Add these helper methods to SystemPromptBuilder class
 
+        private static readonly string[] MetadataKeywords =
+{
+    "which policy", "what policy", "list policy", "policy information",
+    "what policies", "available policies", "policy documents",
+    "what do you know", "what information", "which documents",
+    "show me policies", "tell me about policies"
+};
+
+        private static readonly HashSet<string> MetadataStopWords = new(StringComparer.OrdinalIgnoreCase)
+{
+    "policy","policies","which","what","list","show","tell","about","available","documents","document",
+    "information","know","have","are","there","all","the","please","can","could","give","any","for","you","your"
+};
+
         private bool IsMetadataQuery(string question)
         {
-            var metadataKeywords = new[]
-            {
-        "which policy", "what policy", "list policy", "policy information",
-        "what policies", "available policies", "policy documents",
-        "what do you know", "what information", "which documents",
-        "show me policies", "tell me about policies"
-    };
+            if (string.IsNullOrWhiteSpace(question)) return false;
+            var q = question.ToLowerInvariant();
+            if (!MetadataKeywords.Any(k => q.Contains(k))) return false;
 
-            return metadataKeywords.Any(keyword =>
-                question.ToLowerInvariant().Contains(keyword));
+            // A real catalogue request ("what policies do you have?") has no topic of its own.
+            // If any topic words remain ("compliance reminder session form..."), the user is
+            // looking something up, not asking for a list.
+            var topicWords = Regex.Matches(q, @"[a-z0-9]+")
+                .Select(m => m.Value)
+                .Where(w => w.Length > 2 && !MetadataStopWords.Contains(w));
+
+            return !topicWords.Any();
         }
 
         public string BuildMetadataSystemPrompt(string plant, List<RelevantChunk> chunks)
@@ -1107,7 +1123,6 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
             prompt.AppendLine("═══════════════════════════════════════════════════════════════");
             prompt.AppendLine();
 
-            // Query-specific guidance
             if (HasSectionReference(query))
             {
                 var sectionRef = _policyAnalysis.ExtractSectionReference(query);
@@ -1123,7 +1138,16 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
                 prompt.AppendLine();
             }
 
-            // Analyze and present available documents
+            // Shared (Centralized) policies apply to every plant. Say so explicitly so neither
+            // the model nor the verifier treats them as "not this plant's policy".
+            static bool IsSharedPolicy(RelevantChunk c) =>
+                string.Equals(c.PlantTag, "centralized", StringComparison.OrdinalIgnoreCase);
+
+            string ScopeLabel(RelevantChunk c) =>
+                IsSharedPolicy(c) ? $"Centralized policy, applies to all plants including {plant}" :
+                string.Equals(c.PlantTag, "context", StringComparison.OrdinalIgnoreCase) ? "Company reference information" :
+                $"{plant} plant policy";
+
             if (chunks.Any())
             {
                 prompt.AppendLine("📚 AVAILABLE CONTEXT INFORMATION:");
@@ -1135,25 +1159,28 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
                 prompt.AppendLine($"**Total Context Sections:** {chunks.Count}");
                 prompt.AppendLine();
 
-                // List unique documents
                 prompt.AppendLine("**Documents in Context:**");
                 foreach (var group in documentGroups)
                 {
                     var docType = DetermineDocumentType(group.Key);
-                    var chunkCount = group.Count();
-                    prompt.AppendLine($"  • {group.Key} ({docType}) - {chunkCount} section(s)");
+                    prompt.AppendLine($"  • {group.Key} ({docType}; {ScopeLabel(group.First())}) - {group.Count()} section(s)");
                 }
                 prompt.AppendLine();
 
-                // Extract and show key topics from chunks
                 var topics = ExtractTopicsFromChunks(chunks);
                 if (topics.Any())
                 {
                     prompt.AppendLine("**Topics Covered in Context:**");
                     foreach (var topic in topics.Take(10))
-                    {
                         prompt.AppendLine($"  • {topic}");
-                    }
+                    prompt.AppendLine();
+                }
+
+                if (chunks.Any(IsSharedPolicy))
+                {
+                    prompt.AppendLine("**NOTE ON CENTRALIZED POLICIES:** Documents marked \"Centralized policy\" apply to ALL plants,");
+                    prompt.AppendLine($"including {plant}. Use them to answer exactly like plant-specific policies. Never say a");
+                    prompt.AppendLine($"Centralized policy does not apply to {plant}.");
                     prompt.AppendLine();
                 }
 
@@ -1173,22 +1200,30 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
                 prompt.AppendLine();
             }
 
-            // Extract abbreviations from chunks
             var abbreviations = ExtractAbbreviationsFromChunks(chunks, query);
             if (abbreviations.Any())
             {
                 prompt.AppendLine("📖 ABBREVIATIONS FOUND IN CONTEXT:");
                 prompt.AppendLine();
                 foreach (var abbrev in abbreviations)
-                {
                     prompt.AppendLine($"  • {abbrev.Key} = {abbrev.Value}");
-                }
                 prompt.AppendLine();
                 prompt.AppendLine("═══════════════════════════════════════════════════════════════");
                 prompt.AppendLine();
             }
 
-            // Add the actual context content
+            if (Regex.IsMatch(query, @"\b(which|what)\s+(policy|policies|document|scheme)\b|\bunder\s+which\b", RegexOptions.IgnoreCase))
+            {
+                prompt.AppendLine("🔎 **POLICY IDENTIFICATION QUESTION:**");
+                prompt.AppendLine("- The user wants to know WHICH policy document covers or contains something.");
+                prompt.AppendLine("- Find the excerpt(s) that explicitly mention the item asked about, and name that document FIRST.");
+                prompt.AppendLine("- Quote the relevant sentence, and give the section, annexure, appendix or form numbers it mentions.");
+                prompt.AppendLine("- Do not list unrelated policies. If several documents mention it, name each and say what it says.");
+                prompt.AppendLine();
+                prompt.AppendLine("═══════════════════════════════════════════════════════════════");
+                prompt.AppendLine();
+            }
+
             prompt.AppendLine("📄 POLICY CONTEXT (USE THIS TO ANSWER):");
             prompt.AppendLine();
             prompt.AppendLine("**CITATION INSTRUCTIONS:**");
@@ -1198,42 +1233,34 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
             prompt.AppendLine("- Use meaningful document names that users can understand");
             prompt.AppendLine();
 
-            // Added after a real incident: a chunk correctly identified as
-            // the RIGHT document (via topic anchor / policy trigger /
-            // document router -- see IsAnchorGuaranteed) still got buried
-            // under "Related Information" in the final answer, with an
-            // unrelated document leading instead. Marking it explicitly and
-            // moving it first gives the model an unambiguous signal about
-            // which excerpt is the actual answer to the question, not just
-            // background.
+            // PRIMARY SOURCE = an anchor-matched chunk that is ALSO among the best-scoring
+            // excerpts. An anchor alone (e.g. a generic trigger word) must not outrank the
+            // chunk that actually answers the question.
+            double Score(RelevantChunk c) => c.RerankScore ?? c.Similarity;
+            var topTexts = new HashSet<string>(
+                chunks.OrderByDescending(Score).Take(3).Select(c => c.Text));
+            bool IsPrimary(RelevantChunk c) => c.IsAnchorGuaranteed && topTexts.Contains(c.Text);
+
             prompt.AppendLine("**PRIMARY SOURCE INSTRUCTIONS:**");
-            prompt.AppendLine("- Any excerpt below marked \"⭐ PRIMARY SOURCE\" was specifically identified as the");
-            prompt.AppendLine("  document this question is about -- treat its content as the main, authoritative");
-            prompt.AppendLine("  answer and lead your response with it");
-            prompt.AppendLine("- Other excerpts are supplementary context, not the primary answer -- use them to");
-            prompt.AppendLine("  add relevant detail, but do not let them displace the primary source's content");
-            prompt.AppendLine("  or push it down into a \"related information\" section");
-            prompt.AppendLine("- If a primary source is present but seems incomplete on its own, say so explicitly");
-            prompt.AppendLine("  (e.g. \"the retrieved excerpt covers X but may not include every step -- check the");
-            prompt.AppendLine("  full policy for additional requirements such as forms or annexures\") rather than");
-            prompt.AppendLine("  silently presenting a partial answer as complete");
+            prompt.AppendLine("- An excerpt marked \"⭐ PRIMARY SOURCE\" is both specifically identified as the document this");
+            prompt.AppendLine("  question is about AND among the best matches -- treat it as the main, authoritative answer");
+            prompt.AppendLine("  and lead your response with it");
+            prompt.AppendLine("- Other excerpts are supplementary context -- use them to add relevant detail, but do not let");
+            prompt.AppendLine("  them displace the primary source or push it into a \"related information\" section");
+            prompt.AppendLine("- If no excerpt is marked primary, weigh all excerpts by how directly they answer the question");
+            prompt.AppendLine("- If a primary source seems incomplete on its own, say so explicitly (e.g. \"the retrieved");
+            prompt.AppendLine("  excerpt covers X but may not include every step -- check the full policy for additional");
+            prompt.AppendLine("  requirements such as forms or annexures\") rather than presenting a partial answer as complete");
             prompt.AppendLine();
 
             int contextNumber = 1;
-            // Primary-source (anchor-guaranteed) excerpts first, so the
-            // instruction above and the model's own recency/position bias
-            // work together instead of against each other.
-            foreach (var chunk in chunks.OrderByDescending(c => c.IsAnchorGuaranteed))
+            foreach (var chunk in chunks.OrderByDescending(IsPrimary).ThenByDescending(Score))
             {
-                if (chunk.IsAnchorGuaranteed)
-                {
-                    prompt.AppendLine($"--- ⭐ PRIMARY SOURCE (Excerpt {contextNumber}) ---");
-                }
-                else
-                {
-                    prompt.AppendLine($"--- Internal Reference {contextNumber} ---");
-                }
+                prompt.AppendLine(IsPrimary(chunk)
+                    ? $"--- ⭐ PRIMARY SOURCE (Excerpt {contextNumber}) ---"
+                    : $"--- Internal Reference {contextNumber} ---");
                 prompt.AppendLine($"Document: {chunk.Source}");
+                prompt.AppendLine($"Scope: {ScopeLabel(chunk)}");
                 prompt.AppendLine($"Relevance: {chunk.Similarity:F3}");
                 prompt.AppendLine("Content:");
                 prompt.AppendLine(chunk.Text);
@@ -1245,15 +1272,6 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
 
             prompt.AppendLine("📋 RESPONSE FORMAT:");
             prompt.AppendLine();
-            // Formatting folded directly into each structure item (as literal
-            // ## / ** syntax) rather than kept as a separate abstract bullet
-            // list further down. Confirmed in practice: the model reliably
-            // follows this numbered structure (it was even using the item
-            // text verbatim as its own section labels), but was dropping a
-            // separate "Formatting:" list placed after it -- by that point
-            // in a long system prompt, an abstract rule with no example is a
-            // much weaker signal than a rule embedded directly in the thing
-            // it's already committed to producing.
             prompt.AppendLine("**Structure your answer using these exact markdown headings, in order:**");
             prompt.AppendLine("1. `## Direct Answer` — the direct answer to the question");
             prompt.AppendLine("2. `## Main Policy Provisions` — bold the policy name and section numbers");
