@@ -1270,6 +1270,11 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
                 contextNumber++;
             }
 
+            prompt.AppendLine("**IF THE QUESTION IS NOT ABOUT COMPANY POLICY OR NOTHING ABOVE ANSWERS IT:**");
+            prompt.AppendLine("- Do NOT use the headings below. Reply in one or two plain sentences saying the policy");
+            prompt.AppendLine("  documents don't cover it, and suggest rephrasing or contacting HR. No headings, no lists.");
+            prompt.AppendLine();
+
             prompt.AppendLine("📋 RESPONSE FORMAT:");
             prompt.AppendLine();
             prompt.AppendLine("**Structure your answer using these exact markdown headings, in order:**");

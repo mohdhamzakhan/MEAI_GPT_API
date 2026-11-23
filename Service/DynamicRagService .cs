@@ -10514,6 +10514,19 @@ Reply with ONLY this JSON: {{""missing_input"": true or false, ""question"": ""<
 
             yield return new StreamChunk { Type = "status", Content = "Initializing agent..." };
 
+            if (!conversationContext.AwaitingGeneralClarification &&
+                !conversationContext.AwaitingGradeClarification &&
+                !conversationContext.AwaitingTitleBandClarification &&
+                !conversationContext.AwaitingPolicyClarification &&
+                TryGetSmallTalkReply(question, plant, out var smallTalkReply))
+            {
+                await foreach (var chunk in StreamTextResponse(smallTalkReply, cancellationToken))
+                    yield return chunk;
+
+                yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
+                yield break;
+            }
+
             // ============================
             // CACHE CHECK (appreciated answers / corrections)
             // ============================
@@ -11062,7 +11075,7 @@ Reply with ONLY this JSON: {{""missing_input"": true or false, ""question"": ""<
 
                     finalAnswer = clarifyingQuestion;
                 }
-                else if (verification.IsGrounded && !verification.HasHallucinations)
+                else if (verification.IsGrounded && !verification.HasHallucinations && IsCalculationQuestion(question))
                 {
                     // Honest but incomplete (typically "the policy doesn't define X"), or the employee just
                     // answered our question: don't refuse, answer under stated assumptions.
@@ -13534,7 +13547,26 @@ RULES:
         security requirements, and evidence-grounding rules.
         """;
         }
+        private static readonly Regex SmallTalkRegex = new(
+    @"^\s*(hi|hii+|hello|hey|hey there|hi there|hello there|good\s+(morning|afternoon|evening|night)|how\s+are\s+you(\s+doing)?|how\s+r\s+u|how'?s\s+it\s+going|what'?s\s+up|thanks?|thank\s+you(\s+so\s+much)?|ok(ay)?|cool|great|bye|goodbye|see\s+you|who\s+are\s+you|what\s+can\s+you\s+do|help)\s*[!.?]*\s*$",
+    RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        private static bool TryGetSmallTalkReply(string text, string plant, out string reply)
+        {
+            reply = "";
+            if (string.IsNullOrWhiteSpace(text) || text.Length > 40 || !SmallTalkRegex.IsMatch(text)) return false;
+
+            var t = text.ToLowerInvariant();
+            reply =
+                Regex.IsMatch(t, @"thank") ? "You're welcome! Let me know if there's anything else you'd like to check."
+              : Regex.IsMatch(t, @"\b(bye|goodbye|see you)\b") ? "Goodbye! Come back any time you have a policy question."
+              : Regex.IsMatch(t, @"who are you|what can you do|help")
+                    ? $"I'm the MEAI assistant for the {plant} plant. I can answer questions about company policies (leave, travel, loans, benefits, compliance and more), explain forms and annexures, and help with calculations based on policy rules. What would you like to know?"
+              : Regex.IsMatch(t, @"how\s+are|how\s+r\s+u|how'?s\s+it|what'?s\s+up")
+                    ? "I'm doing well, thanks for asking! How can I help you today? You can ask me about any company policy."
+              : "Hello! How can I help you today? You can ask me about any company policy.";
+            return true;
+        }
         private async Task<VerificationResult?> VerifyResponseSafelyAsync(
           string question,
           string response,
