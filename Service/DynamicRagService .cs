@@ -4031,7 +4031,22 @@ Answer directly without introducing yourself.";
 
         //    return results;
         //}
+        private static readonly HashSet<string> IntentStopWords = new(StringComparer.OrdinalIgnoreCase)
+{ "policy","policies","the","of","and","for","company","scheme","guidelines","guideline","rules","plant" };
 
+        private static string StemWord(string w) => w.Length > 4 && w.EndsWith("s") ? w[..^1] : w;
+
+        private static bool IntentMatchesSource(string intent, string sourceFile)
+        {
+            var intentWords = Regex.Matches(intent.ToLowerInvariant(), "[a-z]+").Select(m => m.Value)
+                .Where(w => w.Length > 2 && !IntentStopWords.Contains(w)).Select(StemWord).Distinct().ToList();
+            if (intentWords.Count == 0) return false;
+
+            var nameWords = new HashSet<string>(
+                Regex.Matches(Path.GetFileNameWithoutExtension(sourceFile).ToLowerInvariant(), "[a-z]+").Select(m => StemWord(m.Value)));
+
+            return (double)intentWords.Count(nameWords.Contains) / intentWords.Count >= 0.75;
+        }
         private List<RelevantChunk> ParseSearchResults(
           JsonElement root,
           int maxResults,
@@ -4087,6 +4102,15 @@ Answer directly without introducing yourself.";
                 // so it is easy to read and tune.
                 double boost = 0.0;
 
+                // Intent names are DOCUMENT names; policyType is a CATEGORY, so Equals() never matched.
+                if (policyIntent.IntendedPolicyType != null)
+                {
+                    if (IntentMatchesSource(policyIntent.IntendedPolicyType, sourceFile))
+                        boost += 0.50;
+                    else if (policyIntent.Confidence >= 0.9 && !isCentralized)
+                        boost -= 0.10;   // was -0.25 on every chunk, including the right one
+                }
+
                 // Exact policy-type match — strongest signal
                 if (policyIntent.IntendedPolicyType != null &&
                   policyType.Equals(
@@ -4131,7 +4155,7 @@ Answer directly without introducing yourself.";
 
                 if (documentText.Contains(originalQuery, StringComparison.OrdinalIgnoreCase))
                 {
-                    boost += 0.60; // strong boost for exact phrase match
+                    boost += 0.25; // strong boost for exact phrase match
                 }
 
                 // shared Centralized policies count as "this plant's" for every plant
@@ -5344,7 +5368,12 @@ Answer directly without introducing yourself.";
                 // query, guaranteeing that document a fair shot at being in
                 // the pool before we truncate and boost below. Capped at 2
                 // distinct source docs to bound the extra Chroma calls.
-                var lastTurnSources = context.History.LastOrDefault()?.Sources;
+                var lastRealTurn = context.History.LastOrDefault(t => t.Sources?.Any() == true);
+                var lastTurnSources = lastRealTurn?.Sources;
+                var isRepeat = lastRealTurn != null &&
+                    string.Equals(lastRealTurn.Question?.Trim(), query.Trim(), StringComparison.OrdinalIgnoreCase);
+
+               
                 if (lastTurnSources != null && lastTurnSources.Any())
                 {
                     foreach (var source in lastTurnSources.Distinct().Take(2))
@@ -5480,9 +5509,9 @@ Answer directly without introducing yourself.";
                 // question now falls through to SelectWithGuaranteedAnchors, which
                 // still gives the anchor document priority via its guaranteed-slot
                 // boost, but doesn't exclude every other relevant policy outright.
-                var isNarrowContinuation = lastTurnSources != null && lastTurnSources.Any() &&
-                  context?.History != null && context.History.Any() &&
-                  !_conversationAnalysis.IsTopicChanged(query, context);
+                var isNarrowContinuation = !isRepeat && lastTurnSources != null && lastTurnSources.Any() &&
+                       context?.History != null && context.History.Any() &&
+                       !_conversationAnalysis.IsTopicChanged(query, context);
 
                 if (isNarrowContinuation)
                 {
@@ -5504,11 +5533,16 @@ Answer directly without introducing yourself.";
                     }
 
                     var remainingSlots = Math.Max(0, maxResults - anchorChunks.Count);
+                    var topRaw = dedupedChunks.Count > 0 ? dedupedChunks.Max(c => c.Similarity) : 0;
+                    var strongRaw = dedupedChunks
+                        .Where(c => !anchorChunks.Contains(c) && topRaw > 0 && c.Similarity / topRaw >= 0.92)
+                        .OrderByDescending(c => c.Similarity).Take(6).ToList();
+
                     var otherChunks = dedupedChunks
-                      .Where(c => !anchorChunks.Contains(c))
-                      .OrderByDescending(c => c.RelevanceScore)
-                      .Take(remainingSlots)
-                      .ToList();
+                        .Where(c => !anchorChunks.Contains(c) && !strongRaw.Contains(c))
+                        .OrderByDescending(c => c.RelevanceScore)
+                        .Take(Math.Max(0, maxResults - anchorChunks.Count - strongRaw.Count))
+                        .ToList();
 
                     if (anchorChunks.Any())
                     {
@@ -5517,9 +5551,8 @@ Answer directly without introducing yourself.";
                           anchorChunks.Count, lastTurnSources.First(), otherChunks.Count);
                     }
 
-                    uniqueChunks = anchorChunks.Concat(otherChunks)
-                      .OrderByDescending(c => c.RelevanceScore)
-                      .ToList();
+                    uniqueChunks = anchorChunks.Concat(strongRaw).Concat(otherChunks)
+                            .OrderByDescending(c => c.RelevanceScore).ToList();
                 }
                 else
                 {
@@ -11124,6 +11157,7 @@ Reply with ONLY this JSON: {{""missing_input"": true or false, ""question"": ""<
             // ============================
             // SAVE TO DATABASE (conversation + answer quality + failure link, in one go)
             // ============================
+            var chunksForHistory = (declined || askedClarification) ? new List<RelevantChunk>() : finalChunks;
             _ = SaveConversationSafelyAsync(
               agentContext, question, finalAnswer, finalChunks,
               genModel, embModel, plant, verification, stopwatch.ElapsedMilliseconds,
@@ -12371,13 +12405,10 @@ Rewritten question:";
                 {
                     var conversationContext = _conversation.GetOrCreateConversationContext(context.SessionId);
 
-                    conversationContext.History = context.History.Select(h => new ConversationTurn
-                    {
-                        Question = h.Question,
-                        Answer = h.Answer,
-                        Timestamp = h.Timestamp,
-                        Sources = h.Sources
-                    }).ToList();
+                    conversationContext.History = context.History
+     .Where(h => h.Sources != null && h.Sources.Any())   // skip clarification/refusal turns
+     .Select(h => new ConversationTurn { Question = h.Question, Answer = h.Answer, Timestamp = h.Timestamp, Sources = h.Sources })
+     .ToList();
 
                     // Genuine topic change: reset retrieval anchoring and tell generation to drop history.
                     if (_conversationAnalysis.IsTopicChanged(question, conversationContext))
@@ -12464,8 +12495,13 @@ Rewritten question:";
                 timer.Lap("diversify + token budget");
 
                 // Real token budget for this model's context window (~60% for chunks).
-                var contextWindow = genModel?.MaxContextLength ?? 4096;
-                var remainingBudget = (int)(contextWindow * 0.6);
+                // Generation runs with num_ctx = 32768 (StreamGenerateWithHistoryAsync), not MaxContextLength from appsettings.
+                var contextWindow = 32768;
+                if (genModel?.ModelOptions != null && genModel.ModelOptions.TryGetValue("num_ctx", out var nc))
+                {
+                    try { contextWindow = Convert.ToInt32(CoerceConfigValue(nc)); } catch { }
+                }
+                var remainingBudget = Math.Min((int)(contextWindow * 0.5), 14000);
                 var budgetedChunks = new List<RelevantChunk>();
                 var skippedForBudget = 0;
 
