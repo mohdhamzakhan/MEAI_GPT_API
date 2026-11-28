@@ -1312,7 +1312,9 @@ A resigned employee must complete a **Full & Final Settlement** as per the **Set
             prompt.AppendLine("═══════════════════════════════════════════════════════════════");
             prompt.AppendLine();
 
+            prompt.Append(BuildUserHistorySection());
             prompt.AppendLine("🎯 **USER QUESTION:**");
+
             prompt.AppendLine(query);
             prompt.AppendLine();
 
@@ -1551,5 +1553,9 @@ Be thorough in checking for all variations of terms."
             if (lowerSource.Contains("environment")) return "Environment";
             return "General";
         }
+        public string? UserHistoryBlock { get; set; }
+
+        private string BuildUserHistorySection() =>
+            string.IsNullOrWhiteSpace(UserHistoryBlock) ? "" : UserHistoryBlock + "\n";
     }
 }

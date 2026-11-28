@@ -125,6 +125,8 @@ namespace MEAI_GPT_API.Services
         private readonly PolicyTriggerService _policyTriggerService;
         private readonly LearnedTriggerService _learnedTriggerService;
 
+        private UserHistoryService _userHistory;
+
         private readonly QueryIntentAnalyzer _queryIntentAnalyzer;
 
         private readonly GradeHierarchyService _gradeHierarchy;
@@ -298,7 +300,8 @@ namespace MEAI_GPT_API.Services
           KeywordRetrievalService keywordRetrieval,
           HybridRetrievalService hybrid,
           ChunkBm25Index chunkIndex,
-          RagTraceStore traceStore)
+          RagTraceStore traceStore,
+          UserHistoryService userHistory)
         {
             _modelManager = modelManager;
             _collectionManager = collectionManager;
@@ -357,6 +360,7 @@ namespace MEAI_GPT_API.Services
             _hybrid = hybrid;
             _chunkIndex = chunkIndex;
             _traceStore = traceStore;
+            _userHistory = userHistory;
         }
 
         //For Agentic AI
@@ -10675,6 +10679,19 @@ Reply with ONLY this JSON: {{""missing_input"": true or false, ""question"": ""<
                 yield return new StreamChunk { Type = "complete", ProcessingTimeMs = stopwatch.ElapsedMilliseconds };
                 yield break;
             }
+            float[]? historyEmbedding = _userHistory.IsEnabled
+                    ? (await GetDocumentEmbeddingAsync(question, embModel)).ToArray()
+                    : null;
+
+            // ============================
+            // USER HISTORY (optional personalisation; complete no-op when UserHistory:Enabled=false)
+            // Set before planning so both the normal path and ExecuteDirectPathAsync get it.
+            // ============================
+            _systemPromptBuilder.UserHistoryBlock = await _userHistory.BuildHistoryContextAsync(
+                userId ?? "system", question, agentContext.SessionId,
+                null,            // pass your question embedding here if you have it handy (see note below)
+                embModel.Name,
+                cancellationToken);
 
             // ============================
             // PLANNING

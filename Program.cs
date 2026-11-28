@@ -178,6 +178,9 @@ builder.Services.Configure<ChromaDbOptions>(
 builder.Services.Configure<AccessControlOptions>(
     builder.Configuration.GetSection("AccessControl"));
 
+builder.Services.Configure<UserHistoryOptions>(builder.Configuration.GetSection("UserHistory"));
+builder.Services.AddScoped<MEAI_GPT_API.Service.UserHistoryService>();
+
 // ✅ NEW: annexure-to-server-link resolution (disabled by default until
 // AnnexureLinks:Enabled + AnnexureLinks:BaseServerPath are set in appsettings.json)
 builder.Services.Configure<AnnexureLinkOptions>(
