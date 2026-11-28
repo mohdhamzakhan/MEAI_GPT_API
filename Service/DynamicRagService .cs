@@ -9,6 +9,7 @@ using DocumentFormat.OpenXml.Office2013.Drawing.ChartStyle;
 using DocumentFormat.OpenXml.Spreadsheet;
 using DocumentFormat.OpenXml.Wordprocessing;
 using MEAI_GPT_API.Models;
+using MEAI_GPT_API.Observability;
 using MEAI_GPT_API.Service;
 using MEAI_GPT_API.Service.Interface;
 using MEAI_GPT_API.Service.Models;
@@ -96,6 +97,9 @@ namespace MEAI_GPT_API.Services
         private readonly RerankerService _rerankerService;
         private readonly Bm25Service _bm25Service = new();
         private readonly KeywordRetrievalService _keywordRetrieval;
+        private readonly HybridRetrievalService _hybrid;
+        private readonly ChunkBm25Index _chunkIndex;
+        private readonly RagTraceStore _traceStore;
         // NEW: Single embedding cache with better management
         //private readonly ConcurrentDictionary<string, (List<float> Embedding, DateTime Cached)> _optimizedEmbeddingCache = new();
         //private readonly SemaphoreSlim _globalEmbeddingSemaphore = new(3, 3); // Allow 3 concurrent embedding requests
@@ -291,7 +295,10 @@ namespace MEAI_GPT_API.Services
           RagInitializationState initState,
           IWebSearchService webSearch,
           QuestionLearningService questionLearning,
-          KeywordRetrievalService keywordRetrieval)
+          KeywordRetrievalService keywordRetrieval,
+          HybridRetrievalService hybrid,
+          ChunkBm25Index chunkIndex,
+          RagTraceStore traceStore)
         {
             _modelManager = modelManager;
             _collectionManager = collectionManager;
@@ -347,6 +354,9 @@ namespace MEAI_GPT_API.Services
             _webSearch = webSearch;
             _questionLearning = questionLearning;
             _keywordRetrieval = keywordRetrieval;
+            _hybrid = hybrid;
+            _chunkIndex = chunkIndex;
+            _traceStore = traceStore;
         }
 
         //For Agentic AI
@@ -6511,7 +6521,7 @@ Answer directly without introducing yourself.";
                 await LoadHistoricalAppreciatedAnswersAsync();
 
                 var embeddingModels = models.Where(m => m.Type == "embedding").ToList();
-
+                var defaultEmbeddingModel = GetDefaultEmbeddingModelConfiguration();
                 // ✅ FIX 2: Process plants sequentially to avoid parallel DbContext issues
                 foreach (var plant in _plants.Plants.Keys)
                 {
@@ -6527,7 +6537,7 @@ Answer directly without introducing yourself.";
 
                     _logger.LogInformation($"📄 Processing NEW plant: {plant}");
                     await ProcessDocumentsForAllModelsAsync(embeddingModels, plant);
-
+                    await _chunkIndex.EnsureFreshAsync(defaultEmbeddingModel, force: true);
                     _plantInitialized[plant] = true;
                     _plantLastScan[plant] = DateTime.Now;
                 }
@@ -6567,6 +6577,34 @@ Answer directly without introducing yourself.";
                 _logger.LogError(ex, "❌ Initialization failed");
                 throw;
             }
+        }
+
+        public ModelConfiguration GetDefaultEmbeddingModelConfiguration()
+        {
+            var defaultEmbeddingModel = _config.DefaultEmbeddingModel;
+
+            var modelSettings = _config.ModelConfigurations.Values
+                .FirstOrDefault(x =>
+                    string.Equals(
+                        x.Name,
+                        defaultEmbeddingModel,
+                        StringComparison.OrdinalIgnoreCase));
+
+            if (modelSettings == null)
+            {
+                throw new InvalidOperationException(
+                    $"Model configuration not found for: {defaultEmbeddingModel}");
+            }
+
+            return new ModelConfiguration
+            {
+                Name = modelSettings.Name,
+                EmbeddingDimension = modelSettings.EmbeddingDimension,
+                Type = modelSettings.Type,
+                ModelOptions = modelSettings.ModelOptions,
+                MaxContextLength = modelSettings.MaxContextLength,
+                Temperature = modelSettings.Temperature
+            };
         }
 
         /// <summary>
@@ -6764,12 +6802,13 @@ Answer directly without introducing yourself.";
                 // Process with all embedding models
                 var models = await _modelManager.DiscoverAvailableModelsAsync();
                 var embeddingModels = models.Where(m => m.Type == "embedding").ToList();
-
+                var defaultEmbeddingModel = GetDefaultEmbeddingModelConfiguration();
                 foreach (var model in embeddingModels)
                 {
                     var collectionId = await _collectionManager.GetOrCreateCollectionAsync(model);
                     await DeleteFileEmbeddingsAsync(filePath, model.Name, collectionId);
                     await ProcessFileForModelAsync(filePath, model, collectionId, plant);
+                    await _chunkIndex.EnsureFreshAsync(defaultEmbeddingModel, force: true);
                 }
 
                 _logger.LogInformation($"✅ File reprocessed successfully: {filePath}");
@@ -10343,7 +10382,7 @@ Reply with ONLY this JSON: {{""missing_input"": true or false, ""question"": ""<
   [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             var stopwatch = Stopwatch.StartNew();
-
+            using var trace = _traceStore.Begin(question, plant, userId, sessionId);
             // ============================
             // PRE-FLIGHT VALIDATION
             // ============================
@@ -12422,12 +12461,15 @@ Rewritten question:";
             report.Add($"6 coverage gate passes: {_policyAnalysis.CheckPolicyCoverage(f3, question)}");
             return report;
         }
-        private void LogStage(string stage, List<RelevantChunk> chunks) =>
-    _logger.LogInformation(
-        "🧪 [{Stage}] {Count} chunks | centralized={C} | {Sources}",
-        stage, chunks.Count,
-        chunks.Count(x => string.Equals(x.PlantTag, "centralized", StringComparison.OrdinalIgnoreCase)),
-        string.Join(" | ", chunks.Select(x => x.Source).Distinct().Take(8)));
+        private void LogStage(string stage, List<RelevantChunk> chunks)
+        {
+            RagTrace.Current?.Chunks(stage, chunks);
+            _logger.LogInformation(
+                "🧪 [{Stage}] {Count} chunks | centralized={C} | {Sources}",
+                stage, chunks.Count,
+                chunks.Count(x => string.Equals(x.PlantTag, "centralized", StringComparison.OrdinalIgnoreCase)),
+                string.Join(" | ", chunks.Select(x => x.Source).Distinct().Take(8)));
+        }
 
         private async Task<RetrievalResult> ExecuteRetrievalAsync(
           string question,
@@ -12488,6 +12530,14 @@ Rewritten question:";
                 LogStage("expansion + anchors", chunks);
 
                 chunks = FilterByPolicyIntent(chunks, question);
+
+                var queryEmbedding = await GetEmbeddingAsync(question, embModel);   // same call SearchChromaDBAsync uses
+                using (RagTrace.Step("hybrid.bm25"))
+                {
+                    chunks = await _hybrid.AugmentAsync(question, queryEmbedding, chunks, embModel, plant, BuildWhere);
+                }
+                LogStage("hybrid (bm25 + vector)", chunks);
+
                 LogStage("policy-intent filter", chunks);
                 timer.Lap("search + expansion (GetRelevantChunksWithExpansionAsync)");
 

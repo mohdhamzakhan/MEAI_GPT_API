@@ -1,6 +1,7 @@
 ﻿using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 using MEAI_GPT_API.Data;
 using MEAI_GPT_API.Models;
+using MEAI_GPT_API.Observability;
 using MEAI_GPT_API.Service;
 using MEAI_GPT_API.Service.Interface;
 using MEAI_GPT_API.Service.Models;
@@ -123,24 +124,51 @@ builder.WebHost.ConfigureKestrel(options =>
 // Add OpenTelemetry
 // Configure OpenTelemetry
 builder.Services.AddOpenTelemetry()
+
+    // Resource information shared by metrics and traces
+    .ConfigureResource(resource =>
+        resource
+            .AddService("MEAI_RAG_API")
+            .AddAttributes(new Dictionary<string, object>
+            {
+                ["environment"] = builder.Environment.EnvironmentName,
+                ["user"] = Environment.UserName,
+                ["version"] = Environment.Version.ToString(),
+                ["machineName"] = Environment.MachineName
+            }))
+
+    // Metrics
     .WithMetrics(metrics =>
     {
         metrics
-            .SetResourceBuilder(
-                ResourceBuilder.CreateDefault()
-                    .AddService("MEAI_RAG_API")
-                    .AddAttributes(new Dictionary<string, object>
-                    {
-                        ["environment"] = builder.Environment.EnvironmentName,
-                        ["timestamp"] = DateTime.Now.ToString("O"),
-                        ["user"] = Environment.UserName,
-                        ["version"] = Environment.Version.ToString(),
-                        ["machineName"] = Environment.MachineName
-                    }))
             .AddMeter("MEAI.RAG.Metrics")
+            .AddMeter(RagTelemetry.Name)
+
             .AddAspNetCoreInstrumentation()
             .AddHttpClientInstrumentation()
+
             .AddPrometheusExporter();
+    })
+
+    // Distributed tracing
+    .WithTracing(tracing =>
+    {
+        tracing
+            .AddSource(RagTelemetry.Name)
+
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation();
+
+        var endpoint = builder.Configuration["Otlp:Endpoint"];
+
+        if (!string.IsNullOrWhiteSpace(endpoint))
+        {
+            tracing.AddOtlpExporter(options =>
+            {
+                options.Endpoint = new Uri(
+                    builder.Configuration["Otlp:Endpoint"]!);
+            });
+        }
     });
 
 builder.Services.Configure<ChromaDbOptions>(
@@ -256,7 +284,9 @@ builder.Services.AddSingleton<GradeEligibilityService>(provider =>
 builder.Services.AddSingleton<IEmployeeDirectoryService, JsonFileEmployeeDirectoryService>();
 
 builder.Services.AddSingleton<OllamaQueueService>();
-
+builder.Services.AddSingleton<ChunkBm25Index>();       // holds the index in memory, so singleton
+builder.Services.AddScoped<HybridRetrievalService>();
+builder.Services.AddSingleton<RagTraceStore>();
 builder.Configuration
     .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
     .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true);
