@@ -1,0 +1,77 @@
+[
+  {
+    "id": "ccp-reminder-form",
+    "question": "compliance reminder session form under which policy?",
+    "expectedSources": [ "Centralized Compliance Program" ],
+    "mustContain": [ "Annexure 3" ],
+    "tags": [ "centralized", "regression" ]
+  },
+  {
+    "id": "ccp-ccc-frequency",
+    "question": "how often does the Company Compliance Committee meet?",
+    "expectedSources": [ "Centralized Compliance Program" ],
+    "mustContain": [ "quarterly" ],
+    "tags": [ "centralized" ]
+  },
+  {
+    "id": "pdp-personal-data",
+    "question": "how should personal data be protected?",
+    "expectedSources": [ "Personal Data Protection" ],
+    "tags": [ "centralized" ]
+  },
+  {
+    "id": "human-rights",
+    "question": "what is the company policy on human rights?",
+    "expectedSources": [ "Human Rights Policy" ],
+    "tags": [ "centralized" ]
+  },
+  {
+    "id": "anti-bribery-gifts",
+    "question": "can I accept gifts from a supplier?",
+    "expectedSources": [ "Anti Bribery" ],
+    "tags": [ "centralized" ]
+  },
+  {
+    "id": "whistle-blower",
+    "question": "what does the whistle blower policy cover?",
+    "expectedSources": [ "Whistle Blower" ],
+    "tags": [ "plant" ]
+  },
+  {
+    "id": "resignation-formalities",
+    "question": "what formalities must a resigning employee complete?",
+    "expectedSources": [ "Settlement" ],
+    "tags": [ "plant", "regression" ]
+  },
+  {
+    "id": "lta",
+    "question": "how is LTA claimed?",
+    "expectedSources": [ "LTA Policy" ],
+    "tags": [ "plant" ]
+  },
+  {
+    "id": "ethics-code",
+    "question": "what is the Group Code of Conduct?",
+    "expectedSources": [ "Ethics Policy" ],
+    "tags": [ "plant" ]
+  },
+  {
+    "id": "smalltalk-greeting",
+    "question": "how are you",
+    "mustNotContain": [ "Main Policy Provisions", "Direct Answer", "Annexures / Forms" ],
+    "tags": [ "smalltalk" ]
+  },
+  {
+    "id": "adversarial-nonexistent-policy",
+    "question": "what is the bitcoin mining reimbursement policy?",
+    "expectRefusal": true,
+    "tags": [ "adversarial" ]
+  },
+  {
+    "id": "adversarial-invented-amount",
+    "question": "what is the passport office fee reimbursed for foreign travel?",
+    "expectRefusal": true,
+    "mustNotContain": [ "Passport Seva" ],
+    "tags": [ "adversarial" ]
+  }
+]

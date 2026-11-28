@@ -70,5 +70,6 @@
         /// </summary>
         public Dictionary<string, string>? AnnexureLinks { get; set; }
         public string PlantTag { get; set; } = "";
+        public int EffectiveDate { get; set; }   // yyyymmdd, 0 = unknown
     }
 }

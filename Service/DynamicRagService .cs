@@ -95,6 +95,7 @@ namespace MEAI_GPT_API.Services
         private readonly OracleEBSQuery _oracleEBSQuery;
         private readonly RerankerService _rerankerService;
         private readonly Bm25Service _bm25Service = new();
+        private readonly KeywordRetrievalService _keywordRetrieval;
         // NEW: Single embedding cache with better management
         //private readonly ConcurrentDictionary<string, (List<float> Embedding, DateTime Cached)> _optimizedEmbeddingCache = new();
         //private readonly SemaphoreSlim _globalEmbeddingSemaphore = new(3, 3); // Allow 3 concurrent embedding requests
@@ -289,7 +290,8 @@ namespace MEAI_GPT_API.Services
           IEmployeeDirectoryService employeeDirectory,
           RagInitializationState initState,
           IWebSearchService webSearch,
-          QuestionLearningService questionLearning)
+          QuestionLearningService questionLearning,
+          KeywordRetrievalService keywordRetrieval)
         {
             _modelManager = modelManager;
             _collectionManager = collectionManager;
@@ -344,6 +346,7 @@ namespace MEAI_GPT_API.Services
             _employeeDirectory = employeeDirectory;
             _webSearch = webSearch;
             _questionLearning = questionLearning;
+            _keywordRetrieval = keywordRetrieval;
         }
 
         //For Agentic AI
@@ -2324,14 +2327,17 @@ namespace MEAI_GPT_API.Services
                 return 0;
             }
         }
+        //private string GenerateChunkId(string sourceFile, string text, DateTime lastModified, string modelName)
+        //{
+        //    var fileName = System.IO.Path.GetFileNameWithoutExtension(sourceFile);
+        //    var textHash = text.GetHashCode().ToString("X");
+        //    var timeStamp = lastModified.Ticks.ToString();
+        //    var modelHash = modelName.GetHashCode().ToString("X");
+        //    return $"{fileName}_{textHash}_{timeStamp}_{modelHash}";
+        //}
+
         private string GenerateChunkId(string sourceFile, string text, DateTime lastModified, string modelName)
-        {
-            var fileName = System.IO.Path.GetFileNameWithoutExtension(sourceFile);
-            var textHash = text.GetHashCode().ToString("X");
-            var timeStamp = lastModified.Ticks.ToString();
-            var modelHash = modelName.GetHashCode().ToString("X");
-            return $"{fileName}_{textHash}_{timeStamp}_{modelHash}";
-        }
+                    => ChunkIdentity.StableChunkId(sourceFile, text, modelName);
 
         private void InitializeSessionCleanup()
         {
@@ -3632,7 +3638,7 @@ Answer directly without introducing yourself.";
                 var documents = successfulChunks.Select(c => c.Text).ToList();
                 var ids = successfulChunks.Select(c => c.ChunkId).ToList();
                 var embeddings = successfulChunks.Select(c => c.Embedding).ToList();
-
+                var docEffective = PolicyDates.ExtractEffectiveDate(chunks.Select(x => x.Text));
                 // ✅ FIX: eligibility must be extracted PER CHUNK, not once for
                 // the whole batch. The previous version referenced a 'c' that
                 // wasn't in scope at this point (it only existed inside the
@@ -3659,6 +3665,8 @@ Answer directly without introducing yourself.";
                       employeeCategory: eligibility.EmployeeCategory,
                       directSubtype: eligibility.DirectSubtype));
                 }
+                if (docEffective > 0)
+                    foreach (var m in metadatas) m["effective_date"] = docEffective;
 
                 _logger.LogInformation($"💾 Saving {successfulChunks.Count} chunks to ChromaDB collection: {collectionId}");
 
@@ -4101,7 +4109,12 @@ Answer directly without introducing yourself.";
                 // then apply additive boosts.  We track the boost total separately
                 // so it is easy to read and tune.
                 double boost = 0.0;
+                var effective = 0;
+                if (metadata.TryGetProperty("effective_date", out var edEl) &&
+                    edEl.ValueKind == JsonValueKind.Number && edEl.TryGetInt32(out var edInt))
+                    effective = edInt;
 
+                boost += FreshnessScorer.Boost(effective, DateTime.Today);
                 // Intent names are DOCUMENT names; policyType is a CATEGORY, so Equals() never matched.
                 if (policyIntent.IntendedPolicyType != null)
                 {
@@ -5072,6 +5085,11 @@ Answer directly without introducing yourself.";
                 // 1. Original query search
                 var originalChunks = await SearchChromaDBAsync(query, embeddingModel, maxResults, plant);
                 allChunks.AddRange(originalChunks);
+                var queryEmbedding = await GetEmbeddingAsync(query, embeddingModel);   // use your existing cached embedding call
+                var keywordChunks = await _keywordRetrieval.SearchAsync(
+                    query, queryEmbedding, embeddingModel, plant, BuildWhere, maxResults: 8);
+                allChunks.AddRange(keywordChunks);
+                timer.Lap("keyword retrieval");
                 timer.Lap("original query search");
 
                 // 2. Expanded query search
@@ -6458,6 +6476,31 @@ Answer directly without introducing yourself.";
                 // out already-retrieved chunks) with no indication at startup
                 // that anything was wrong. This turns that into a boot-time signal.
                 await ValidateCriticalModelsAsync();
+
+                // Vector store already populated by a previous run: serve queries now, refresh in the background.
+                try
+                {
+                    var probe = models.FirstOrDefault(m => m.Type == "embedding" && m.Name == _config.DefaultEmbeddingModel)
+                                ?? models.FirstOrDefault(m => m.Type == "embedding");
+                    if (probe != null)
+                    {
+                        var probeCollection = await _collectionManager.GetOrCreateCollectionAsync(probe);
+                        var existing = await GetCollectionCountAsync(probeCollection);
+                        const int readyMinChunks = 200;   // anything clearly beyond "empty"; or move to DynamicRAG config
+
+                        if (existing >= readyMinChunks)
+                        {
+                            _initState.MarkInitialized();
+                            _logger.LogInformation(
+                                "✅ Found {Count} existing chunks in the vector store — accepting queries now; incremental refresh continues in the background",
+                                existing);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Existing-index probe failed — falling back to waiting for full initialization");
+                }
 
                 EnsureDirectoriesExist();
                 EnsureAbbreviationContext();
@@ -12483,7 +12526,8 @@ Rewritten question:";
 
                 var hybridChunks = byScore.Concat(protectedRaw).ToList();
                 LogStage("hybrid merge", hybridChunks);
-
+                hybridChunks = SupersededVersionFilter.Apply(hybridChunks);
+                LogStage("superseded-version filter", hybridChunks);
                 // ── Rerank ──────────────────────────────────────────────────────────
                 if (useReRanking && hybridChunks.Count > 3)
                 {
@@ -15730,6 +15774,9 @@ RULES:
 
                 foreach (var chunk in relevantChunks)
                 {
+                    var cleanTitle = ExtractDocumentTitleTerms(chunk.Source ?? "");
+                    if (string.IsNullOrWhiteSpace(cleanTitle)) cleanTitle = chunk.Source;
+
                     var chunkText = $"Source: {chunk.Source}\n{chunk.Text}\n";
                     var chunkTokens = _stringProcessor.EstimateTokenCount(chunkText);
 

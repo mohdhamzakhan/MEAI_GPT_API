@@ -111,13 +111,12 @@ Would you like detailed information about any specific policy?
             {
                 prompt.AppendLine($"**{policy.FileName}**");
 
-                // Extract a brief description
                 var description = ExtractPolicyDescription(policy.Content);
                 if (!string.IsNullOrEmpty(description))
                 {
                     prompt.AppendLine($"Description: {description}");
                 }
-                prompt.AppendLine($"Source: {policy.Source}");
+                prompt.AppendLine($"Source: {policy.FileName}"); // ✅ FIXED
                 prompt.AppendLine();
             }
 
@@ -130,12 +129,14 @@ Would you like detailed information about any specific policy?
 
         private string CleanPolicyName(string source)
         {
+            if (string.IsNullOrWhiteSpace(source)) return "Unknown Policy";
+
             var fileName = Path.GetFileNameWithoutExtension(source);
 
-            // Remove common prefixes and suffixes
+            // This regex strips "41_", "01SP_", "46SP_", etc. from the start
+            fileName = Regex.Replace(fileName, @"^\d+[A-Za-z]*_", "");
+
             fileName = fileName
-                .Replace("46SP_", "")
-                .Replace("23A", "")
                 .Replace("(Sanand Plant)", "")
                 .Replace("(Manesar Plant)", "")
                 .Replace("_", " ")
@@ -318,7 +319,7 @@ Would you like detailed information about any specific policy?
 
             foreach (var chunk in chunks)
             {
-                sb.AppendLine($"Document: {chunk.Source}");
+                sb.AppendLine($"Document: {CleanPolicyName(chunk.Source)}");
                 sb.AppendLine(chunk.Text);
                 sb.AppendLine();
                 sb.AppendLine("---------------------------------------------------------------");
@@ -820,7 +821,7 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
             foreach (var chunk in chunks)
             {
                 sb.AppendLine($"--- Excerpt {i} ---");
-                sb.AppendLine($"Document: {chunk.Source}");
+                sb.AppendLine($"Document: {CleanPolicyName(chunk.Source)}");
                 sb.AppendLine("Content:");
                 sb.AppendLine(chunk.Text);
                 sb.AppendLine();
@@ -1163,8 +1164,9 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
                 foreach (var group in documentGroups)
                 {
                     var docType = DetermineDocumentType(group.Key);
-                    prompt.AppendLine($"  • {group.Key} ({docType}; {ScopeLabel(group.First())}) - {group.Count()} section(s)");
+                    prompt.AppendLine($"  • {CleanPolicyName(group.Key)} ({docType}; {ScopeLabel(group.First())}) - {group.Count()} section(s)");
                 }
+
                 prompt.AppendLine();
 
                 var topics = ExtractTopicsFromChunks(chunks);
@@ -1259,6 +1261,8 @@ Now, provide a comprehensive answer about {sectionRef} of {docType} based on the
                 prompt.AppendLine(IsPrimary(chunk)
                     ? $"--- ⭐ PRIMARY SOURCE (Excerpt {contextNumber}) ---"
                     : $"--- Internal Reference {contextNumber} ---");
+                prompt.AppendLine($"Document: {CleanPolicyName(chunk.Source)}"); // ✅ FIXED
+                prompt.AppendLine($"Scope: {ScopeLabel(chunk)}");
                 prompt.AppendLine($"Document: {chunk.Source}");
                 prompt.AppendLine($"Scope: {ScopeLabel(chunk)}");
                 prompt.AppendLine($"Relevance: {chunk.Similarity:F3}");
@@ -1301,7 +1305,7 @@ A resigned employee must complete a **Full & Final Settlement** as per the **Set
 - Employee must submit the **No Dues Certificate** on the last working day
 
 ## Sources
-[Source: Settlement Policy.docx]
+
 ");
             prompt.AppendLine();
 

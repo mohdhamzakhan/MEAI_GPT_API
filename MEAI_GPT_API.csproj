@@ -1,76 +1,79 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
-  <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
-    <DockerfileContext>.</DockerfileContext>
-  </PropertyGroup>
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+		<DockerfileContext>.</DockerfileContext>
+	</PropertyGroup>
 
 
-  <ItemGroup>
-    <Compile Remove="Service\RagService.cs" />
-    <Compile Remove="Service\RagService_Old.cs" />
-  </ItemGroup>
+	<ItemGroup>
+		<Compile Remove="Service\RagService.cs" />
+		<Compile Remove="Service\RagService_Old.cs" />
+	</ItemGroup>
 
 
-  <ItemGroup>
-    <Content Remove="context\Employee directory.sample.json" />
-    <Content Remove="context\Topic_Anchors.json" />
-  </ItemGroup>
+	<ItemGroup>
+		<Content Remove="context\Employee directory.sample.json" />
+		<Content Remove="context\Topic_Anchors.json" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <None Remove="Service\RagService - Copy.txt" />
-  </ItemGroup>
+	<ItemGroup>
+		<None Remove="Service\RagService - Copy.txt" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="DocumentFormat.OpenXml" Version="3.3.0" />
-    <PackageReference Include="jose-jwt" Version="5.2.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.22" />
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.18" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.7" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.18" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="8.0.18">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-    <PackageReference Include="Microsoft.IdentityModel.Logging" Version="8.15.0" />
-    <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.22.1" />
-    <PackageReference Include="NPOI.HWPF" Version="2.3.0" />
-    <PackageReference Include="PdfPig" Version="0.1.10" />
-    <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
-    <PackageReference Include="Serilog.Extensions.Logging" Version="9.0.2" />
-    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
-	<PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="9.0.7" />
+	<ItemGroup>
+		<PackageReference Include="DocumentFormat.OpenXml" Version="3.3.0" />
+		<PackageReference Include="jose-jwt" Version="5.2.0" />
+		<PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.22" />
+		<PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.18" />
+		<PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.7" />
+		<PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.18" />
+		<PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="8.0.18">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+		<PackageReference Include="Microsoft.IdentityModel.Logging" Version="8.15.0" />
+		<PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.22.1" />
+		<PackageReference Include="NPOI.HWPF" Version="2.3.0" />
+		<PackageReference Include="PdfPig" Version="0.1.10" />
+		<PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
+		<PackageReference Include="Serilog.Extensions.Logging" Version="9.0.2" />
+		<PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+		<PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+		<PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="9.0.7" />
 
-	  <PackageReference Include="OpenTelemetry" Version="1.12.0" />
-	  <PackageReference Include="OpenTelemetry.Api" Version="1.15.3" />
-	  <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.12.0" />
-	  <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.7.0-rc.1" />
-	  <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.12.0" />
-	  <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.12.0" />
-	  <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.12.0" />
-	  <PackageReference Include="System.DirectoryServices.AccountManagement" Version="10.0.1" />
-	  <PackageReference Include="System.Drawing.Common" Version="8.0.30" />
-	  <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.15.0" />
-	  <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
-	  <PackageReference Include="Tesseract" Version="5.2.0" />
-  </ItemGroup>
+		<PackageReference Include="OpenTelemetry" Version="1.12.0" />
+		<PackageReference Include="OpenTelemetry.Api" Version="1.15.3" />
+		<PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.12.0" />
+		<PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.7.0-rc.1" />
+		<PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.12.0" />
+		<PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.12.0" />
+		<PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.12.0" />
+		<PackageReference Include="System.DirectoryServices.AccountManagement" Version="10.0.1" />
+		<PackageReference Include="System.Drawing.Common" Version="8.0.30" />
+		<PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.15.0" />
+		<PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
+		<PackageReference Include="Tesseract" Version="5.2.0" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <EditorConfigFiles Remove="D:\Code\MEAIGPT\MEAI_GPT_API\.editorconfig" />
-  </ItemGroup>
+	<ItemGroup>
+		<EditorConfigFiles Remove="D:\Code\MEAIGPT\MEAI_GPT_API\.editorconfig" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <None Include="context\Employee directory.sample.json" />
-    <None Include="D:\Code\MEAIGPT\MEAI_GPT_API\.editorconfig" />
-  </ItemGroup>
+	<ItemGroup>
+		<None Include="context\Employee directory.sample.json" />
+		<None Include="D:\Code\MEAIGPT\MEAI_GPT_API\.editorconfig" />
+		<None Update="context\eval-cases.json">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
+	</ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="Logs\" />
-    <Folder Include="policies\Sanand\" />
-  </ItemGroup>
+	<ItemGroup>
+		<Folder Include="Logs\" />
+		<Folder Include="policies\Sanand\" />
+	</ItemGroup>
 
 </Project>

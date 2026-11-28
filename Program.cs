@@ -185,6 +185,8 @@ builder.Services.AddScoped<CodingDetectionResult>();
 builder.Services.AddScoped<DynamicCodingAssistanceService>();
 builder.Services.AddSingleton<CodingDetectionService>();
 builder.Services.AddScoped<AttachmentProcessor>();
+builder.Services.AddScoped<KeywordRetrievalService>();
+builder.Services.AddScoped<MEAI_GPT_API.Evaluation.EvalRunner>();
 
 builder.Services.AddScoped<DynamicRAGInitializationService>();
 
